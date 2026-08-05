@@ -37,6 +37,8 @@ declare global {
   }
 }
 
+const LOCAL_PROXY_COHERENCE_GRACE_S = 3;
+
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly depthStrategy: "reversed" | "logarithmic";
@@ -78,6 +80,7 @@ export class PlanetEngine {
   private paused = false;
   private disposed = false;
   private surfaceEntryRevision = 0;
+  private localProxyCoherenceLossSeconds = 0;
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
     overlay: false,
@@ -323,6 +326,14 @@ export class PlanetEngine {
     this.audio.update(deltaSeconds);
     this.smoothedFrameMs += (frameMs - this.smoothedFrameMs) * 0.06;
     this.framesSinceQualityChange += 1;
+    if (this.surfaceTraverse.active && !this.surfaceTraverse.localProxyCoherent) {
+      this.localProxyCoherenceLossSeconds += deltaSeconds;
+      if (this.localProxyCoherenceLossSeconds >= LOCAL_PROXY_COHERENCE_GRACE_S) {
+        this.exitSurfaceTraverse();
+      }
+    } else {
+      this.localProxyCoherenceLossSeconds = 0;
+    }
     this.controlState = this.surfaceTraverse.active
       ? this.surfaceTraverse.update(deltaSeconds)
       : this.controls.update(deltaSeconds);
@@ -576,6 +587,7 @@ export class PlanetEngine {
   private exitSurfaceTraverse() {
     this.surfaceEntryRevision += 1;
     if (!this.surfaceTraverse.active) return;
+    this.localProxyCoherenceLossSeconds = 0;
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);
     this.surfaceTraverse.deactivate();
