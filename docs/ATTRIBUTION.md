@@ -5,7 +5,7 @@
 Mars macro terrain is derived from the Mars Global Surveyor Mars Orbiter Laser Altimeter Mission Experiment Gridded Data Record:
 
 - Data set: `MGS-M-MOLA-5-MEGDR-L3-V1.0`
-- Products: `MEGR90N000CB.IMG` (planetary radius) and `MEGA90N000CB.IMG` (areoid)
+- Products: `MEGR90N000EB.IMG` (planetary radius) and `MEGA90N000EB.IMG` (areoid)
 - Product version: 2.0, created 2003-04-03
 - Producers: MGS MOLA Team / David E. Smith, NASA Goddard Space Flight Center
 - Archive: NASA Planetary Data System Geosciences Node, Washington University in St. Louis
@@ -29,4 +29,3 @@ Planet and Sun vectors use Astronomy Engine by Don Cross, MIT licensed. It imple
 
 - Project: https://github.com/cosinekitty/astronomy
 - Installed package: `astronomy-engine` 2.1.19
-

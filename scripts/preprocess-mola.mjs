@@ -5,6 +5,7 @@ import path from "node:path";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 const FACES = ["px", "nx", "py", "ny", "pz", "nz"];
+const PDS_MEGDR_ROOT = "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x";
 
 function argumentsFrom(argv) {
   const result = {};
@@ -92,6 +93,11 @@ function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+function productUrl(productId, resolution) {
+  const directory = `meg${String(resolution).padStart(3, "0")}`;
+  return `${PDS_MEGDR_ROOT}/${directory}/${productId.toLowerCase()}`;
+}
+
 const options = argumentsFrom(process.argv.slice(2));
 const radiusPath = options.radius;
 const areoidPath = options.areoid;
@@ -138,8 +144,8 @@ const manifest = {
     productVersion: radiusInfo.productVersion,
     coordinateSystem: radiusInfo.coordinateSystem,
     sourceResolutionPixelsPerDegree: radiusInfo.resolution,
-    radiusUrl: "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/megr90n000cb.img",
-    areoidUrl: "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/mega90n000cb.img",
+    radiusUrl: productUrl(radiusInfo.productId, radiusInfo.resolution),
+    areoidUrl: productUrl(areoidInfo.productId, areoidInfo.resolution),
   },
   settings: {
     projection: "normalized cube sphere",
@@ -218,4 +224,3 @@ for (let lod = 0; lod <= maxLod; lod += 1) {
 
 await writeFile(path.join(outputPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`Wrote ${Object.keys(manifest.tiles).length} deterministic MOLA cube-sphere tiles to ${outputPath}`);
-

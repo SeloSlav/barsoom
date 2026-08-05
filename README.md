@@ -25,7 +25,7 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 
 - Metre-authoritative Mars maths and latitude/longitude, Cartesian, ENU, cube-face, tile, high/low, and camera-relative conversions.
 - Six-face quadtree terrain with screen-space-error selection, frustum and horizon culling, skirts, parent fallback, dithered parent/child morphing, pooled mesh containers, bounded LRU caches, and stale-job cancellation.
-- 126 static cube-sphere tiles derived from the official 4-pixel/degree MOLA planetary-radius and areoid MEGDRs. These give complete global coverage and are streamed by tile.
+- 2,046 static cube-sphere tiles derived from the official 16-pixel/degree MOLA planetary-radius and areoid MEGDRs. These give complete global coverage and stream real elevation into the terrain vertices by tile.
 - Worker-generated fixed-resolution terrain geometry with continuous planet-space procedural ridges, erosion, rock and regolith detail.
 - A data-driven procedural Mars PBR shader with dust, regolith, basalt, light rock, and polar frost blends.
 - Analytic Rayleigh, dust/Mie, transmittance-inspired limb, terminator, horizon haze, and terrain aerial perspective.
@@ -37,4 +37,3 @@ See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pi
 ## Debugging
 
 Press `F3` for diagnostics and `F4` for tile boundaries. The development API at `window.__BARSOOM__` exposes deterministic location/altitude setters for integration and screenshot automation.
-

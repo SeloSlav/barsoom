@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ATMOSPHERE_CONFIG, MATERIAL_CONFIG, MARS_REFERENCE_RADIUS_M } from "../constants";
+import { ATMOSPHERE_CONFIG, MATERIAL_CONFIG, MARS_ATMOSPHERE_TOP_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "../constants";
 
 export type TerrainMaterial = THREE.ShaderMaterial & {
   uniforms: {
@@ -228,26 +228,93 @@ const atmosphereFragment = /* glsl */ `
   varying vec3 vWorldPosition;
   varying vec3 vRadial;
 
+  const float PLANET_RADIUS = ${MARS_REFERENCE_RADIUS_M.toFixed(1)};
+  const float ATMOSPHERE_RADIUS = ${(MARS_REFERENCE_RADIUS_M + MARS_ATMOSPHERE_TOP_M).toFixed(1)};
+  const float RAYLEIGH_HEIGHT = ${ATMOSPHERE_CONFIG.scaleHeightM.toFixed(1)};
+  const float DUST_HEIGHT = ${ATMOSPHERE_CONFIG.dustScaleHeightM.toFixed(1)};
+  const float PI = 3.141592653589793;
+
+  vec2 raySphere(vec3 origin, vec3 direction, float radius) {
+    float b = dot(origin, direction);
+    float c = dot(origin, origin) - radius * radius;
+    float h = b * b - c;
+    if (h < 0.0) return vec2(1e20, -1e20);
+    h = sqrt(h);
+    return vec2(-b - h, -b + h);
+  }
+
+  float rayleighPhase(float cosineAngle) {
+    return 3.0 * (1.0 + cosineAngle * cosineAngle) / (16.0 * PI);
+  }
+
+  float miePhase(float cosineAngle) {
+    float g = ${ATMOSPHERE_CONFIG.mieG.toFixed(3)};
+    float denominator = max(0.035, 1.0 + g * g - 2.0 * g * cosineAngle);
+    return 3.0 * (1.0 - g * g) * (1.0 + cosineAngle * cosineAngle) /
+      (8.0 * PI * (2.0 + g * g) * pow(denominator, 1.5));
+  }
+
   void main() {
-    vec3 ray = normalize(vWorldPosition);
-    vec3 radial = normalize(vWorldPosition - uPlanetCenter);
-    vec3 cameraUp = normalize(-uPlanetCenter);
-    float outside = smoothstep(${(MARS_REFERENCE_RADIUS_M + 3_000).toFixed(1)}, ${(MARS_REFERENCE_RADIUS_M + 80_000).toFixed(1)}, uCameraRadius);
-    float tangent = pow(clamp(1.0 - abs(dot(ray, radial)), 0.0, 1.0), 1.55);
-    float horizon = pow(clamp(1.0 - abs(dot(ray, cameraUp)), 0.0, 1.0), 6.5);
-    float cameraDensity = exp(-max(uCameraAltitude, 0.0) / ${ATMOSPHERE_CONFIG.scaleHeightM.toFixed(1)});
-    float sunFacing = smoothstep(-0.18, 0.14, dot(radial, normalize(uSunDirection)));
-    float forward = pow(max(dot(ray, normalize(uSunDirection)), 0.0), 18.0);
-    vec3 rayleigh = vec3(${ATMOSPHERE_CONFIG.rayleigh.join(",")}) * (0.38 + 0.62 * sunFacing);
-    vec3 mie = vec3(${ATMOSPHERE_CONFIG.mie.join(",")}) * (0.22 + forward * 2.8);
-    vec3 dust = vec3(${ATMOSPHERE_CONFIG.dust.join(",")}) * (0.32 + 0.68 * sunFacing);
-    float limbAmount = tangent * ${ATMOSPHERE_CONFIG.limbStrength.toFixed(2)} * (0.24 + 0.76 * sunFacing);
-    float groundAmount = horizon * cameraDensity * (0.55 + 0.45 * sunFacing);
-    float amount = mix(groundAmount, limbAmount, outside) * ${ATMOSPHERE_CONFIG.density.toFixed(2)};
-    vec3 colour = mix(rayleigh + dust, mie + dust, clamp(forward * 0.68, 0.0, 1.0));
-    colour *= uExposure * amount;
-    float alpha = clamp(amount * mix(1.18, 0.82, outside), 0.0, 0.82);
-    gl_FragColor = vec4(colour, alpha);
+    bool cameraOutside = uCameraRadius > ATMOSPHERE_RADIUS;
+    if ((cameraOutside && !gl_FrontFacing) || (!cameraOutside && gl_FrontFacing)) discard;
+
+    vec3 viewRay = normalize(vWorldPosition);
+    vec3 cameraFromCenter = -uPlanetCenter;
+    vec3 sun = normalize(uSunDirection);
+    vec2 atmosphereHit = raySphere(cameraFromCenter, viewRay, ATMOSPHERE_RADIUS);
+    float rayStart = max(atmosphereHit.x, 0.0);
+    float rayEnd = atmosphereHit.y;
+    vec2 groundHit = raySphere(cameraFromCenter, viewRay, PLANET_RADIUS);
+    if (groundHit.x > 0.0) rayEnd = min(rayEnd, groundHit.x);
+    if (rayEnd <= rayStart) discard;
+
+    vec3 betaRayleigh = vec3(${ATMOSPHERE_CONFIG.rayleigh.join(",")}) * ${ATMOSPHERE_CONFIG.density.toFixed(3)};
+    vec3 betaDust = (vec3(${ATMOSPHERE_CONFIG.mie.join(",")}) * 0.48 + vec3(${ATMOSPHERE_CONFIG.dust.join(",")}) * 0.72) * ${ATMOSPHERE_CONFIG.density.toFixed(3)};
+    float mu = dot(viewRay, sun);
+    float phaseR = rayleighPhase(mu);
+    float phaseM = miePhase(mu);
+    float segmentLength = (rayEnd - rayStart) / ${RENDER_CONFIG.atmosphereQualitySteps.toFixed(1)};
+    float opticalViewR = 0.0;
+    float opticalViewM = 0.0;
+    vec3 inscatter = vec3(0.0);
+
+    for (int viewStep = 0; viewStep < ${RENDER_CONFIG.atmosphereQualitySteps}; viewStep++) {
+      float sampleDistance = rayStart + (float(viewStep) + 0.5) * segmentLength;
+      vec3 sampleFromCenter = cameraFromCenter + viewRay * sampleDistance;
+      float altitude = max(0.0, length(sampleFromCenter) - PLANET_RADIUS);
+      float densityR = exp(-altitude / RAYLEIGH_HEIGHT);
+      float densityM = exp(-altitude / DUST_HEIGHT);
+      opticalViewR += densityR * segmentLength / RAYLEIGH_HEIGHT;
+      opticalViewM += densityM * segmentLength / DUST_HEIGHT;
+
+      vec3 sampleUp = normalize(sampleFromCenter);
+      vec2 sunGroundHit = raySphere(sampleFromCenter + sampleUp * 24.0, sun, PLANET_RADIUS);
+      float illuminated = sunGroundHit.x > 0.0 ? 0.0 : 1.0;
+      vec2 sunAtmosphereHit = raySphere(sampleFromCenter, sun, ATMOSPHERE_RADIUS);
+      float sunLength = max(0.0, sunAtmosphereHit.y);
+      float opticalSunR = 0.0;
+      float opticalSunM = 0.0;
+      for (int sunStep = 0; sunStep < 3; sunStep++) {
+        vec3 sunSample = sampleFromCenter + sun * ((float(sunStep) + 0.5) * sunLength / 3.0);
+        float sunAltitude = max(0.0, length(sunSample) - PLANET_RADIUS);
+        opticalSunR += exp(-sunAltitude / RAYLEIGH_HEIGHT) * sunLength / (3.0 * RAYLEIGH_HEIGHT);
+        opticalSunM += exp(-sunAltitude / DUST_HEIGHT) * sunLength / (3.0 * DUST_HEIGHT);
+      }
+
+      vec3 transmittance = exp(-(
+        betaRayleigh * (opticalViewR + opticalSunR) +
+        betaDust * (opticalViewM + opticalSunM)
+      ));
+      vec3 localScatter = betaRayleigh * densityR * phaseR / RAYLEIGH_HEIGHT +
+        betaDust * densityM * phaseM / DUST_HEIGHT;
+      inscatter += localScatter * transmittance * segmentLength * illuminated;
+    }
+
+    vec3 viewTransmittance = exp(-(betaRayleigh * opticalViewR + betaDust * opticalViewM));
+    float opticalAlpha = 1.0 - dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
+    vec3 colour = inscatter * uExposure * ${ATMOSPHERE_CONFIG.limbStrength.toFixed(3)};
+    float alpha = clamp(opticalAlpha * 0.92 + dot(colour, vec3(0.22)), 0.0, 0.94);
+    gl_FragColor = vec4(max(colour, vec3(0.0)), alpha);
   }
 `;
 

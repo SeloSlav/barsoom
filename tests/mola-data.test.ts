@@ -13,7 +13,7 @@ async function loadTile(key: TileKey) {
 }
 
 async function sampleGlobal(direction: Vec3) {
-  const key = directionToTile(direction, 2);
+  const key = directionToTile(direction, 4);
   const tile = await loadTile(key);
   const sample = sampleMolaTile(tile, direction);
   if (!sample) throw new Error(`Direction did not map into ${tileKeyToString(key)}`);
@@ -28,12 +28,14 @@ describe("MOLA decoding and global terrain coverage", () => {
     expect(decodePdsInt16Sample(bytes, 1, encoding)).toBe(3_396_500);
   });
 
-  it("ships all 126 global cube-sphere base tiles with validation metadata", async () => {
+  it("ships all 2,046 global cube-sphere base tiles with validation metadata", async () => {
     const manifest = JSON.parse(await readFile(path.join(process.cwd(), "public/data/mola/manifest.json"), "utf8"));
     expect(manifest.format).toBe("barsoom-mola-cubesphere");
-    expect(manifest.source.radiusProductId).toBe("MEGR90N000CB.IMG");
-    expect(manifest.source.areoidProductId).toBe("MEGA90N000CB.IMG");
-    expect(Object.keys(manifest.tiles)).toHaveLength(126);
+    expect(manifest.source.radiusProductId).toBe("MEGR90N000EB.IMG");
+    expect(manifest.source.areoidProductId).toBe("MEGA90N000EB.IMG");
+    expect(manifest.gridSize).toBe(65);
+    expect(manifest.maxLod).toBe(4);
+    expect(Object.keys(manifest.tiles)).toHaveLength(2_046);
     expect(Object.values(manifest.tiles).every((entry: any) => /^[0-9a-f]{64}$/.test(entry.sha256))).toBe(true);
   });
 
@@ -72,4 +74,3 @@ describe("MOLA decoding and global terrain coverage", () => {
     expect(a.areoidHeightM).toBeCloseTo(b.areoidHeightM, 8);
   });
 });
-

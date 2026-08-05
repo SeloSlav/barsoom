@@ -8,12 +8,13 @@ export const PLANET_SEED = 0x4d415253;
 
 export const TERRAIN_CONFIG = {
   meshSegments: 24,
-  assetGridSize: 33,
-  assetMaxLod: 2,
+  assetGridSize: 65,
+  assetMaxLod: 4,
   maxRenderLod: 18,
   screenSpaceErrorPx: 3.4,
   maxActiveTiles: 220,
   geometryCacheSize: 280,
+  nodeRetentionFrames: 900,
   molaCacheSize: 96,
   workerCount: 2,
   skirtMinimumM: 140,
@@ -50,4 +51,3 @@ export const MATERIAL_CONFIG = {
   lightRock: { albedo: [0.57, 0.245, 0.12] as const, roughness: 0.81 },
   frost: { albedo: [0.72, 0.68, 0.64] as const, roughness: 0.55 },
 } as const;
-

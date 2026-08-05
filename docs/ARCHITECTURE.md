@@ -20,7 +20,7 @@ The maths module covers:
 
 Each of the six root faces persists in a quadtree. Selection uses projected geometric error, viewport height, FOV, camera distance, a frustum sphere test, and a planetary horizon-angle test. Coarse parents are requested first. Children become visible only after all four are ready; a dithered fade and parent-height morph then replaces the parent without transparent overlap lines.
 
-MOLA static tiles stop at LOD 2 because they are the complete global macro source. A render tile at a finer LOD samples its LOD-2 ancestor in the worker. Geometry continues to LOD 18 near the camera. Eight deterministic planet-space detail bands are introduced progressively, and every band is a continuous 3D function of the normalized planetary direction, so borders, cube-face edges, longitude seams and poles share identical samples.
+MOLA static tiles stop at LOD 4 because they are the complete global macro source. A render tile at a finer LOD samples its LOD-4 ancestor in the worker and bakes the sampled planetary-radius elevation into its vertex positions. Geometry continues to LOD 18 near the camera. Eight deterministic planet-space detail bands are introduced progressively, and every band is a continuous 3D function of the normalized planetary direction, so borders, cube-face edges, longitude seams and poles share identical samples.
 
 All tiles use one fixed grid topology (24×24 cells) and edge skirts. Mesh/geometry containers are pooled, the ready cache is bounded to 280 tiles, MOLA data to 96 tiles, and two workers service a priority queue. Requests carry cancellation tokens; rapid camera movement removes queued jobs and rejects stale results. Missing or corrupt data retries through the nearest parent and logs a single warning per key.
 
@@ -40,4 +40,3 @@ Astronomy Engine supplies compact, tested VSOP87/NOVAS-derived heliocentric vect
 ## Recovery and extension
 
 WebGL context loss pauses the loop, preserves navigation state and resumes on restoration. Atmosphere and material constants are centralized. Material blending is data-driven so a later terraforming layer can replace dust/regolith weights with water, soil and vegetation without replacing coordinates, terrain selection or controls.
-

@@ -2,8 +2,8 @@
 
 | Action | Input | Behaviour |
 |---|---|---|
-| Orbit around geographic focus | Hold middle mouse and drag | Horizontal drag changes heading; vertical drag changes grazing angle without pole locks or Euler gimbal flips. |
-| Pan across Mars | Hold right mouse and drag | Moves the focus along its local tangent basis and renormalizes onto Mars. Speed follows a nonlinear altitude curve from sub-metre adjustments to continental movement. |
+| Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point. Terrain collision stops the arc without moving the focus. |
+| Pan across Mars | Hold right mouse and drag | Translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
 | Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. The surface point under the cursor becomes the zoom anchor when the cursor ray hits Mars. |
 | Select surface point | Left click | Leaves left mouse free for gameplay and places a scale-aware geographic marker. |
 | Toggle diagnostics | `F3` | FPS, timing, tiles, LOD, triangles, calls, tile memory, worker queue, depth range and floating origin. |
@@ -20,4 +20,3 @@ window.__BARSOOM__.setAltitude(altitudeM, true)
 window.__BARSOOM__.setDebug("tileBoundaries", true)
 window.__BARSOOM__.getState()
 ```
-

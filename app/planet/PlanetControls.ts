@@ -36,6 +36,7 @@ type PointerDrag = { id: number; button: number; lastX: number; lastY: number };
 export class PlanetControls {
   private readonly focusDirection = new THREE.Vector3();
   private readonly orbitDirection = new THREE.Vector3();
+  private readonly viewUp = new THREE.Vector3();
   private readonly cameraAbsolute = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
   private readonly focusAbsolute = new THREE.Vector3();
@@ -48,6 +49,8 @@ export class PlanetControls {
   private readonly yawQuaternion = new THREE.Quaternion();
   private readonly pitchQuaternion = new THREE.Quaternion();
   private zoomAnchor: THREE.Vector3 | null = null;
+  private cameraDistanceM = 10_000_000 + CAMERA_SURFACE_EPSILON_M;
+  private desiredCameraDistanceM = this.cameraDistanceM;
   private desiredAltitudeM = 10_000_000;
   private altitudeM = 10_000_000;
   private drag: PointerDrag | null = null;
@@ -65,6 +68,9 @@ export class PlanetControls {
     // vector can point through Mars at some longitudes, which made descent end
     // on the opposite hemisphere and presented as a black surface.
     this.orbitDirection.copy(this.focusDirection);
+    this.viewUp.set(0, 1, 0).addScaledVector(this.orbitDirection, -this.orbitDirection.y);
+    if (this.viewUp.lengthSq() < 1e-10) this.viewUp.set(0, 0, 1);
+    this.viewUp.normalize();
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerup", this.onPointerUp);
@@ -111,45 +117,108 @@ export class PlanetControls {
   };
 
   private orbit(dx: number, dy: number) {
-    // Axes come from the current camera plane, making drag direction stable at every
-    // latitude and after any number of complete revolutions.
-    const screenRight = this.scratchA.set(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
-    const screenUp = this.scratchB.set(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
-    this.yawQuaternion.setFromAxisAngle(screenUp, -dx * 0.0045);
-    this.pitchQuaternion.setFromAxisAngle(screenRight, -dy * 0.0045);
-    this.orbitDirection.applyQuaternion(this.yawQuaternion).applyQuaternion(this.pitchQuaternion).normalize();
+    // Rotate one fixed camera offset around an unchanged focus point.
+    const oldOrbit = this.scratchA.copy(this.orbitDirection);
+    const oldUp = this.scratchB.copy(this.viewUp);
+    this.yawQuaternion.setFromAxisAngle(this.viewUp, -dx * 0.0032);
+    this.orbitDirection.applyQuaternion(this.yawQuaternion).normalize();
+    this.viewUp.applyQuaternion(this.yawQuaternion).normalize();
+
+    const screenRight = this.scratchC
+      .crossVectors(this.scratchD.copy(this.orbitDirection).multiplyScalar(-1), this.viewUp)
+      .normalize();
+    this.pitchQuaternion.setFromAxisAngle(screenRight, -dy * 0.0032);
+    this.orbitDirection.applyQuaternion(this.pitchQuaternion).normalize();
+    this.viewUp.applyQuaternion(this.pitchQuaternion);
+    this.viewUp.addScaledVector(this.orbitDirection, -this.viewUp.dot(this.orbitDirection)).normalize();
+
+    // Stop at terrain/the local horizon instead of moving the focus or letting
+    // a large pointer delta put the camera on the far side of Mars.
+    if (
+      this.focusDirection.dot(this.orbitDirection) <= 0
+      || this.cameraAltitudeAtDistance(this.cameraDistanceM) < CAMERA_SURFACE_EPSILON_M
+    ) {
+      this.orbitDirection.copy(oldOrbit);
+      this.viewUp.copy(oldUp);
+      return;
+    }
+    this.finishGesture();
   }
 
   private pan(dx: number, dy: number) {
-    // Translate in the visible camera plane, project the displacement to the local
-    // tangent, then rotate both target and orbit frame together around Mars.
+    // Translate camera and focus together in the current view plane. The offset
+    // and view-up vectors do not change, so panning cannot become an orbit or roll.
     const oldFocus = this.scratchA.copy(this.focusDirection);
-    const screenRight = this.scratchB.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
-    const screenUp = this.scratchC.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
+    const screenRight = this.scratchB
+      .crossVectors(this.scratchD.copy(this.orbitDirection).multiplyScalar(-1), this.viewUp)
+      .normalize();
+    const screenUp = this.scratchC.copy(this.viewUp);
     screenRight.addScaledVector(oldFocus, -screenRight.dot(oldFocus));
     screenUp.addScaledVector(oldFocus, -screenUp.dot(oldFocus));
     if (screenRight.lengthSq() < 1e-10) screenRight.crossVectors(screenUp, oldFocus);
     if (screenUp.lengthSq() < 1e-10) screenUp.crossVectors(oldFocus, screenRight);
     screenRight.normalize();
     screenUp.normalize();
-    const metresPerPixel = 0.042 * (this.altitudeM + 24) ** 0.79;
+    const viewportHeight = Math.max(1, this.canvas.clientHeight || this.canvas.getBoundingClientRect().height || 1);
+    const metresPerPixel = 2 * this.cameraDistanceM
+      * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5)
+      / viewportHeight;
     const nextFocus = this.scratchD.copy(oldFocus)
       .addScaledVector(screenRight, (-dx * metresPerPixel) / MARS_REFERENCE_RADIUS_M)
       .addScaledVector(screenUp, (dy * metresPerPixel) / MARS_REFERENCE_RADIUS_M)
       .normalize();
-    this.scratchQuaternion.setFromUnitVectors(oldFocus, nextFocus);
     this.focusDirection.copy(nextFocus);
-    this.orbitDirection.applyQuaternion(this.scratchQuaternion).normalize();
+    this.updateFocusAbsolute();
+    this.finishGesture();
     this.prefetch(this.focusDirection);
+  }
+
+  private updateFocusAbsolute() {
+    const focusRadius = MARS_REFERENCE_RADIUS_M + this.terrainHeight(this.focusDirection);
+    this.focusAbsolute.copy(this.focusDirection).multiplyScalar(focusRadius);
+  }
+
+  private cameraAltitudeAtDistance(distanceM: number) {
+    const position = this.scratchD.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, distanceM);
+    const direction = this.scratchC.copy(position).normalize();
+    return position.length() - MARS_REFERENCE_RADIUS_M - this.terrainHeight(direction);
+  }
+
+  private distanceForAltitude(altitudeM: number) {
+    let cameraRadius = MARS_REFERENCE_RADIUS_M + altitudeM + CAMERA_SURFACE_EPSILON_M;
+    let distance = this.cameraDistanceM;
+    for (let iteration = 0; iteration < 2; iteration += 1) {
+      const projected = this.focusAbsolute.dot(this.orbitDirection);
+      const discriminant = Math.max(
+        0,
+        projected * projected + cameraRadius * cameraRadius - this.focusAbsolute.lengthSq(),
+      );
+      distance = Math.max(CAMERA_SURFACE_EPSILON_M, -projected + Math.sqrt(discriminant));
+      const position = this.scratchD.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, distance);
+      const direction = this.scratchC.copy(position).normalize();
+      cameraRadius = MARS_REFERENCE_RADIUS_M + this.terrainHeight(direction) + altitudeM + CAMERA_SURFACE_EPSILON_M;
+    }
+    return distance;
+  }
+
+  private finishGesture() {
+    this.desiredCameraDistanceM = this.cameraDistanceM;
+    this.altitudeM = Math.max(0, this.cameraAltitudeAtDistance(this.cameraDistanceM) - CAMERA_SURFACE_EPSILON_M);
+    this.desiredAltitudeM = this.altitudeM;
+    this.zoomAnchor = null;
   }
 
   private onWheel = (event: WheelEvent) => {
     event.preventDefault();
     this.updateCursor(event);
-    const modeScale = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? 480 : 1;
+    // WheelEvent constants are 1 (line) and 2 (page). Using the values keeps
+    // this input path deterministic in browser integration/SSR test harnesses.
+    const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
     const previous = this.desiredAltitudeM;
     this.desiredAltitudeM = nonlinearZoomAltitude(this.desiredAltitudeM, event.deltaY * modeScale);
+    this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
     if (this.desiredAltitudeM < previous) this.zoomAnchor = this.cursorSurfacePoint();
+    else this.zoomAnchor = null;
   };
 
   private cursorSurfacePoint() {
@@ -166,54 +235,49 @@ export class PlanetControls {
 
   private moveFocusTowardZoomAnchor(amount: number) {
     if (!this.zoomAnchor) return;
-    const oldFocus = this.scratchA.copy(this.focusDirection);
     this.focusDirection.lerp(this.zoomAnchor, amount).normalize();
-    this.scratchQuaternion.setFromUnitVectors(oldFocus, this.focusDirection);
-    this.orbitDirection.applyQuaternion(this.scratchQuaternion).normalize();
-    if (this.altitudeM < 1 || this.focusDirection.angleTo(this.zoomAnchor) < 1e-7) this.zoomAnchor = null;
-  }
-
-  private solveCameraPosition(focusRadius: number, requestedAltitudeM: number) {
-    let cameraRadius = MARS_REFERENCE_RADIUS_M + requestedAltitudeM;
-    for (let iteration = 0; iteration < 2; iteration += 1) {
-      const projected = focusRadius * this.focusDirection.dot(this.orbitDirection);
-      const discriminant = Math.max(0, projected * projected + cameraRadius * cameraRadius - focusRadius * focusRadius);
-      const distance = Math.max(CAMERA_SURFACE_EPSILON_M, -projected + Math.sqrt(discriminant));
-      this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, distance);
-      this.cameraDirection.copy(this.cameraAbsolute).normalize();
-      const localHeight = this.terrainHeight(this.cameraDirection);
-      cameraRadius = MARS_REFERENCE_RADIUS_M + localHeight + requestedAltitudeM + CAMERA_SURFACE_EPSILON_M;
-    }
-    if (this.cameraAbsolute.length() < cameraRadius) this.cameraAbsolute.setLength(cameraRadius);
-    this.cameraDirection.copy(this.cameraAbsolute).normalize();
+    if (this.focusDirection.angleTo(this.zoomAnchor) < 1e-7) this.zoomAnchor = null;
   }
 
   update(deltaSeconds: number): PlanetControlState {
     if (this.disposed) throw new Error("PlanetControls has been disposed");
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 10.5);
-    const altitudeDifference = this.desiredAltitudeM - this.altitudeM;
-    this.altitudeM += altitudeDifference * smoothing;
-    if (Math.abs(altitudeDifference) < 0.001) this.altitudeM = this.desiredAltitudeM;
-    this.altitudeM = clamp(this.altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
-    if (this.zoomAnchor && this.desiredAltitudeM <= this.altitudeM) {
-      const strength = clamp((7.2 - Math.log10(this.altitudeM + 10)) * 0.018 + 0.005, 0.004, 0.06);
-      this.moveFocusTowardZoomAnchor(strength * smoothing * 24);
+    const previousDistanceM = this.cameraDistanceM;
+    const distanceDifference = this.desiredCameraDistanceM - this.cameraDistanceM;
+    this.cameraDistanceM += distanceDifference * smoothing;
+    if (Math.abs(distanceDifference) < 0.001) this.cameraDistanceM = this.desiredCameraDistanceM;
+    if (this.zoomAnchor && this.cameraDistanceM < previousDistanceM) {
+      // In the local planar limit this is the exact target interpolation needed
+      // to keep the picked ground point stationary as camera distance changes.
+      // Applying only the realised distance step prevents residual target drift
+      // once smooth zooming has settled.
+      const fraction = clamp(
+        1 - (this.cameraDistanceM + 2.5) / Math.max(previousDistanceM + 2.5, 2.5),
+        0,
+        0.42,
+      );
+      this.moveFocusTowardZoomAnchor(fraction);
     }
 
-    const focusHeight = this.terrainHeight(this.focusDirection);
-    const focusRadius = MARS_REFERENCE_RADIUS_M + focusHeight;
-    this.focusAbsolute.copy(this.focusDirection).multiplyScalar(focusRadius);
-    this.solveCameraPosition(focusRadius, this.altitudeM);
-    const localHeight = this.terrainHeight(this.cameraDirection);
-    const actualAltitude = Math.max(0, this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - localHeight - CAMERA_SURFACE_EPSILON_M);
+    this.updateFocusAbsolute();
+    this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
+    this.cameraDirection.copy(this.cameraAbsolute).normalize();
+    let actualAltitude = this.cameraAbsolute.length()
+      - MARS_REFERENCE_RADIUS_M
+      - this.terrainHeight(this.cameraDirection)
+      - CAMERA_SURFACE_EPSILON_M;
+    if (actualAltitude < 0) {
+      this.cameraDistanceM = this.distanceForAltitude(0);
+      this.desiredCameraDistanceM = Math.max(this.desiredCameraDistanceM, this.cameraDistanceM);
+      this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
+      this.cameraDirection.copy(this.cameraAbsolute).normalize();
+      actualAltitude = 0;
+    }
+    this.altitudeM = clamp(actualAltitude, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
 
     this.camera.position.set(0, 0, 0);
     const targetRelative = this.scratchA.copy(this.focusAbsolute).sub(this.cameraAbsolute);
-    // Local radial up removes accumulated roll while quaternion orbiting avoids Euler poles.
-    this.camera.up.copy(this.cameraDirection);
-    if (Math.abs(this.scratchB.copy(targetRelative).normalize().dot(this.camera.up)) > 0.998) {
-      this.camera.up.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
-    }
+    this.camera.up.copy(this.viewUp);
     this.camera.lookAt(targetRelative);
     const near = clamp(actualAltitude * 0.000006, RENDER_CONFIG.surfaceNearM, 180);
     const far = actualAltitude > 150_000
@@ -244,14 +308,22 @@ export class PlanetControls {
     this.focusDirection.set(direction.x, direction.y, direction.z).normalize();
     this.scratchQuaternion.setFromUnitVectors(oldFocus, this.focusDirection);
     this.orbitDirection.applyQuaternion(this.scratchQuaternion).normalize();
+    this.viewUp.applyQuaternion(this.scratchQuaternion).normalize();
+    this.updateFocusAbsolute();
     this.altitudeM = this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
+    this.cameraDistanceM = this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
     this.zoomAnchor = null;
     this.prefetch(this.focusDirection);
   }
 
   setAltitude(altitudeM: number, immediate = false) {
     this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
-    if (immediate) this.altitudeM = this.desiredAltitudeM;
+    this.updateFocusAbsolute();
+    this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
+    if (immediate) {
+      this.cameraDistanceM = this.desiredCameraDistanceM;
+      this.altitudeM = this.desiredAltitudeM;
+    }
   }
 
   getState() {
@@ -259,6 +331,7 @@ export class PlanetControls {
       latitudeLongitude: cartesianToLatLonElevation(this.focusDirection, 1),
       altitudeM: this.altitudeM,
       desiredAltitudeM: this.desiredAltitudeM,
+      cameraDistanceM: this.cameraDistanceM,
       orbitDirection: { x: this.orbitDirection.x, y: this.orbitDirection.y, z: this.orbitDirection.z },
     };
   }

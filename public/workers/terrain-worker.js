@@ -220,7 +220,10 @@ function generate(message) {
       const b = a + 1;
       const c = a + gridSize;
       const d = c + 1;
-      indices.set([a, c, b, b, c, d], cursor);
+      // All six face mappings use the same UV orientation. Counter-clockwise
+      // a-b-c / b-d-c winding points away from Mars so FrontSide terrain is
+      // visible from orbit and from the surface.
+      indices.set([a, b, c, b, d, c], cursor);
       cursor += 6;
     }
   }
@@ -253,7 +256,9 @@ function generate(message) {
   };
 }
 
-self.onmessage = (event) => {
+export { generate as generateTerrainTile };
+
+if (typeof self !== "undefined") self.onmessage = (event) => {
   if (event.data?.type !== "generate") return;
   try {
     const result = generate(event.data);
@@ -272,4 +277,3 @@ self.onmessage = (event) => {
     self.postMessage({ type: "error", jobId: event.data.jobId, message: error instanceof Error ? error.message : String(error) });
   }
 };
-

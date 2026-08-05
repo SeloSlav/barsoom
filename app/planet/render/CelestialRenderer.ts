@@ -1,12 +1,16 @@
 import * as THREE from "three";
 import type { MarsSkyState } from "../ephemeris";
 import { loadStarCatalogue } from "../stars";
+import type { Vec3 } from "../types";
 
 const starVertex = /* glsl */ `
   attribute vec3 starColour;
   attribute float magnitude;
   uniform float uPixelRatio;
-  uniform float uAtmosphereExtinction;
+  uniform float uCameraAltitude;
+  uniform float uDaylight;
+  uniform vec3 uCameraUp;
+  uniform vec3 uSunDirection;
   varying vec3 vColour;
   varying float vBrightness;
   void main() {
@@ -15,7 +19,13 @@ const starVertex = /* glsl */ `
     float flux = pow(2.512, -magnitude);
     gl_PointSize = clamp((7.4 - magnitude) * 1.08 * uPixelRatio, 1.8, 11.0);
     vColour = starColour;
-    vBrightness = clamp((0.72 + flux * 1.9) * uAtmosphereExtinction, 0.0, 8.0);
+    vec3 marsDirection = normalize((modelMatrix * vec4(position, 0.0)).xyz);
+    float zenithCosine = max(0.055, dot(marsDirection, normalize(uCameraUp)));
+    float airmass = min(18.0, 1.0 / zenithCosine);
+    float density = exp(-max(uCameraAltitude, 0.0) / 10800.0);
+    float sunProximity = pow(max(dot(marsDirection, normalize(uSunDirection)), 0.0), 3.0);
+    float extinction = exp(-airmass * density * (0.38 + uDaylight * (8.2 + 7.0 * sunProximity)));
+    vBrightness = clamp((0.72 + flux * 1.9) * extinction, 0.0, 8.0);
   }
 `;
 
@@ -110,7 +120,13 @@ export class CelestialRenderer {
       const material = new THREE.ShaderMaterial({
         vertexShader: starVertex,
         fragmentShader: starFragment,
-        uniforms: { uPixelRatio: { value: 1 }, uAtmosphereExtinction: { value: 1 } },
+        uniforms: {
+          uPixelRatio: { value: 1 },
+          uCameraAltitude: { value: 1_000_000 },
+          uDaylight: { value: 0 },
+          uCameraUp: { value: new THREE.Vector3(0, 1, 0) },
+          uSunDirection: { value: new THREE.Vector3(1, 0, 0) },
+        },
         transparent: true,
         depthTest: false,
         depthWrite: false,
@@ -127,7 +143,15 @@ export class CelestialRenderer {
     }
   }
 
-  update(sky: MarsSkyState, viewportHeight: number, fovRadians: number, pixelRatio: number, cameraAltitudeM: number, daylight: number) {
+  update(
+    sky: MarsSkyState,
+    viewportHeight: number,
+    fovRadians: number,
+    pixelRatio: number,
+    cameraAltitudeM: number,
+    cameraDirection: Vec3,
+    daylight: number,
+  ) {
     this.camera.position.set(0, 0, 0);
     const matrix = sky.inertialToMarsFixed;
     this.skyMatrix.set(
@@ -141,8 +165,10 @@ export class CelestialRenderer {
       this.starPoints.matrixWorldNeedsUpdate = true;
       const material = this.starPoints.material as THREE.ShaderMaterial;
       material.uniforms.uPixelRatio.value = pixelRatio;
-      const atmosphere = Math.exp(-Math.max(cameraAltitudeM, 0) / 12_000);
-      material.uniforms.uAtmosphereExtinction.value = Math.max(0.015, 1 - atmosphere * daylight * 1.15);
+      material.uniforms.uCameraAltitude.value = cameraAltitudeM;
+      material.uniforms.uDaylight.value = daylight;
+      material.uniforms.uCameraUp.value.set(cameraDirection.x, cameraDirection.y, cameraDirection.z);
+      material.uniforms.uSunDirection.value.set(sky.sunDirection.x, sky.sunDirection.y, sky.sunDirection.z);
     }
 
     this.bodyCount = Math.min(1 + sky.bodies.length, 10);
@@ -158,7 +184,17 @@ export class CelestialRenderer {
       this.colours.set(colour, index * 3);
       const physicalSize = angularRadiusRad * 2 * pixelsPerRadian * pixelRatio;
       this.sizes[index] = Math.max(index === 0 ? 9 : 3.2, Math.min(index === 0 ? 80 : 22, physicalSize));
-      this.intensities[index] = index === 0 ? 12 : Math.max(0.72, Math.min(4.5, 2.512 ** (-magnitude * 0.2)));
+      const zenithCosine = Math.max(0.055,
+        direction.x * cameraDirection.x + direction.y * cameraDirection.y + direction.z * cameraDirection.z,
+      );
+      const airmass = Math.min(18, 1 / zenithCosine);
+      const atmosphereDensity = Math.exp(-Math.max(cameraAltitudeM, 0) / 10_800);
+      const sunProximity = Math.max(0,
+        direction.x * sky.sunDirection.x + direction.y * sky.sunDirection.y + direction.z * sky.sunDirection.z,
+      ) ** 3;
+      const extinction = Math.exp(-airmass * atmosphereDensity * (0.38 + daylight * (8.2 + 7 * sunProximity)));
+      const unextinguished = index === 0 ? 12 : Math.max(0.72, Math.min(4.5, 2.512 ** (-magnitude * 0.2)));
+      this.intensities[index] = unextinguished * Math.max(index === 0 ? 0.08 : 0.012, extinction);
     }
     (this.bodyGeometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
     (this.bodyGeometry.getAttribute("bodyColour") as THREE.BufferAttribute).needsUpdate = true;

@@ -5,6 +5,7 @@ import {
   dot3,
   faceUvToDirection,
   length3,
+  neighbourTile,
   normalize3,
   tileBounds,
   tileKeyToString,
@@ -36,6 +37,7 @@ class PlanetTileNode {
   childrenReadyAt = -1;
   triangleCount = 0;
   failureCount = 0;
+  forcedSplitUntilFrame = -1;
 
   constructor(readonly key: TileKey, parent: PlanetTileNode | null) {
     this.id = tileKeyToString(key);
@@ -135,6 +137,7 @@ export class PlanetTerrain {
     for (const root of this.roots) this.visit(root, 10_000);
     this.cancelStaleRequests();
     if (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize + 12) this.evictGeometry();
+    if (this.frame % 120 === 0) this.pruneStaleNodes();
 
     let loading = 0;
     let queued = 0;
@@ -160,7 +163,7 @@ export class PlanetTerrain {
 
     this.ensureRequested(node, Math.max(parentPriority, visibility.screenError));
     const canSplit =
-      visibility.screenError > TERRAIN_CONFIG.screenSpaceErrorPx &&
+      (visibility.screenError > TERRAIN_CONFIG.screenSpaceErrorPx || node.forcedSplitUntilFrame >= this.frame) &&
       node.key.lod < TERRAIN_CONFIG.maxRenderLod &&
       this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles;
     if (!canSplit) {
@@ -168,13 +171,8 @@ export class PlanetTerrain {
       return;
     }
 
-    if (!node.children) {
-      node.children = childTiles(node.key).map((key) => {
-        const child = new PlanetTileNode(key, node);
-        this.allNodes.set(child.id, child);
-        return child;
-      });
-    }
+    this.forceBalancedNeighbours(node);
+    this.ensureChildren(node);
     for (const child of node.children) {
       child.lastWantedFrame = this.frame;
       this.ensureRequested(child, visibility.screenError + child.key.lod * 0.1);
@@ -196,6 +194,38 @@ export class PlanetTerrain {
       } else {
         this.visit(child, visibility.screenError);
       }
+    }
+  }
+
+  private ensureChildren(node: PlanetTileNode) {
+    if (node.children) return node.children;
+    node.children = childTiles(node.key).map((key) => {
+      const child = new PlanetTileNode(key, node);
+      this.allNodes.set(child.id, child);
+      return child;
+    });
+    return node.children;
+  }
+
+  private forceBalancedNeighbours(node: PlanetTileNode) {
+    // If this LOD-L tile produces L+1 children, every edge neighbour is forced
+    // to exist at least at L. That maintains a 2:1 quadtree balance; skirts then
+    // only bridge a single tessellation level instead of hiding arbitrarily deep
+    // T-junctions. The two-frame lifetime removes root traversal order bias.
+    if (node.key.lod === 0) return;
+    for (const edge of ["north", "east", "south", "west"] as const) {
+      const neighbour = neighbourTile(node.key, edge);
+      let current = this.roots[FACE_INDEX[neighbour.face]];
+      for (let depth = 1; depth <= neighbour.lod; depth += 1) {
+        current.lastWantedFrame = this.frame;
+        current.forcedSplitUntilFrame = Math.max(current.forcedSplitUntilFrame, this.frame + 2);
+        const children = this.ensureChildren(current);
+        const shift = neighbour.lod - depth;
+        const xBit = (Math.floor(neighbour.x / 2 ** shift)) & 1;
+        const yBit = (Math.floor(neighbour.y / 2 ** shift)) & 1;
+        current = children[xBit + yBit * 2];
+      }
+      current.lastWantedFrame = this.frame;
     }
   }
 
@@ -344,6 +374,31 @@ export class PlanetTerrain {
       const node = candidates.shift()!;
       this.releaseNodeGeometry(node);
     }
+  }
+
+  private pruneStaleNodes() {
+    for (const root of this.roots) this.pruneChildren(root);
+  }
+
+  private pruneChildren(node: PlanetTileNode) {
+    if (!node.children) return;
+    for (const child of node.children) this.pruneChildren(child);
+    if (node.children.some((child) => child.lastWantedFrame >= this.frame - TERRAIN_CONFIG.nodeRetentionFrames)) return;
+    for (const child of node.children) this.releaseSubtree(child);
+    node.children = null;
+  }
+
+  private releaseSubtree(node: PlanetTileNode) {
+    if (node.children) {
+      for (const child of node.children) this.releaseSubtree(child);
+      node.children = null;
+    }
+    node.requestToken += 1;
+    if (node.jobId !== null) this.workers.cancel(node.jobId);
+    node.jobId = null;
+    if (node.mesh) this.releaseNodeGeometry(node);
+    node.state = "idle";
+    this.allNodes.delete(node.id);
   }
 
   private releaseNodeGeometry(node: PlanetTileNode) {

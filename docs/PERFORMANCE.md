@@ -10,10 +10,10 @@ Measured on the production build in this repository:
 
 | Item | Result |
 |---|---:|
-| MOLA runtime files | 127 files / 577,741 bytes total |
+| MOLA runtime files | 2,047 files / 35,034,956 bytes total |
 | Star runtime files | 3 files / 109,276 bytes total |
 | Embedded rendered stars | 6,682 |
-| MOLA files requested for a typical orbital view | small visible-face subset, not all 126 |
+| MOLA files requested for a typical orbital view | small visible-face subset, not all 2,046 |
 | Terrain mesh topology | 24×24 cells plus four skirts |
 | Triangle count per tile | 1,344 |
 | Ready geometry cache cap | 280 tiles |
@@ -34,4 +34,3 @@ No geometry, material, texture or network request is constructed in the steady-s
 ## Visual verification matrix
 
 The development API can place the camera deterministically at 30,000 km, 10,000 km, 1,000 km, 100 km, 10 km, 1 km, 100 m and 0 m AGL over Olympus Mons, Valles Marineris, Hellas Planitia, a polar region and a cube edge. Visual checks should keep the same canvas and camera active while moving between levels; the landmark buttons are debug-only shortcuts for repeatable inspection, not the normal navigation transition.
-

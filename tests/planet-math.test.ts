@@ -56,6 +56,20 @@ describe("planetary coordinate maths", () => {
 describe("cube-sphere addressing", () => {
   const faces: CubeFace[] = ["px", "nx", "py", "ny", "pz", "nz"];
 
+  it.each(faces)("winds face %s triangles outward for GPU front-face culling", (face) => {
+    const a = faceUvToDirection(face, -0.2, -0.2);
+    const b = faceUvToDirection(face, 0.2, -0.2);
+    const c = faceUvToDirection(face, -0.2, 0.2);
+    const ab = { x: b.x - a.x, y: b.y - a.y, z: b.z - a.z };
+    const ac = { x: c.x - a.x, y: c.y - a.y, z: c.z - a.z };
+    const normal = {
+      x: ab.y * ac.z - ab.z * ac.y,
+      y: ab.z * ac.x - ab.x * ac.z,
+      z: ab.x * ac.y - ab.y * ac.x,
+    };
+    expect(dot3(normal, faceUvToDirection(face, 0, 0))).toBeGreaterThan(0);
+  });
+
   it.each(faces)("round-trips face %s UV away from ambiguous edges", (face) => {
     for (const [u, v] of [[0, 0], [-0.72, 0.31], [0.44, -0.68], [0.91, 0.88]]) {
       const mapped = directionToFaceUv(faceUvToDirection(face, u, v));
@@ -131,4 +145,3 @@ describe("continuous detail, zoom, and floating origin", () => {
     expect(MARS_REFERENCE_RADIUS_M).toBe(3_389_500);
   });
 });
-

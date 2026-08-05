@@ -180,6 +180,7 @@ export class PlanetEngine {
       THREE.MathUtils.degToRad(this.skyCamera.fov),
       this.renderer.getPixelRatio(),
       this.controlState.altitudeM,
+      this.controlState.cameraDirection,
       daylight,
     );
 
