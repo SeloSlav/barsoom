@@ -5,8 +5,10 @@ import {
 } from "../app/planet/constants";
 import {
   applyWowCameraDrag,
+  dampCameraHeight,
   marsJumpApexHeight,
   randomMarsSurfaceDirection,
+  wowMouseAutoRun,
 } from "../app/planet/SurfaceTraverseController";
 
 describe("surface traverse physics", () => {
@@ -36,8 +38,8 @@ describe("surface traverse physics", () => {
 
   it("orbits freely with left drag and steers the astronaut with right drag", () => {
     const leftDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, false);
-    expect(leftDrag.cameraYawRad).toBeGreaterThan(0.4);
-    expect(leftDrag.cameraPitchRad).toBeLessThan(0.3);
+    expect(leftDrag.cameraYawRad).toBeLessThan(0.4);
+    expect(leftDrag.cameraPitchRad).toBeGreaterThan(0.3);
     expect(leftDrag.headingRad).toBe(1.2);
 
     const rightDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, true);
@@ -45,8 +47,21 @@ describe("surface traverse physics", () => {
   });
 
   it("allows upward mouselook past the horizon", () => {
-    const lookingUp = applyWowCameraDrag(0, 0.1, 0, 0, -400, true);
-    expect(lookingUp.cameraPitchRad).toBeLessThan(0);
-    expect(lookingUp.cameraPitchRad).toBeCloseTo(-Math.PI / 3, 12);
+    const lookingUp = applyWowCameraDrag(0, 0.1, 0, 0, -500, true);
+    expect(lookingUp.cameraPitchRad).toBeGreaterThan(0);
+    expect(lookingUp.cameraPitchRad).toBeCloseTo(85 * Math.PI / 180, 12);
+  });
+
+  it("moves forward only while both mouse buttons are held", () => {
+    expect(wowMouseAutoRun(true, true)).toBe(true);
+    expect(wowMouseAutoRun(true, false)).toBe(false);
+    expect(wowMouseAutoRun(false, true)).toBe(false);
+  });
+
+  it("damps terrain elevation changes instead of snapping the camera", () => {
+    const next = dampCameraHeight(100, 120, 1 / 60);
+    expect(next).toBeGreaterThan(100);
+    expect(next).toBeLessThan(102);
+    expect(dampCameraHeight(next, 120, 1 / 60)).toBeGreaterThan(next);
   });
 });

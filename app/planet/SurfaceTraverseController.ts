@@ -17,8 +17,11 @@ const PLAYER_HEIGHT_M = 1.82;
 const CAMERA_MIN_DISTANCE_M = 3.2;
 const CAMERA_MAX_DISTANCE_M = 14;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
-const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-60);
-const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(80);
+const CAMERA_ORBIT_ELEVATION_RAD = THREE.MathUtils.degToRad(14);
+const CAMERA_INITIAL_LOOK_PITCH_RAD = -CAMERA_ORBIT_ELEVATION_RAD;
+const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-85);
+const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(85);
+const CAMERA_HEIGHT_FOLLOW_RATE = 5.5;
 const BOOT_SOLE_CLEARANCE_M = 0.025;
 
 type AnimationName = "idle" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
@@ -52,16 +55,30 @@ export function applyWowCameraDrag(
   deltaY: number,
   steeringCharacter: boolean,
 ) {
-  const nextCameraYawRad = cameraYawRad + deltaX * 0.0042;
+  const nextCameraYawRad = cameraYawRad - deltaX * 0.0042;
   return {
     cameraYawRad: nextCameraYawRad,
     cameraPitchRad: clamp(
-      cameraPitchRad + deltaY * 0.0032,
+      cameraPitchRad - deltaY * 0.0032,
       CAMERA_MIN_PITCH_RAD,
       CAMERA_MAX_PITCH_RAD,
     ),
     headingRad: steeringCharacter ? nextCameraYawRad : headingRad,
   };
+}
+
+export function wowMouseAutoRun(leftMouseHeld: boolean, rightMouseHeld: boolean) {
+  return leftMouseHeld && rightMouseHeld;
+}
+
+export function dampCameraHeight(
+  currentHeightM: number,
+  targetHeightM: number,
+  deltaSeconds: number,
+  followRate = CAMERA_HEIGHT_FOLLOW_RATE,
+) {
+  const blend = 1 - Math.exp(-Math.max(0, deltaSeconds) * Math.max(0, followRate));
+  return currentHeightM + (targetHeightM - currentHeightM) * blend;
 }
 
 /**
@@ -101,8 +118,10 @@ export class SurfaceTraverseController {
   private pointerY = 0;
   private headingRad = 0;
   private cameraYawRad = 0;
-  private cameraPitchRad = THREE.MathUtils.degToRad(18);
+  private cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
   private cameraDistanceM = 7;
+  private cameraAnchorHeightM = 0;
+  private cameraAnchorInitialized = false;
   private verticalOffsetM = 0;
   private verticalVelocityMps = 0;
   private airborneSeconds = 0;
@@ -183,8 +202,9 @@ export class SurfaceTraverseController {
     this.direction.set(next.x, next.y, next.z).normalize();
     this.headingRad = random() * Math.PI * 2;
     this.cameraYawRad = this.headingRad;
-    this.cameraPitchRad = THREE.MathUtils.degToRad(18);
+    this.cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
     this.cameraDistanceM = 7;
+    this.cameraAnchorInitialized = false;
     this.verticalOffsetM = 0;
     this.verticalVelocityMps = 0;
     this.airborneSeconds = 0;
@@ -249,7 +269,7 @@ export class SurfaceTraverseController {
 
     let forwardInput = Number(this.keys.has("KeyW") || this.keys.has("ArrowUp"))
       - Number(this.keys.has("KeyS") || this.keys.has("ArrowDown"));
-    if (this.mouseButtons.has(0) && rightMouse) forwardInput += 1;
+    if (wowMouseAutoRun(this.mouseButtons.has(0), rightMouse)) forwardInput += 1;
     let strafeInput = Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ"));
     if (rightMouse) strafeInput += Number(turnRight) - Number(turnLeft);
     if (forwardInput === 0 && strafeInput === 0) return 0;
@@ -366,26 +386,41 @@ export class SurfaceTraverseController {
 
     this.headingVector(this.cameraYawRad, this.forward);
     this.forward.addScaledVector(this.surfaceNormal, -this.forward.dot(this.surfaceNormal)).normalize();
-    this.targetAbsolute.copy(this.playerAbsolute).addScaledVector(this.surfaceNormal, CAMERA_TARGET_HEIGHT_M);
-    const horizontalDistance = Math.cos(this.cameraPitchRad) * this.cameraDistanceM;
-    const verticalDistance = Math.sin(this.cameraPitchRad) * this.cameraDistanceM;
+    const desiredCameraAnchorHeightM = this.playerAbsolute.length() - MARS_REFERENCE_RADIUS_M +
+      CAMERA_TARGET_HEIGHT_M;
+    if (!this.cameraAnchorInitialized) {
+      this.cameraAnchorHeightM = desiredCameraAnchorHeightM;
+      this.cameraAnchorInitialized = true;
+    } else {
+      this.cameraAnchorHeightM = dampCameraHeight(
+        this.cameraAnchorHeightM,
+        desiredCameraAnchorHeightM,
+        delta,
+      );
+    }
+    this.targetAbsolute.copy(this.direction).multiplyScalar(
+      MARS_REFERENCE_RADIUS_M + this.cameraAnchorHeightM,
+    );
+    // Keep the physical camera in a collision-safe orbit. View pitch is
+    // independent so looking up is not cancelled when Mars pushes the camera
+    // above the ground behind the astronaut.
+    const horizontalDistance = Math.cos(CAMERA_ORBIT_ELEVATION_RAD) * this.cameraDistanceM;
+    const verticalDistance = Math.sin(CAMERA_ORBIT_ELEVATION_RAD) * this.cameraDistanceM;
     this.cameraAbsolute.copy(this.targetAbsolute)
       .addScaledVector(this.forward, -horizontalDistance)
-      .addScaledVector(this.surfaceNormal, verticalDistance);
+      .addScaledVector(this.up, verticalDistance);
 
     this.cameraDirection.copy(this.cameraAbsolute).normalize();
-    const cameraGroundM = this.terrainSurface(this.cameraDirection).heightM;
-    let cameraAltitudeM = this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - cameraGroundM;
-    if (cameraAltitudeM < 0.65) {
-      this.cameraAbsolute.addScaledVector(this.cameraDirection, 0.65 - cameraAltitudeM);
-      cameraAltitudeM = 0.65;
-    }
-    this.cameraDirection.copy(this.cameraAbsolute).normalize();
+    const cameraAltitudeM = Math.max(
+      0.65,
+      this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - this.groundHeightM,
+    );
 
     this.root.position.copy(this.playerAbsolute).sub(this.cameraAbsolute);
     this.camera.position.set(0, 0, 0);
-    this.camera.up.copy(this.surfaceNormal);
-    this.relativeTarget.copy(this.targetAbsolute).sub(this.cameraAbsolute);
+    this.camera.up.copy(this.up);
+    this.relativeTarget.copy(this.forward).multiplyScalar(Math.cos(this.cameraPitchRad))
+      .addScaledVector(this.up, Math.sin(this.cameraPitchRad));
     this.camera.lookAt(this.relativeTarget);
     this.camera.near = 0.05;
     this.camera.far = Math.max(
@@ -451,7 +486,9 @@ export class SurfaceTraverseController {
   };
 
   private onPointerMove = (event: PointerEvent) => {
-    if (!this.active || this.pointerId !== event.pointerId || this.mouseButtons.size === 0) return;
+    if (!this.active || this.pointerId !== event.pointerId) return;
+    this.syncMouseButtons(event.buttons);
+    if (this.mouseButtons.size === 0) return;
     const dx = event.clientX - this.pointerX;
     const dy = event.clientY - this.pointerY;
     this.pointerX = event.clientX;
@@ -472,13 +509,20 @@ export class SurfaceTraverseController {
 
   private onPointerUp = (event: PointerEvent) => {
     if (this.pointerId !== event.pointerId) return;
-    this.mouseButtons.delete(event.button);
+    this.syncMouseButtons(event.buttons);
     if (event.buttons === 0) {
       if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
       this.pointerId = null;
       this.mouseButtons.clear();
     }
   };
+
+  private syncMouseButtons(buttons: number) {
+    if ((buttons & 1) !== 0) this.mouseButtons.add(0);
+    else this.mouseButtons.delete(0);
+    if ((buttons & 2) !== 0) this.mouseButtons.add(2);
+    else this.mouseButtons.delete(2);
+  }
 
   private onWheel = (event: WheelEvent) => {
     if (!this.active) return;
