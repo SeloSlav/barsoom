@@ -34,6 +34,7 @@ export type PlanetTelemetry = {
   latitudeDeg: number;
   longitudeDeg: number;
   altitudeM: number;
+  desiredAltitudeM: number;
   elevationM: number;
   groundWidthM: number;
   activeTiles: number;
@@ -57,6 +58,7 @@ export type PlanetTelemetry = {
   frameMs: number;
   fps: number;
   simulationUtc: string;
+  controlMode: "survey" | "surface";
 };
 
 export type DebugFlags = {

@@ -6,11 +6,12 @@ import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
+import { SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
 export type PlanetEngineApi = {
-  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null };
+  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface" };
   setLocation: (latitudeDeg: number, longitudeDeg: number, altitudeM?: number) => void;
   setAltitude: (altitudeM: number, immediate?: boolean) => void;
   setDebug: (flag: keyof DebugFlags, value: boolean) => void;
@@ -19,6 +20,8 @@ export type PlanetEngineApi = {
   setNightSide: (altitudeM?: number) => void;
   setTerminator: (altitudeM?: number) => void;
   setSimulationUtc: (utcIso: string, rate?: number) => void;
+  teleportRandomSurface: () => void;
+  exitSurfaceTraverse: () => void;
 };
 
 declare global {
@@ -45,6 +48,7 @@ export class PlanetEngine {
   private readonly atmosphere: AtmosphereRenderer;
   private readonly celestial: CelestialRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
+  private readonly surfaceTraverse: SurfaceTraverseController;
   private readonly resizeObserver: ResizeObserver;
   private readonly selection: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   private readonly viewportSize = new THREE.Vector2();
@@ -154,6 +158,14 @@ export class PlanetEngine {
       (direction) => this.terrain.sampleHeight(direction),
       (direction) => void this.terrain.prefetch(direction),
     );
+    this.surfaceTraverse = new SurfaceTraverseController(
+      this.scene,
+      canvas,
+      this.camera,
+      (direction) => this.terrain.sampleHeight(direction),
+      (direction) => void this.terrain.prefetch(direction),
+      (message) => this.onError(message),
+    );
     // Begin above the illuminated hemisphere for a legible first descent. The
     // simulation remains physically time-based; this only chooses the landing
     // point, it does not move the Sun or add a scene-wide fill light.
@@ -181,9 +193,19 @@ export class PlanetEngine {
     canvas.addEventListener("webglcontextrestored", this.onContextRestored, false);
     window.addEventListener("keydown", this.onKeyDown);
     window.__BARSOOM__ = {
-      getState: () => ({ ...this.controls.getState(), telemetry: this.telemetry }),
-      setLocation: (latitudeDeg, longitudeDeg, altitudeM) => this.controls.setLocation(latitudeDeg, longitudeDeg, altitudeM),
-      setAltitude: (altitudeM, immediate) => this.controls.setAltitude(altitudeM, immediate),
+      getState: () => ({
+        ...this.controls.getState(),
+        telemetry: this.telemetry,
+        controlMode: this.surfaceTraverse.active ? "surface" : "survey",
+      }),
+      setLocation: (latitudeDeg, longitudeDeg, altitudeM) => {
+        if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+        this.controls.setLocation(latitudeDeg, longitudeDeg, altitudeM);
+      },
+      setAltitude: (altitudeM, immediate) => {
+        if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+        this.controls.setAltitude(altitudeM, immediate);
+      },
       setDebug: (flag, value) => { this.debug[flag] = value; },
       getDebug: () => ({ ...this.debug }),
       querySurface: (latitudeDeg, longitudeDeg) => {
@@ -219,6 +241,8 @@ export class PlanetEngine {
         this.skyState = calculateMarsSky(epoch);
         this.lastSkyUpdate = -Infinity;
       },
+      teleportRandomSurface: () => this.enterSurfaceTraverse(),
+      exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
     };
     this.renderer.setAnimationLoop(this.animate);
   }
@@ -242,7 +266,9 @@ export class PlanetEngine {
     const frameMs = deltaSeconds * 1000;
     this.smoothedFrameMs += (frameMs - this.smoothedFrameMs) * 0.06;
     this.framesSinceQualityChange += 1;
-    this.controlState = this.controls.update(deltaSeconds);
+    this.controlState = this.surfaceTraverse.active
+      ? this.surfaceTraverse.update(deltaSeconds)
+      : this.controls.update(deltaSeconds);
     const simulationUtc = new Date(
       this.simulationStartUtc.getTime() + (time - this.simulationStartPerformance) * this.simulationRate,
     );
@@ -262,6 +288,7 @@ export class PlanetEngine {
     const viewport = this.renderer.getDrawingBufferSize(this.viewportSize);
     const terrainStats = this.terrain.update(
       this.controlState.cameraAbsolute,
+      this.controlState.focusDirection,
       this.camera,
       viewport.y,
       time / 1000,
@@ -312,6 +339,7 @@ export class PlanetEngine {
       latitudeDeg: focusCoordinates.latitudeDeg,
       longitudeDeg: focusCoordinates.longitudeDeg,
       altitudeM: this.controlState.altitudeM,
+      desiredAltitudeM: this.controlState.desiredAltitudeM,
       elevationM: surface.areoidElevationM,
       groundWidthM: groundWidth,
       activeTiles: terrainStats.activeTiles,
@@ -335,6 +363,7 @@ export class PlanetEngine {
       frameMs: this.smoothedFrameMs,
       fps: 1000 / Math.max(0.01, this.smoothedFrameMs),
       simulationUtc: simulationUtc.toISOString(),
+      controlMode: this.surfaceTraverse.active ? "surface" : "survey",
     };
     this.onTelemetry(this.telemetry);
   }
@@ -388,10 +417,18 @@ export class PlanetEngine {
   }
 
   private onSelectionPointerDown = (event: PointerEvent) => {
-    if (event.button === 0) this.pointerDown = { x: event.clientX, y: event.clientY };
+    if (this.surfaceTraverse.active) return;
+    if (event.button === 0) {
+      this.pointerDown = { x: event.clientX, y: event.clientY };
+    } else if (event.button === 2) {
+      this.pointerDown = null;
+      this.selectionDirection = null;
+      this.controls.setZoomAnchor(null);
+    }
   };
 
   private onSelectionPointerUp = (event: PointerEvent) => {
+    if (this.surfaceTraverse.active) return;
     if (event.button !== 0 || !this.pointerDown) return;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
     this.pointerDown = null;
@@ -405,10 +442,15 @@ export class PlanetEngine {
     const hit = rayTerrainIntersection(this.controlState.cameraAbsolute, direction, (sampleDirection) => this.terrain.sampleHeight(sampleDirection));
     if (!hit) return;
     this.selectionDirection = new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z);
+    this.controls.setZoomAnchor(this.selectionDirection);
     void this.terrain.prefetch(this.selectionDirection);
   };
 
   private updateSelection() {
+    if (this.surfaceTraverse.active) {
+      this.selection.visible = false;
+      return;
+    }
     if (!this.selectionDirection) {
       this.selection.visible = false;
       return;
@@ -428,7 +470,13 @@ export class PlanetEngine {
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
-    if (event.code === "F3") {
+    if (event.code === "Backquote" && !event.repeat) {
+      event.preventDefault();
+      this.enterSurfaceTraverse();
+    } else if (event.code === "Escape" && this.surfaceTraverse.active) {
+      event.preventDefault();
+      this.exitSurfaceTraverse();
+    } else if (event.code === "F3") {
       event.preventDefault();
       this.debug.overlay = !this.debug.overlay;
     } else if (event.code === "F4") {
@@ -436,6 +484,23 @@ export class PlanetEngine {
       this.debug.tileBoundaries = !this.debug.tileBoundaries;
     }
   };
+
+  private enterSurfaceTraverse() {
+    this.controls.setEnabled(false);
+    this.selectionDirection = null;
+    this.surfaceTraverse.teleportRandom();
+    this.lastTelemetryTime = -Infinity;
+  }
+
+  private exitSurfaceTraverse() {
+    if (!this.surfaceTraverse.active) return;
+    const direction = this.surfaceTraverse.getSurfaceDirection();
+    const location = cartesianToLatLonElevation(direction, 1);
+    this.surfaceTraverse.deactivate();
+    this.controls.setEnabled(true);
+    this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, 1_200);
+    this.lastTelemetryTime = -Infinity;
+  }
 
   private onContextLost = (event: Event) => {
     event.preventDefault();
@@ -455,6 +520,7 @@ export class PlanetEngine {
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.surfaceTraverse.dispose();
     this.surfaceDetails.dispose();
     this.terrain.dispose();
     this.atmosphere.dispose();

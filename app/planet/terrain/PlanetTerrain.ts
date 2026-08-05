@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG, TERRAIN_CONFIG } from "../constants";
 import {
   childTiles,
+  clamp,
   directionToTile,
   dot3,
   faceUvToDirection,
@@ -62,7 +63,6 @@ class PlanetTileNode {
   triangleCount = 0;
   geometryBytes = 0;
   failureCount = 0;
-  forcedSplitUntilFrame = -1;
 
   constructor(readonly key: TileKey, parent: PlanetTileNode | null) {
     this.id = tileKeyToString(key);
@@ -103,9 +103,11 @@ export class PlanetTerrain {
   private readonly frustum = new THREE.Frustum();
   private readonly sphere = new THREE.Sphere();
   private readonly temporaryCenter = new THREE.Vector3();
+  private readonly cameraForward = new THREE.Vector3();
   private frame = 0;
   private nowS = 0;
   private cameraAbsolute: Vec3 = { x: 0, y: 0, z: MARS_REFERENCE_RADIUS_M + 1 };
+  private focusDirection: Vec3 = { x: 0, y: 0, z: 1 };
   private viewportHeight = 1080;
   private fovRadians = Math.PI / 4;
   private debugDisableHorizonCulling = false;
@@ -135,6 +137,7 @@ export class PlanetTerrain {
 
   update(
     cameraAbsolute: Vec3,
+    focusDirection: Vec3,
     camera: THREE.PerspectiveCamera,
     viewportHeight: number,
     nowS: number,
@@ -145,6 +148,7 @@ export class PlanetTerrain {
     this.frame += 1;
     this.nowS = nowS;
     this.cameraAbsolute = cameraAbsolute;
+    this.focusDirection = normalize3(focusDirection);
     this.viewportHeight = viewportHeight;
     this.fovRadians = THREE.MathUtils.degToRad(camera.fov);
     this.debugDisableHorizonCulling = debug.horizonCulling;
@@ -152,6 +156,7 @@ export class PlanetTerrain {
       dot3(normalize3(cameraAbsolute), sunDirection) > 0.01;
     this.projectionScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projectionScreen);
+    camera.getWorldDirection(this.cameraForward);
 
     for (const node of this.visibleNodes) {
       if (node.mesh) node.mesh.visible = false;
@@ -172,7 +177,10 @@ export class PlanetTerrain {
     this.material.uniforms.uDebugNormals.value = debug.normals ? 1 : 0;
     this.material.uniforms.uDebugMolaOnly.value = debug.molaOnly ? 1 : 0;
 
-    for (const root of this.roots) this.visit(root, 10_000);
+    const rootsByPriority = [...this.roots].sort(
+      (a, b) => this.visibility(b).priority - this.visibility(a).priority,
+    );
+    for (const root of rootsByPriority) this.visit(root, 10_000);
     this.cancelStaleRequests();
     if (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize + 12) this.evictGeometry();
     if (this.frame % 120 === 0) this.pruneStaleNodes();
@@ -201,21 +209,34 @@ export class PlanetTerrain {
       return;
     }
 
-    this.ensureRequested(node, Math.max(parentPriority, visibility.screenError));
+    this.ensureRequested(node, Math.max(parentPriority, visibility.priority));
+    const focusTile = directionToTile(this.focusDirection, node.key.lod);
+    const isFocusBranch = tileKeyToString(focusTile) === node.id;
+    const isClipmapRing = visibility.focusProximity <= 2.25;
     const canSplit =
-      (visibility.screenError > TERRAIN_CONFIG.screenSpaceErrorPx || node.forcedSplitUntilFrame >= this.frame) &&
+      visibility.screenError > TERRAIN_CONFIG.screenSpaceErrorPx &&
       node.key.lod < TERRAIN_CONFIG.maxRenderLod &&
-      this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles;
+      (isFocusBranch || isClipmapRing ||
+        this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles);
     if (!canSplit) {
       this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
 
-    this.forceBalancedNeighbours(node);
+    // Refine the visible branch first. `isClipmapRing` guarantees concentric
+    // detail rings around the viewed point; it is independent of traversal
+    // order and cannot expire while sibling tiles are still transitioning.
     const children = this.ensureChildren(node);
-    for (const child of children) {
+    const childrenByPriority = [...children].sort(
+      (a, b) => this.visibility(b).priority - this.visibility(a).priority,
+    );
+    for (const child of childrenByPriority) {
       child.lastWantedFrame = this.frame;
-      this.ensureRequested(child, visibility.screenError + child.key.lod * 0.1);
+      const childVisibility = this.visibility(child);
+      this.ensureRequested(
+        child,
+        (childVisibility.visible ? childVisibility.priority : visibility.priority * 0.08) + child.key.lod * 0.1,
+      );
     }
     const allChildrenReady = children.every((child) => child.state === "ready");
     if (!allChildrenReady) {
@@ -227,7 +248,7 @@ export class PlanetTerrain {
     if (node.childrenReadyAt < 0) node.childrenReadyAt = this.nowS;
     const transition = Math.min(1, Math.max(0, (this.nowS - node.childrenReadyAt) / TERRAIN_CONFIG.morphDurationS));
     if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1, fadeIn: false });
-    for (const child of children) {
+    for (const child of childrenByPriority) {
       if (transition < 1) {
         const childVisibility = this.visibility(child);
         if (childVisibility.visible) this.addVisible(child, { fade: transition, morph: transition, fadeIn: true });
@@ -247,25 +268,6 @@ export class PlanetTerrain {
     return node.children;
   }
 
-  private forceBalancedNeighbours(node: PlanetTileNode) {
-    // If this LOD-L tile produces L+1 children, every edge neighbour is forced
-    // to exist at least at L. That maintains a 2:1 quadtree balance; skirts then
-    // only bridge a single tessellation level instead of hiding arbitrarily deep
-    // T-junctions. The two-frame lifetime removes root traversal order bias.
-    if (node.key.lod === 0) return;
-    for (const edge of ["north", "east", "south", "west"] as const) {
-      const { neighbour, ancestors } = neighbourBalanceAncestors(node.key, edge);
-      for (const ancestor of ancestors) {
-        const current = this.allNodes.get(tileKeyToString(ancestor));
-        if (!current) throw new Error(`Missing quadtree ancestor ${tileKeyToString(ancestor)}`);
-        current.lastWantedFrame = this.frame;
-        current.forcedSplitUntilFrame = Math.max(current.forcedSplitUntilFrame, this.frame + 2);
-        this.ensureChildren(current);
-      }
-      this.allNodes.get(tileKeyToString(neighbour))!.lastWantedFrame = this.frame;
-    }
-  }
-
   private visibility(node: PlanetTileNode) {
     const bounds = tileBounds(node.key);
     const centerDirection = node.center
@@ -279,7 +281,7 @@ export class PlanetTerrain {
       : 0;
     const separation = Math.acos(Math.max(-1, Math.min(1, dot3(centerDirection, cameraDirection))));
     if (!this.debugDisableHorizonCulling && separation > horizonAngle + angularRadius * 1.28 + 0.025) {
-      return { visible: false, horizon: true, screenError: 0 };
+      return { visible: false, horizon: true, screenError: 0, priority: 0, focusProximity: Infinity };
     }
 
     const center = node.center ?? {
@@ -292,18 +294,37 @@ export class PlanetTerrain {
       y: center.y - this.cameraAbsolute.y,
       z: center.z - this.cameraAbsolute.z,
     };
-    const boundRadius = MARS_REFERENCE_RADIUS_M * angularRadius * 1.1 + 24_000;
+    const geometryBounds = node.mesh?.geometry.boundingSphere;
+    const boundRadius = geometryBounds?.radius ?? MARS_REFERENCE_RADIUS_M * angularRadius * 1.1 + 24_000;
     this.temporaryCenter.set(relative.x, relative.y, relative.z);
+    if (geometryBounds) this.temporaryCenter.add(geometryBounds.center);
     this.sphere.center.copy(this.temporaryCenter);
     this.sphere.radius = boundRadius;
     if (!this.frustum.intersectsSphere(this.sphere)) {
-      return { visible: false, horizon: false, screenError: 0 };
+      return { visible: false, horizon: false, screenError: 0, priority: 0, focusProximity: Infinity };
     }
     const distance = Math.max(1, Math.hypot(relative.x, relative.y, relative.z) - boundRadius * 0.65);
     const geometricError = (MARS_REFERENCE_RADIUS_M * 2) /
       (2 ** node.key.lod * TERRAIN_CONFIG.meshSegments) * (node.key.lod < 3 ? 1.35 : 0.72);
     const screenError = (geometricError / distance) * (this.viewportHeight / (2 * Math.tan(this.fovRadians * 0.5)));
-    return { visible: true, horizon: false, screenError };
+    const viewDirectionLength = Math.max(1, this.temporaryCenter.length());
+    const viewAlignment = clamp(
+      this.temporaryCenter.dot(this.cameraForward) / viewDirectionLength,
+      -1,
+      1,
+    );
+    const centreWeight = 0.2 + 2.8 * Math.max(0, viewAlignment) ** 6;
+    const focusTile = directionToTile(this.focusDirection, node.key.lod);
+    const focusPriority = tileKeyToString(focusTile) === node.id ? 1_000_000 + node.key.lod * 10_000 : 0;
+    const focusSeparation = Math.acos(clamp(dot3(centerDirection, this.focusDirection), -1, 1));
+    const focusProximity = focusSeparation / Math.max(angularRadius, 1e-9);
+    return {
+      visible: true,
+      horizon: false,
+      screenError,
+      priority: focusPriority + screenError * centreWeight,
+      focusProximity,
+    };
   }
 
   private ensureRequested(node: PlanetTileNode, priority: number) {
@@ -399,6 +420,7 @@ export class PlanetTerrain {
       if (node.parent) this.addVisible(node.parent, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
+    const wasVisible = this.visibleNodes.has(node);
     node.mesh.visible = true;
     node.mesh.castShadow = this.surfaceShadowsEnabled;
     node.mesh.position.set(
@@ -406,9 +428,13 @@ export class PlanetTerrain {
       node.center!.y - this.cameraAbsolute.y,
       node.center!.z - this.cameraAbsolute.z,
     );
-    node.mesh.userData.renderState = renderState;
+    const previousState = node.mesh.userData.renderState as TileRenderState | undefined;
+    node.mesh.userData.renderState = wasVisible && previousState && previousState.fade > renderState.fade
+      ? previousState
+      : renderState;
     node.lastUsedFrame = this.frame;
     this.visibleNodes.add(node);
+    if (wasVisible) return;
     this.stats.activeTiles += 1;
     this.stats.triangles += node.triangleCount;
     this.stats.minLod = Math.min(this.stats.minLod, node.key.lod);
@@ -429,8 +455,15 @@ export class PlanetTerrain {
 
   private evictGeometry() {
     const candidates = [...this.readyNodes]
-      .filter((node) => !this.visibleNodes.has(node))
-      .sort((a, b) => a.lastUsedFrame - b.lastUsedFrame);
+      // A newly generated child is not visible until all four siblings are
+      // ready. Evicting it during that short staging window makes the parent
+      // wait forever and leaves close views on continent-scale geometry.
+      .filter((node) => !this.visibleNodes.has(node) && node.lastWantedFrame < this.frame - 8)
+      .sort((a, b) => {
+        const aRecency = Math.max(a.lastUsedFrame, a.lastWantedFrame);
+        const bRecency = Math.max(b.lastUsedFrame, b.lastWantedFrame);
+        return aRecency - bRecency;
+      });
     while (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize && candidates.length) {
       const node = candidates.shift()!;
       this.releaseNodeGeometry(node);

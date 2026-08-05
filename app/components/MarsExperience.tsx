@@ -9,12 +9,12 @@ const SIMULATION_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug
 
 function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
   return {
-    latitudeDeg: 18.65, longitudeDeg: -133.8, altitudeM: 10_000_000, elevationM: 0, groundWidthM: 0,
+    latitudeDeg: 18.65, longitudeDeg: -133.8, altitudeM: 10_000_000, desiredAltitudeM: 10_000_000, elevationM: 0, groundWidthM: 0,
     activeTiles: 0, loadingTiles: 0, queuedTiles: 0, minLod: 0, maxLod: 0, triangles: 0, drawCalls: 0,
     textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
-    frameMs: 16.67, fps: 60, simulationUtc,
+    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey",
   };
 }
 
@@ -91,7 +91,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [initialSimulationUtc]);
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
-  const surfaceMode = telemetry.altitudeM <= 8_000;
+  const surfaceMode = telemetry.controlMode === "surface";
+  const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   const toggleDebug = (flag: keyof DebugFlags) => {
     const next = !debug[flag];
@@ -100,44 +101,81 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   };
 
   return (
-    <main className="mars-shell">
-      <canvas ref={canvasRef} className="mars-canvas" aria-label="Interactive three-dimensional rendering of Mars" />
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}`}>
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : "Interactive three-dimensional rendering of Mars"} />
       <div className="hud-vignette" aria-hidden="true" />
+      <div className="instrument-grid" aria-hidden="true" />
+      <div className="reconstruction-reticle" aria-hidden="true"><i /><span /></div>
       <header className="mission-header">
-        <div className="mission-identity"><span className="mission-kicker">ARES CARTOGRAPHY NETWORK</span><h1>BARSOOM</h1><span className="mission-mode"><i /> {surfaceMode ? "SURFACE TRAVERSE" : "PLANETARY SURVEY"} / LIVE</span></div>
-        <div className="simulation-clock"><span>SIMULATION UTC</span><strong>{simulationLabel}</strong><small>60× CELESTIAL TIME</small></div>
-        <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>CONTROLS <kbd>H</kbd></button>
-      </header>
-      <section className="coordinate-panel" aria-label="Current Mars coordinates">
-        <div className="eyebrow">GEOGRAPHIC FOCUS</div>
-        <div className="coordinate-grid">
-          <div><span>LATITUDE</span><strong>{formatCoordinate(telemetry.latitudeDeg, "N", "S")}</strong></div>
-          <div><span>LONGITUDE</span><strong>{formatCoordinate(telemetry.longitudeDeg, "E", "W")}</strong></div>
-          <div><span>ALTITUDE AGL</span><strong>{formatDistance(telemetry.altitudeM)}</strong></div>
-          <div><span>AREOID ELEV.</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
+        <div className="mission-identity">
+          <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
+          <div className="wordmark-row"><h1>BARSOOM</h1><b>MARS</b></div>
+          <span className="mission-mode"><i /> {surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED</span>
         </div>
-        <div className="ground-span"><span>FRAME GROUND WIDTH</span><b>{formatDistance(telemetry.groundWidthM)}</b></div>
+        <div className="simulation-clock">
+          <span>SOURCE EPOCH / UTC</span>
+          <strong>{simulationLabel}</strong>
+          <small>CAUSAL DELAY EMBEDDED · MODEL RATE 60×</small>
+        </div>
+        <div className="header-actions">
+          <span className="array-state"><i /> ARRAY 07 / COHERENT</span>
+          <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>INSTRUMENT <kbd>H</kbd></button>
+        </div>
+      </header>
+      <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
+        <div className="panel-index">SOLUTION / 01</div>
+        <div className="eyebrow">VIRTUAL APERTURE SOLUTION</div>
+        <div className="coordinate-grid">
+          <div><span>SOLVED LATITUDE</span><strong>{formatCoordinate(telemetry.latitudeDeg, "N", "S")}</strong></div>
+          <div><span>SOLVED LONGITUDE</span><strong>{formatCoordinate(telemetry.longitudeDeg, "E", "W")}</strong></div>
+          <div><span>FOCAL HEIGHT / AGL</span><strong>{formatDistance(telemetry.altitudeM)}</strong></div>
+          <div><span>MOLA AREOID OFFSET</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
+        </div>
+        <div className="ground-span"><span>RECONSTRUCTED FIELD</span><b>{formatDistance(telemetry.groundWidthM)}</b></div>
       </section>
-      <section className="altitude-gauge" aria-label="Zoom altitude">
-        <div className="gauge-track"><i style={{ height: `${Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100)}%` }} /></div>
-        <div className="gauge-copy"><span>ORBIT</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>SURFACE</span></div>
+      <section className="altitude-gauge" aria-label="Reconstruction focal height">
+        <span className="gauge-label">FOCAL<br />STANDOFF</span>
+        <div className="gauge-track"><i style={{ height: `${apertureFill}%` }} /><b style={{ bottom: `${apertureFill}%` }} /></div>
+        <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>
-      <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>{formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>
+      <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>
+      <div className={`traverse-controls${surfaceMode ? " active" : ""}`} aria-live="polite">
+        <span>{surfaceMode ? "OBSERVER PROXY / KINEMATIC SOLVE" : "EMBODIED VIEW / LOCAL SOLUTION"}</span>
+        {surfaceMode ? <>
+          <strong><kbd>WASD</kbd> TRANSLATE <i /> <kbd>RMB</kbd> ORIENT <i /> <kbd>SPACE</kbd> BALLISTIC STEP</strong>
+          <small><kbd>~</kbd> RETARGET FIELD <i /> <kbd>ESC</kbd> COLLAPSE LOCAL SOLUTION</small>
+        </> : <>
+          <strong>PRESS <kbd>~</kbd> TO INSTANTIATE OBSERVER</strong>
+          <small>UNBIASED SURFACE SAMPLE · THIRD-PERSON SCALE PROXY</small>
+        </>}
+      </div>
       {helpVisible && <aside className="help-panel">
-        <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close controls">×</button><p className="eyebrow">PLANET CONTROLS</p>
-        <dl><div><dt>Orbit focus</dt><dd>Middle-mouse drag</dd></div><div><dt>Move across Mars</dt><dd>Right-mouse drag</dd></div><div><dt>Zoom at cursor</dt><dd>Mouse wheel</dd></div><div><dt>Select ground</dt><dd>Left click</dd></div><div><dt>Diagnostics</dt><dd>F3</dd></div><div><dt>Tile boundaries</dt><dd>F4</dd></div></dl>
-        <p>Wheel movement scales continuously from orbit to a 2.2 m eye-height surface view. The final descent lowers the sightline to keep the horizon and local terrain in frame; middle-drag takes full manual control.</p>
-        <div className="descent-targets"><p className="eyebrow">MOLA CRATER DESCENTS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
+        <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
+        <p className="panel-index">FIELD MANUAL / QSI–04</p>
+        <p className="eyebrow">{surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
+        {!surfaceMode && <div className="instrument-principle">
+          <strong>YOU ARE NOT MOVING FASTER THAN LIGHT.</strong>
+          <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with MOLA priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
+        </div>}
+        {surfaceMode ? <>
+          <dl><div><dt>Translate / turn</dt><dd>W S / A D</dd></div><div><dt>Lateral step</dt><dd>Q / E</dd></div><div><dt>Fast solve</dt><dd>Hold Shift</dd></div><div><dt>Orient proxy</dt><dd>Right-mouse drag</dd></div><div><dt>Decouple viewpoint</dt><dd>Left-mouse drag</dd></div><div><dt>Continuous advance</dt><dd>Both mouse buttons</dd></div><div><dt>Observer distance</dt><dd>Mouse wheel</dd></div><div><dt>Ballistic step</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Collapse local solve</dt><dd>Escape</dd></div></dl>
+          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s².</p>
+        </> : <>
+          <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
+          <p>Left-click a surface point to phase-lock wheel focus to the amber ring. Right-click once to release it and return the solution to cursor-guided focus.</p>
+          <div className="descent-targets"><p className="eyebrow">CALIBRATED MOLA FIELDS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
+        </>}
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
-        <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
+        <div className="debug-heading"><span>INVERSE SOLVER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
+        <div className="debug-metrics"><span>Focal target</span><b>{formatDistance(telemetry.desiredAltitudeM)}</b></div>
         <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>Nodes</span><b>{telemetry.terrainNodes} retained</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Horizon</span><b>{telemetry.horizonCulled} culled</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>MOLA cache</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Geometry</span><b>{telemetry.geometryMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth mode</span><b>{telemetry.depthStrategy}</b><span>Surface shadows</span><b>{telemetry.surfaceShadows ? `on / ${formatDistance(telemetry.shadowExtentM)}` : "off"}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
         <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly", "horizonCulling"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag === "horizonCulling" ? "horizon audit" : flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
         <div className="qa-altitudes" aria-label="Visual QA altitudes">{QA_ALTITUDES.map((level) => <button key={level.metres} type="button" onClick={() => window.__BARSOOM__?.setAltitude(level.metres, true)}>{level.label}</button>)}</div>
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
-      <footer className="mission-footer"><span>NASA VIKING ALBEDO · MOLA 16 PPD RELIEF</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL SURFACE FIELD ACTIVE" : "GLOBAL TERRAIN STREAM NOMINAL"}</span><span>ORBITAL IMAGERY / PROCEDURAL SURFACE</span></footer>
+      <footer className="mission-footer"><span>VIKING ALBEDO · MOLA 16 PPD / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>NO FTL TRANSFER · RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

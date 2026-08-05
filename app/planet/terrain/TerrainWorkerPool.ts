@@ -34,7 +34,7 @@ type WorkerSlot = {
 // Public workers are not fingerprinted by Vite. Keep this in lockstep with
 // public/workers/terrain-worker.js so a new geometry algorithm always gets a
 // new browser cache key and an old cached worker can never masquerade as new.
-export const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v4";
+export const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v8";
 
 export class TerrainWorkerPool {
   private nextJobId = 1;

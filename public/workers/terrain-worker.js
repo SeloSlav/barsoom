@@ -1,6 +1,6 @@
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 const PLANET_SEED = 0x4d415253;
-const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v4";
+const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v8";
 const DETAIL_OCTAVES = [
   [38, 310],
   [91, 142],
@@ -228,6 +228,11 @@ function generate(message) {
   const tileUv = new Float32Array(vertexCount * 2);
   const surface = new Float32Array(vertexCount);
   const count = 2 ** key.lod;
+  // Skirts only need to cover the spacing between adjacent vertices. Keeping
+  // the former 140 m minimum at LOD 18 turned an otherwise sub-metre seam into
+  // a visible rectangular canyon beside the playable patch.
+  const localSkirtM = Math.min(skirtM, Math.max(0.35,
+    (MARS_REFERENCE_RADIUS_M * 2 / count) / segments * 0.12));
   const u0 = -1 + 2 * key.x / count;
   const v0 = -1 + 2 * key.y / count;
   const size = 2 / count;
@@ -235,6 +240,40 @@ function generate(message) {
   const centerBase = sampleBase(base, u0 + size * 0.5, v0 + size * 0.5);
   const centerHeight = centerBase.height + terrainDetailHeightForLod(centerDirection, key.lod);
   const center = centerDirection.map((component) => component * (MARS_REFERENCE_RADIUS_M + centerHeight));
+
+  // Build the exact parent mesh under this child. A radial height delta is not
+  // enough to join a tessellated cube-sphere: the odd child-edge vertices must
+  // land on the parent's straight triangles, not merely sample its height
+  // function at the same direction. This interpolation is the crack-free
+  // geomorph target used both during transitions and along steady LOD edges.
+  let parentGrid = null;
+  let parentU0 = 0;
+  let parentV0 = 0;
+  let parentSize = 0;
+  if (key.lod > 0) {
+    const parentLod = key.lod - 1;
+    const parentCount = 2 ** parentLod;
+    const parentX = Math.floor(key.x / 2);
+    const parentY = Math.floor(key.y / 2);
+    parentU0 = -1 + 2 * parentX / parentCount;
+    parentV0 = -1 + 2 * parentY / parentCount;
+    parentSize = 2 / parentCount;
+    parentGrid = new Float64Array(gridSize * gridSize * 3);
+    for (let parentRow = 0; parentRow < gridSize; parentRow += 1) {
+      for (let parentColumn = 0; parentColumn < gridSize; parentColumn += 1) {
+        const parentIndex = parentRow * gridSize + parentColumn;
+        const parentU = parentU0 + parentSize * (parentColumn / segments);
+        const parentV = parentV0 + parentSize * (parentRow / segments);
+        const parentDirection = faceDirection(key.face, parentU, parentV);
+        const parentBase = sampleBase(base, parentU, parentV);
+        const parentHeight = parentBase.height + terrainDetailHeightForLod(parentDirection, parentLod);
+        const parentRadius = MARS_REFERENCE_RADIUS_M + parentHeight;
+        for (let axis = 0; axis < 3; axis += 1) {
+          parentGrid[parentIndex * 3 + axis] = parentDirection[axis] * parentRadius;
+        }
+      }
+    }
+  }
 
   for (let row = 0; row < gridSize; row += 1) {
     for (let column = 0; column < gridSize; column += 1) {
@@ -246,12 +285,39 @@ function generate(message) {
       const direction = faceDirection(key.face, u, v);
       const baseSample = sampleBase(base, u, v);
       const currentHeight = baseSample.height + terrainDetailHeightForLod(direction, key.lod);
-      const parentHeight = baseSample.height + terrainDetailHeightForLod(direction, Math.max(0, key.lod - 1));
       const radius = MARS_REFERENCE_RADIUS_M + currentHeight;
+      const absolute = direction.map((component) => component * radius);
       for (let axis = 0; axis < 3; axis += 1) {
-        positions[index * 3 + axis] = direction[axis] * radius - center[axis];
+        positions[index * 3 + axis] = absolute[axis] - center[axis];
         planetDirections[index * 3 + axis] = direction[axis];
-        morphDelta[index * 3 + axis] = direction[axis] * (currentHeight - parentHeight);
+        morphDelta[index * 3 + axis] = 0;
+      }
+      if (parentGrid) {
+        const parentGridX = Math.max(0, Math.min(segments, (u - parentU0) / parentSize * segments));
+        const parentGridY = Math.max(0, Math.min(segments, (v - parentV0) / parentSize * segments));
+        const parentColumn = Math.min(segments - 1, Math.floor(parentGridX));
+        const parentRow = Math.min(segments - 1, Math.floor(parentGridY));
+        const tx = parentGridX - parentColumn;
+        const ty = parentGridY - parentRow;
+        const a = parentRow * gridSize + parentColumn;
+        const b = a + 1;
+        const c = a + gridSize;
+        const d = c + 1;
+        for (let axis = 0; axis < 3; axis += 1) {
+          let parentAxis;
+          if (tx + ty <= 1) {
+            const av = parentGrid[a * 3 + axis];
+            parentAxis = av +
+              (parentGrid[b * 3 + axis] - av) * tx +
+              (parentGrid[c * 3 + axis] - av) * ty;
+          } else {
+            const dv = parentGrid[d * 3 + axis];
+            parentAxis = dv +
+              (parentGrid[c * 3 + axis] - dv) * (1 - tx) +
+              (parentGrid[b * 3 + axis] - dv) * (1 - ty);
+          }
+          morphDelta[index * 3 + axis] = absolute[axis] - parentAxis;
+        }
       }
       elevations[index] = currentHeight;
       areoidElevations[index] = baseSample.areoid;
@@ -298,7 +364,8 @@ function generate(message) {
   for (let edgeIndex = 0; edgeIndex < edgeSources.length; edgeIndex += 1) {
     const sourceIndex = edgeSources[edgeIndex];
     const index = surfaceCount + edgeIndex;
-    const dynamicSkirt = Math.max(skirtM, Math.abs(elevations[sourceIndex]) * 0.015 + 40);
+    const orbitalReliefSkirtM = key.lod < 8 ? Math.abs(elevations[sourceIndex]) * 0.015 + 40 : 0;
+    const dynamicSkirt = Math.max(localSkirtM, orbitalReliefSkirtM);
     for (let axis = 0; axis < 3; axis += 1) {
       const direction = planetDirections[sourceIndex * 3 + axis];
       positions[index * 3 + axis] = positions[sourceIndex * 3 + axis] - direction * dynamicSkirt;

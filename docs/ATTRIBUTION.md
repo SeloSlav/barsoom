@@ -1,5 +1,17 @@
 # Scientific data and software attribution
 
+## Astronaut
+
+The surface-traverse character is the rigged and animated **Astronaut** from Quaternius's *Ultimate Space Kit*.
+
+- Asset: `public/models/astronaut.glb`
+- Creator: Quaternius
+- License: Creative Commons Zero 1.0 Universal (CC0; attribution not required)
+- Source: https://quaternius.com/packs/ultimatespacekit.html
+- Distribution mirror: https://opengameart.org/content/ultimate-space-kit-by-quaternius
+
+The included rig supplies idle, walk, run, jump and landing animation clips used by the third-person controller.
+
 ## MOLA
 
 Mars macro terrain is derived from the Mars Global Surveyor Mars Orbiter Laser Altimeter Mission Experiment Gridded Data Record:

@@ -149,6 +149,9 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("distributionGgx");
     expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
+    expect(material.fragmentShader).toContain("sampleRandomizedSurfaceDiffuse");
+    expect(material.fragmentShader).toContain("surfaceAntiTile");
+    expect(material.fragmentShader).toContain("surfaceMaterialResponse");
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
     expect(depth.vertexShader).toContain("morphDelta");
@@ -186,6 +189,67 @@ describe("terrain worker geometry", () => {
     }
 
     expect(Math.max(...bakedHeights) - Math.min(...bakedHeights)).toBeGreaterThan(2_990);
+  });
+
+  it("morphs odd child-edge vertices onto the exact parent triangle edge", () => {
+    const segments = 24;
+    const base = {
+      key: { face: "px" as const, lod: 0, x: 0, y: 0 },
+      gridSize: 2,
+      heightsM: new Int16Array(4),
+      areoidM: new Int16Array(4),
+    };
+    const parent = generateTerrainTile({
+      jobId: 30,
+      key: { face: "px", lod: 4, x: 7, y: 9 },
+      base,
+      segments,
+      skirtM: 140,
+    });
+    const child = generateTerrainTile({
+      jobId: 31,
+      key: { face: "px", lod: 5, x: 14, y: 19 },
+      base,
+      segments,
+      skirtM: 140,
+    });
+    const gridSize = segments + 1;
+    const childIndex = 7 * gridSize;
+    const parentA = 15 * gridSize;
+    const parentB = 16 * gridSize;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const morphedChild = child.positions[childIndex * 3 + axis] + child.center[axis] -
+        child.morphDelta[childIndex * 3 + axis];
+      const expectedParent = (
+        parent.positions[parentA * 3 + axis] + parent.center[axis] +
+        parent.positions[parentB * 3 + axis] + parent.center[axis]
+      ) * 0.5;
+      expect(Math.abs(morphedChild - expectedParent)).toBeLessThan(0.15);
+    }
+  });
+
+  it("keeps playable-LOD skirts below one metre instead of forming 140 m walls", () => {
+    const segments = 24;
+    const geometry = generateTerrainTile({
+      jobId: 32,
+      key: { face: "px", lod: 18, x: 131_072, y: 131_072 },
+      base: {
+        key: { face: "px", lod: 0, x: 0, y: 0 },
+        gridSize: 2,
+        heightsM: new Int16Array(4),
+        areoidM: new Int16Array(4),
+      },
+      segments,
+      skirtM: 140,
+    });
+    const skirtIndex = (segments + 1) ** 2;
+    const skirtDepth = Math.hypot(
+      geometry.positions[skirtIndex * 3] - geometry.positions[0],
+      geometry.positions[skirtIndex * 3 + 1] - geometry.positions[1],
+      geometry.positions[skirtIndex * 3 + 2] - geometry.positions[2],
+    );
+    expect(skirtDepth).toBeGreaterThan(0.3);
+    expect(skirtDepth).toBeLessThan(1);
   });
 
   it("restores byte-identical terrain after leaving a tile and returning", () => {

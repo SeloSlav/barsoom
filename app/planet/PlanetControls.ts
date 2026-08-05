@@ -62,7 +62,8 @@ export class PlanetControls {
   private readonly scratchD = new THREE.Vector3();
   private readonly yawQuaternion = new THREE.Quaternion();
   private readonly pitchQuaternion = new THREE.Quaternion();
-  private zoomAnchor: THREE.Vector3 | null = null;
+  private transientZoomAnchor: THREE.Vector3 | null = null;
+  private lockedZoomAnchor: THREE.Vector3 | null = null;
   private cameraDistanceM = 10_000_000 + CAMERA_SURFACE_EPSILON_M;
   private desiredCameraDistanceM = this.cameraDistanceM;
   private desiredAltitudeM = 10_000_000;
@@ -70,6 +71,7 @@ export class PlanetControls {
   private automaticApproachEnabled = true;
   private automaticApproachPitchRad = 0;
   private drag: PointerDrag | null = null;
+  private enabled = true;
   private disposed = false;
 
   constructor(
@@ -107,14 +109,20 @@ export class PlanetControls {
   }
 
   private onPointerDown = (event: PointerEvent) => {
+    if (!this.enabled) return;
     this.updateCursor(event);
     if (event.button !== 1 && event.button !== 2) return;
     event.preventDefault();
+    if (event.button === 2) {
+      this.lockedZoomAnchor = null;
+      this.transientZoomAnchor = null;
+    }
     this.drag = { id: event.pointerId, button: event.button, lastX: event.clientX, lastY: event.clientY };
     this.canvas.setPointerCapture(event.pointerId);
   };
 
   private onPointerMove = (event: PointerEvent) => {
+    if (!this.enabled) return;
     this.updateCursor(event);
     if (!this.drag || this.drag.id !== event.pointerId) return;
     const dx = event.clientX - this.drag.lastX;
@@ -202,9 +210,13 @@ export class PlanetControls {
   }
 
   private distanceForAltitude(altitudeM: number) {
-    let cameraRadius = MARS_REFERENCE_RADIUS_M + altitudeM + CAMERA_SURFACE_EPSILON_M;
+    // Begin on the local terrain radius, not the datum sphere. Starting at the
+    // datum can put the first quadratic target kilometres below a high or low
+    // focus point; with only two corrections the camera then settles far above
+    // the requested AGL on real MOLA slopes.
+    let cameraRadius = this.focusAbsolute.length() + altitudeM + CAMERA_SURFACE_EPSILON_M;
     let distance = this.cameraDistanceM;
-    for (let iteration = 0; iteration < 2; iteration += 1) {
+    for (let iteration = 0; iteration < 5; iteration += 1) {
       const projected = this.focusAbsolute.dot(this.orbitDirection);
       const discriminant = Math.max(
         0,
@@ -213,9 +225,32 @@ export class PlanetControls {
       distance = Math.max(CAMERA_SURFACE_EPSILON_M, -projected + Math.sqrt(discriminant));
       const position = this.scratchD.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, distance);
       const direction = this.scratchC.copy(position).normalize();
-      cameraRadius = MARS_REFERENCE_RADIUS_M + this.terrainHeight(direction) + altitudeM + CAMERA_SURFACE_EPSILON_M;
+      const nextRadius = MARS_REFERENCE_RADIUS_M + this.terrainHeight(direction) + altitudeM + CAMERA_SURFACE_EPSILON_M;
+      if (Math.abs(nextRadius - cameraRadius) < 0.01) break;
+      cameraRadius = nextRadius;
     }
-    return distance;
+    const aglAtDistance = (candidateDistanceM: number) =>
+      this.cameraAltitudeAtDistance(candidateDistanceM) - CAMERA_SURFACE_EPSILON_M;
+    if (Math.abs(aglAtDistance(distance) - altitudeM) < 0.02) return distance;
+
+    // Rugged real terrain is not a concentric sphere, so fixed-point radius
+    // correction can oscillate between a crater floor and rim. Bracket the
+    // requested AGL along the actual camera ray and finish with a bounded
+    // binary solve. This path only runs when the cheap spherical solve misses.
+    let lower = CAMERA_SURFACE_EPSILON_M;
+    let upper = Math.max(distance, altitudeM + 10);
+    let upperAltitude = aglAtDistance(upper);
+    for (let expansion = 0; expansion < 12 && upperAltitude < altitudeM; expansion += 1) {
+      lower = upper;
+      upper *= 2;
+      upperAltitude = aglAtDistance(upper);
+    }
+    for (let iteration = 0; iteration < 30; iteration += 1) {
+      const midpoint = (lower + upper) * 0.5;
+      if (aglAtDistance(midpoint) < altitudeM) lower = midpoint;
+      else upper = midpoint;
+    }
+    return (lower + upper) * 0.5;
   }
 
   private finishGesture() {
@@ -225,10 +260,11 @@ export class PlanetControls {
       this.cameraAltitudeAtDistance(this.cameraDistanceM) - CAMERA_SURFACE_EPSILON_M,
     );
     this.desiredAltitudeM = this.altitudeM;
-    this.zoomAnchor = null;
+    this.transientZoomAnchor = null;
   }
 
   private onWheel = (event: WheelEvent) => {
+    if (!this.enabled) return;
     event.preventDefault();
     this.updateCursor(event);
     // WheelEvent constants are 1 (line) and 2 (page). Using the values keeps
@@ -237,8 +273,9 @@ export class PlanetControls {
     const previous = this.desiredAltitudeM;
     this.desiredAltitudeM = nonlinearZoomAltitude(this.desiredAltitudeM, event.deltaY * modeScale);
     this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
-    if (this.desiredAltitudeM < previous) this.zoomAnchor = this.cursorSurfacePoint();
-    else this.zoomAnchor = null;
+    if (this.lockedZoomAnchor) this.transientZoomAnchor = null;
+    else if (this.desiredAltitudeM < previous) this.transientZoomAnchor = this.cursorSurfacePoint();
+    else this.transientZoomAnchor = null;
   };
 
   private cursorSurfacePoint() {
@@ -248,10 +285,11 @@ export class PlanetControls {
     return hit ? new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z) : null;
   }
 
-  private moveFocusTowardZoomAnchor(amount: number) {
-    if (!this.zoomAnchor) return;
-    this.focusDirection.lerp(this.zoomAnchor, amount).normalize();
-    if (this.focusDirection.angleTo(this.zoomAnchor) < 1e-7) this.zoomAnchor = null;
+  private moveFocusTowardZoomAnchor(anchor: THREE.Vector3, amount: number) {
+    this.focusDirection.lerp(anchor, amount).normalize();
+    if (anchor === this.transientZoomAnchor && this.focusDirection.angleTo(anchor) < 1e-7) {
+      this.transientZoomAnchor = null;
+    }
   }
 
   private updateAutomaticApproach(deltaSeconds: number) {
@@ -301,17 +339,19 @@ export class PlanetControls {
     const distanceDifference = this.desiredCameraDistanceM - this.cameraDistanceM;
     this.cameraDistanceM += distanceDifference * smoothing;
     if (Math.abs(distanceDifference) < 0.001) this.cameraDistanceM = this.desiredCameraDistanceM;
-    if (this.zoomAnchor && this.cameraDistanceM < previousDistanceM) {
+    const zoomAnchor = this.lockedZoomAnchor ?? this.transientZoomAnchor;
+    if (zoomAnchor && this.cameraDistanceM !== previousDistanceM) {
       // In the local planar limit this is the exact target interpolation needed
       // to keep the picked ground point stationary as camera distance changes.
-      // Applying only the realised distance step prevents residual target drift
-      // once smooth zooming has settled.
+      // A signed fraction also preserves the point while zooming out. Applying
+      // only the realised distance step prevents residual target drift once
+      // smooth zooming has settled.
       const fraction = clamp(
         1 - (this.cameraDistanceM + 2.5) / Math.max(previousDistanceM + 2.5, 2.5),
-        0,
+        -0.42,
         0.42,
       );
-      this.moveFocusTowardZoomAnchor(fraction);
+      this.moveFocusTowardZoomAnchor(zoomAnchor, fraction);
     }
 
     this.updateFocusAbsolute();
@@ -376,8 +416,26 @@ export class PlanetControls {
     this.updateFocusAbsolute();
     this.altitudeM = this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
     this.cameraDistanceM = this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
-    this.zoomAnchor = null;
+    this.transientZoomAnchor = null;
+    this.lockedZoomAnchor = null;
     this.prefetch(this.focusDirection);
+  }
+
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    if (enabled || !this.drag) return;
+    if (this.canvas.hasPointerCapture(this.drag.id)) this.canvas.releasePointerCapture(this.drag.id);
+    this.drag = null;
+  }
+
+  setZoomAnchor(direction: Vec3 | null) {
+    this.transientZoomAnchor = null;
+    if (!direction) {
+      this.lockedZoomAnchor = null;
+      return;
+    }
+    const anchor = new THREE.Vector3(direction.x, direction.y, direction.z);
+    this.lockedZoomAnchor = anchor.lengthSq() > 1e-12 ? anchor.normalize() : null;
   }
 
   setAltitude(altitudeM: number, immediate = false) {
@@ -399,6 +457,7 @@ export class PlanetControls {
       orbitDirection: { x: this.orbitDirection.x, y: this.orbitDirection.y, z: this.orbitDirection.z },
       automaticApproachEnabled: this.automaticApproachEnabled,
       approachPitchDeg: THREE.MathUtils.radToDeg(this.automaticApproachPitchRad),
+      zoomAnchorLocked: this.lockedZoomAnchor !== null,
     };
   }
 

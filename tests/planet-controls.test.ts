@@ -254,6 +254,46 @@ describe("PlanetControls integration", () => {
     expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThanOrEqual(MARS_REFERENCE_RADIUS_M);
   });
 
+  it("locks inward and outward zoom to a selected surface point until right click", () => {
+    const { canvas, camera, controls } = trackedHarness();
+    controls.setAltitude(10_000_000, true);
+    let frame = controls.update(1 / 60);
+
+    const anchorRay = new THREE.Vector3(0.2, -0.08, 0.4).unproject(camera).normalize();
+    const hitDistance = raySphereIntersection(frame.cameraAbsolute, anchorRay, MARS_REFERENCE_RADIUS_M);
+    expect(hitDistance).not.toBeNull();
+    const anchorDirection = new THREE.Vector3(
+      frame.cameraAbsolute.x,
+      frame.cameraAbsolute.y,
+      frame.cameraAbsolute.z,
+    ).addScaledVector(anchorRay, hitDistance!).normalize();
+    const projectAnchor = (current: ReturnType<PlanetControls["update"]>) =>
+      anchorDirection.clone().multiplyScalar(MARS_REFERENCE_RADIUS_M).sub(new THREE.Vector3(
+        current.cameraAbsolute.x,
+        current.cameraAbsolute.y,
+        current.cameraAbsolute.z,
+      )).project(camera);
+
+    controls.setZoomAnchor(anchorDirection);
+    expect(controls.getState().zoomAnchorLocked).toBe(true);
+    const screenPosition = projectAnchor(frame);
+    canvas.emit("wheel", { clientX: 700, clientY: 80, deltaY: -700, deltaMode: 0 });
+    for (let index = 0; index < 360; index += 1) frame = controls.update(1 / 60);
+    const zoomedInPosition = projectAnchor(frame);
+    expect(Math.abs(zoomedInPosition.x - screenPosition.x)).toBeLessThan(0.01);
+    expect(Math.abs(zoomedInPosition.y - screenPosition.y)).toBeLessThan(0.01);
+
+    canvas.emit("wheel", { clientX: 100, clientY: 520, deltaY: 700, deltaMode: 0 });
+    for (let index = 0; index < 360; index += 1) frame = controls.update(1 / 60);
+    const zoomedOutPosition = projectAnchor(frame);
+    expect(Math.abs(zoomedOutPosition.x - screenPosition.x)).toBeLessThan(0.01);
+    expect(Math.abs(zoomedOutPosition.y - screenPosition.y)).toBeLessThan(0.01);
+
+    pointer(canvas, "pointerdown", 2, 400, 300);
+    pointer(canvas, "pointerup", 2, 400, 300);
+    expect(controls.getState().zoomAnchorLocked).toBe(false);
+  });
+
   it.each([30_000_000, 10_000_000, 1_000_000, 100_000, 10_000, 1_000, 100, 0])(
     "resolves the visual-verification altitude %s m against local ground",
     (altitudeM) => {
@@ -281,5 +321,15 @@ describe("PlanetControls integration", () => {
     for (let frame = 0; frame < 90; frame += 1) surface = controls.update(1 / 60);
     expect(surface.altitudeM).toBeCloseTo(SURFACE_EYE_HEIGHT_M, 3);
     expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThan(MARS_REFERENCE_RADIUS_M - 7_001);
+  });
+
+  it("converges to the requested AGL across a strongly varying local slope", () => {
+    const { controls } = trackedHarness((direction) => direction.y * 500_000);
+    controls.setLocation(0, 0, 100);
+    let frame = controls.update(1 / 60);
+    for (let index = 0; index < 180; index += 1) frame = controls.update(1 / 60);
+    expect(frame.desiredAltitudeM).toBe(100);
+    expect(frame.altitudeM).toBeCloseTo(100, 1);
+    expect(controls.getState().approachPitchDeg).toBeGreaterThan(75);
   });
 });

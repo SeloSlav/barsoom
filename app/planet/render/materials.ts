@@ -91,7 +91,14 @@ const terrainVertex = /* glsl */ `
   varying vec3 vStableMetres;
 
   void main() {
-    vec3 morphed = position - morphDelta * (1.0 - uMorph);
+    float edgeDistance = min(min(tileUv.x, 1.0 - tileUv.x), min(tileUv.y, 1.0 - tileUv.y));
+    float boundaryMorph = 1.0 - step(0.00001, edgeDistance);
+    // Every surface edge resolves to its parent height. With the view-centre
+    // transition rings kept 2:1 balanced, a fine edge therefore lands exactly
+    // on the adjacent coarse mesh instead of exposing the safety skirt as a
+    // rectangular cliff in the playable view.
+    float morphWeight = max(1.0 - uMorph, boundaryMorph);
+    vec3 morphed = position - morphDelta * morphWeight;
     vec4 world = modelMatrix * vec4(morphed, 1.0);
     vWorldPosition = world.xyz;
     vNormal = normalize(mat3(modelMatrix) * normal);
@@ -152,6 +159,12 @@ const terrainFragment = /* glsl */ `
     p = fract(p * 0.1031);
     p += dot(p, p.yzx + 33.33);
     return fract((p.x + p.y) * p.z);
+  }
+
+  vec2 hash22(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.xx + p3.yz) * p3.zy);
   }
 
   float valueNoise(vec3 p) {
@@ -223,10 +236,35 @@ const terrainFragment = /* glsl */ `
     return weights / max(weights.x + weights.y + weights.z, 0.0001);
   }
 
-  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights) {
-    vec3 x = texture2D(uSurfaceDiffuse, metres.yz / 2.4).rgb;
-    vec3 y = texture2D(uSurfaceDiffuse, metres.xz / 2.4).rgb;
-    vec3 z = texture2D(uSurfaceDiffuse, metres.xy / 2.4).rgb;
+  vec3 sampleRandomizedSurfaceDiffuse(vec2 projectedMetres, float antiTile) {
+    vec2 textureUv = projectedMetres / 2.4;
+    if (antiTile < 0.001) return texture2D(uSurfaceDiffuse, textureUv).rgb;
+
+    // Blend four deterministic phase offsets over broad, world-anchored
+    // patches. Neighbouring patches share the same samples at their boundary,
+    // so the photographed detail remains continuous without exposing its
+    // original 2.4 m repeat lattice in wider surface views.
+    vec2 patchUv = projectedMetres / 6.7;
+    vec2 patchCell = floor(patchUv);
+    vec2 patchBlend = fract(patchUv);
+    patchBlend = patchBlend * patchBlend * (3.0 - 2.0 * patchBlend);
+    vec3 lowerLeft = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell)).rgb;
+    vec3 lowerRight = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(1.0, 0.0))).rgb;
+    vec3 upperLeft = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(0.0, 1.0))).rgb;
+    vec3 upperRight = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(1.0, 1.0))).rgb;
+    vec3 randomized = mix(
+      mix(lowerLeft, lowerRight, patchBlend.x),
+      mix(upperLeft, upperRight, patchBlend.x),
+      patchBlend.y
+    );
+    if (antiTile > 0.999) return randomized;
+    return mix(texture2D(uSurfaceDiffuse, textureUv).rgb, randomized, antiTile);
+  }
+
+  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights, float antiTile) {
+    vec3 x = sampleRandomizedSurfaceDiffuse(metres.yz, antiTile);
+    vec3 y = sampleRandomizedSurfaceDiffuse(metres.xz, antiTile);
+    vec3 z = sampleRandomizedSurfaceDiffuse(metres.xy, antiTile);
     return x * weights.x + y * weights.y + z * weights.z;
   }
 
@@ -305,6 +343,7 @@ const terrainFragment = /* glsl */ `
     albedo *= mix(0.63, 1.0, vSurfaceMask);
 
     float surfacePbrBlend = 0.0;
+    float surfaceMaterialResponse = 0.0;
     float mappedRoughness = 0.94;
     vec3 mappedNormal = normal;
     if (uTileLod > 12.0 && uCameraAltitude < 9000.0) {
@@ -312,10 +351,12 @@ const terrainFragment = /* glsl */ `
       surfacePbrBlend = smoothstep(13.5, 16.5, uTileLod) *
         (1.0 - smoothstep(350.0, 7000.0, uCameraAltitude)) *
         (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
+      float surfaceAntiTile = smoothstep(5.0, 22.0, uCameraAltitude);
+      surfaceMaterialResponse = surfacePbrBlend * (1.0 - smoothstep(9.0, 34.0, uCameraAltitude));
       vec3 textureWeights = triplanarWeights(normal);
-      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights);
-      vec3 martianRock = photographedRock * vec3(0.96, 0.48, 0.30);
-      martianRock *= 0.82 + macro * 0.24;
+      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights, surfaceAntiTile);
+      vec3 martianRock = photographedRock * vec3(1.10, 0.67, 0.46);
+      martianRock *= 0.88 + macro * 0.22;
       albedo = mix(albedo, martianRock, surfacePbrBlend * (1.0 - frostWeight));
       mappedRoughness = sampleSurfaceRoughness(vStableMetres, textureWeights);
       mappedNormal = sampleSurfaceNormal(vStableMetres, normal, textureWeights);
@@ -325,13 +366,18 @@ const terrainFragment = /* glsl */ `
     float latitudeRadians = asin(clamp(radial.y, -1.0, 1.0));
     vec2 orbitalUv = vec2(fract(longitude / 6.28318530718 + 0.5), latitudeRadians / 3.14159265359 + 0.5);
     vec3 orbitalAlbedo = texture2D(uOrbitalTexture, orbitalUv).rgb;
-    float orbitalBlend = smoothstep(45000.0, 550000.0, uCameraAltitude);
-    albedo = mix(albedo, orbitalAlbedo * 0.91, orbitalBlend);
+    // Retain the actual Viking geography deep into the regional descent, then
+    // hand it to procedural/PBR detail over the final kilometre. The former
+    // 14 km cutoff discarded the real crater image exactly where users were
+    // trying to recognise and enter it.
+    float orbitalBlend = smoothstep(600.0, 13500.0, uCameraAltitude);
+    vec3 orbitalDetailed = orbitalAlbedo * 0.94 * (0.90 + regional * 0.16 + grain * 0.05);
+    albedo = mix(albedo, orbitalDetailed, orbitalBlend);
 
     float roughness = mix(${MATERIAL_CONFIG.regolith.roughness.toFixed(3)}, ${MATERIAL_CONFIG.basalt.roughness.toFixed(3)}, basaltWeight);
     roughness = mix(roughness, ${MATERIAL_CONFIG.frost.roughness.toFixed(3)}, frostWeight);
     roughness = clamp(roughness + (fineGrain - 0.5) * 0.12 * grainVisibility - pebbles * 0.08, 0.48, 0.99);
-    roughness = mix(roughness, clamp(mappedRoughness, 0.58, 0.99), surfacePbrBlend * (1.0 - frostWeight));
+    roughness = mix(roughness, clamp(mappedRoughness, 0.58, 0.99), surfaceMaterialResponse * (1.0 - frostWeight));
     vec3 orbitalMicro = vec3(
       valueNoise(radial * 6200.0 + vec3(0.13,0,0)),
       valueNoise(radial * 6200.0 + vec3(0,0.19,0)),
@@ -347,7 +393,7 @@ const terrainFragment = /* glsl */ `
     }
     metreMicro -= radial * dot(metreMicro, radial);
     normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
-    normal = normalize(mix(normal, mappedNormal, surfacePbrBlend * 0.72 * (1.0 - frostWeight)));
+    normal = normalize(mix(normal, mappedNormal, surfaceMaterialResponse * 0.72 * (1.0 - frostWeight)));
 
     vec3 sun = normalize(uSunDirection);
     float ndl = max(dot(normal, sun), 0.0);
@@ -377,8 +423,10 @@ const terrainFragment = /* glsl */ `
     vec3 specular = distribution * geometry * fresnel / max(4.0 * ndv * ndl, 0.001);
     vec3 diffuse = (vec3(1.0) - fresnel) * albedo / 3.14159265;
     float cavity = clamp(0.72 + regional * 0.16 + metreVariation * 0.12, 0.52, 1.0);
-    vec3 direct = (diffuse + specular) * ndl * 2.15 * surfaceShadow;
-    vec3 skyBounce = albedo * (0.038 + 0.058 * daylight) * cavity;
+    vec3 direct = (diffuse + specular) * ndl * 2.35 * surfaceShadow;
+    // Mars has a bright dusty sky even when the direct sun is low. This fill
+    // preserves readable rock and terrain form without flattening cast shadows.
+    vec3 skyBounce = albedo * (0.075 + 0.105 * daylight) * cavity;
     vec3 colour = direct + skyBounce;
     colour += vec3(0.16, 0.055, 0.025) * albedo * 0.018 * (1.0 - daylight);
 
@@ -460,11 +508,14 @@ export function createTerrainMaterial(): TerrainMaterial {
 
 const terrainShadowVertex = /* glsl */ `
   attribute vec3 morphDelta;
+  attribute vec2 tileUv;
   attribute float surfaceMask;
   uniform float uMorph;
   varying float vSurfaceMask;
   void main() {
-    vec3 morphed = position - morphDelta * (1.0 - uMorph);
+    float edgeDistance = min(min(tileUv.x, 1.0 - tileUv.x), min(tileUv.y, 1.0 - tileUv.y));
+    float boundaryMorph = 1.0 - step(0.00001, edgeDistance);
+    vec3 morphed = position - morphDelta * max(1.0 - uMorph, boundaryMorph);
     vSurfaceMask = surfaceMask;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(morphed, 1.0);
   }
