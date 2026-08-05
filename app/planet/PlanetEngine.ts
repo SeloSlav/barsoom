@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { BarsoomAudio } from "../audio/BarsoomAudio";
 import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
-import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
+import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsMoonState, type MarsSkyState } from "./ephemeris";
 import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
@@ -14,8 +14,10 @@ import { randomMarsDaylightDirection, SurfaceTraverseController } from "./Surfac
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
+export type ObservedBody = "Mars" | MarsMoonState["name"];
+
 export type PlanetEngineApi = {
-  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface" };
+  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody };
   getSpacemanLocation: () => { latitudeDeg: number; longitudeDeg: number; headingRad: number } | null;
   setLocation: (latitudeDeg: number, longitudeDeg: number, altitudeM?: number) => void;
   setAltitude: (altitudeM: number, immediate?: boolean) => void;
@@ -32,6 +34,7 @@ export type PlanetEngineApi = {
   getAudioMuted: () => boolean;
   setAudioMuted: (muted: boolean) => void;
   setNarrationActive: (active: boolean) => void;
+  focusBody: (body: ObservedBody) => void;
 };
 
 declare global {
@@ -41,6 +44,7 @@ declare global {
 }
 
 const LOCAL_PROXY_COHERENCE_GRACE_S = 3;
+const MOON_CAMERA_STANDOFF_RADII = 3.1;
 
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
@@ -68,6 +72,10 @@ export class PlanetEngine {
   private readonly selection: THREE.Group;
   private readonly viewportSize = new THREE.Vector2();
   private readonly selectionReferenceNormal = new THREE.Vector3(0, 0, 1);
+  private readonly moonCameraAbsolute = new THREE.Vector3();
+  private readonly moonFocusDirection = new THREE.Vector3();
+  private readonly moonTargetRelative = new THREE.Vector3();
+  private readonly moonViewUp = new THREE.Vector3();
   private selectionDirection: THREE.Vector3 | null = null;
   private pointerDown: { x: number; y: number } | null = null;
   private controlState!: PlanetControlState;
@@ -86,6 +94,7 @@ export class PlanetEngine {
   private disposed = false;
   private surfaceEntryRevision = 0;
   private localProxyCoherenceLossSeconds = 0;
+  private observedBody: ObservedBody = "Mars";
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
     tileBoundaries: false,
@@ -238,6 +247,7 @@ export class PlanetEngine {
         ...this.controls.getState(),
         telemetry: this.telemetry,
         controlMode: this.surfaceTraverse.active ? "surface" : "survey",
+        observedBody: this.observedBody,
       }),
       getSpacemanLocation: () => {
         if (!this.surfaceTraverse.active) return null;
@@ -309,6 +319,7 @@ export class PlanetEngine {
       getAudioMuted: () => this.getAudioMuted(),
       setAudioMuted: (muted) => this.setAudioMuted(muted),
       setNarrationActive: (active) => this.audio.setNarrationActive(active),
+      focusBody: (body) => this.focusBody(body),
     };
     this.renderer.setAnimationLoop(this.animate);
   }
@@ -319,6 +330,52 @@ export class PlanetEngine {
 
   setAudioMuted(muted: boolean) {
     this.audio.setMuted(muted);
+  }
+
+  private focusBody(body: ObservedBody) {
+    this.observedBody = body;
+    if (body === "Mars") {
+      this.controls.setEnabled(true);
+      return;
+    }
+    if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+    this.controls.setEnabled(false);
+    this.clearSelection();
+  }
+
+  private updateMoonObservation(body: MarsMoonState["name"]): PlanetControlState {
+    const moon = this.skyState.moons.find((candidate) => candidate.name === body);
+    if (!moon) {
+      this.focusBody("Mars");
+      return this.controls.update(0);
+    }
+    const radiusM = Math.max(...moon.semiAxesM);
+    const standoffM = radiusM * MOON_CAMERA_STANDOFF_RADII;
+    this.moonFocusDirection.set(moon.positionM.x, moon.positionM.y, moon.positionM.z).normalize();
+    this.moonCameraAbsolute
+      .set(moon.positionM.x, moon.positionM.y, moon.positionM.z)
+      .addScaledVector(this.moonFocusDirection, standoffM);
+    this.moonTargetRelative.copy(this.moonFocusDirection).multiplyScalar(-standoffM);
+    this.moonViewUp.set(moon.orbitNormal.x, moon.orbitNormal.y, moon.orbitNormal.z).normalize();
+    this.camera.position.set(0, 0, 0);
+    this.camera.up.copy(this.moonViewUp);
+    this.camera.lookAt(this.moonTargetRelative);
+    this.camera.near = Math.max(1, radiusM * 0.002);
+    this.camera.far = Math.max(50_000_000, this.moonCameraAbsolute.length() + 30_000_000);
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+    const altitudeM = Math.max(0, this.moonCameraAbsolute.length() - MARS_REFERENCE_RADIUS_M);
+    return {
+      cameraAbsolute: { x: this.moonCameraAbsolute.x, y: this.moonCameraAbsolute.y, z: this.moonCameraAbsolute.z },
+      cameraDirection: { x: this.moonFocusDirection.x, y: this.moonFocusDirection.y, z: this.moonFocusDirection.z },
+      focusDirection: { x: this.moonFocusDirection.x, y: this.moonFocusDirection.y, z: this.moonFocusDirection.z },
+      focusAbsolute: { x: moon.positionM.x, y: moon.positionM.y, z: moon.positionM.z },
+      altitudeM,
+      desiredAltitudeM: altitudeM,
+      cameraDistanceM: standoffM,
+      nearM: this.camera.near,
+      farM: this.camera.far,
+    };
   }
 
   private resize() {
@@ -349,7 +406,7 @@ export class PlanetEngine {
     } else {
       this.localProxyCoherenceLossSeconds = 0;
     }
-    this.controlState = this.surfaceTraverse.active
+    const marsControlState = this.surfaceTraverse.active
       ? this.surfaceTraverse.update(deltaSeconds)
       : this.controls.update(deltaSeconds);
     const simulationUtc = new Date(
@@ -359,6 +416,9 @@ export class PlanetEngine {
     // the reconstructed field is phase-locked instead: rotating a directional
     // shadow projection at 60x makes an otherwise stationary ground shimmer.
     this.skyState = calculateMarsSky(simulationUtc);
+    this.controlState = this.observedBody === "Mars"
+      ? marsControlState
+      : this.updateMoonObservation(this.observedBody);
     const renderSkyState = this.localLightingPhaseLock.resolve(
       this.skyState,
       this.controlState.altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM,
@@ -513,7 +573,7 @@ export class PlanetEngine {
   }
 
   private onSelectionPointerDown = (event: PointerEvent) => {
-    if (this.surfaceTraverse.active) return;
+    if (this.surfaceTraverse.active || this.observedBody !== "Mars") return;
     if (event.button === 0) {
       this.pointerDown = { x: event.clientX, y: event.clientY };
     } else if (event.button === 2) {
@@ -522,7 +582,7 @@ export class PlanetEngine {
   };
 
   private onSelectionPointerUp = (event: PointerEvent) => {
-    if (this.surfaceTraverse.active) return;
+    if (this.surfaceTraverse.active || this.observedBody !== "Mars") return;
     if (event.button !== 0 || !this.pointerDown) return;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
     this.pointerDown = null;
@@ -544,7 +604,7 @@ export class PlanetEngine {
   };
 
   private updateSelection() {
-    if (this.surfaceTraverse.active) {
+    if (this.surfaceTraverse.active || this.observedBody !== "Mars") {
       this.selection.visible = false;
       return;
     }
