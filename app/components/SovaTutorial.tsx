@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
   isSovaTutorialId,
@@ -12,6 +12,16 @@ import {
 const VOCALIZER_BARS = Array.from({ length: 14 }, (_, index) => index);
 
 let activeNarration: HTMLAudioElement | null = null;
+
+type TutorialSession = {
+  id: SovaTutorialId;
+  autoPlayDelayMs: number;
+};
+
+type SovaTutorialProps = {
+  libraryVisible: boolean;
+  onCloseLibrary: () => void;
+};
 
 function stopNarration(audio: HTMLAudioElement) {
   audio.pause();
@@ -33,9 +43,10 @@ async function playNarrationExclusive(audio: HTMLAudioElement) {
   }
 }
 
-export function SovaTutorial() {
-  const [currentId, setCurrentId] = useState<SovaTutorialId | null>("telescope");
+export function SovaTutorial({ libraryVisible, onCloseLibrary }: SovaTutorialProps) {
+  const [currentSession, setCurrentSession] = useState<TutorialSession | null>({ id: "telescope", autoPlayDelayMs: 0 });
   const [skipFuture, setSkipFuture] = useState(false);
+  const [seenIds, setSeenIds] = useState<ReadonlySet<SovaTutorialId>>(() => new Set(["telescope"]));
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
@@ -43,23 +54,29 @@ export function SovaTutorial() {
   const skipFutureRef = useRef(false);
   const seenRef = useRef(new Set<SovaTutorialId>(["telescope"]));
 
+  const markSeen = useCallback((id: SovaTutorialId) => {
+    if (seenRef.current.has(id)) return;
+    seenRef.current.add(id);
+    setSeenIds(new Set(seenRef.current));
+  }, []);
+
   useEffect(() => {
     const handleTutorial = (event: Event) => {
       const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
       if (!isSovaTutorialId(id) || skipFutureRef.current || seenRef.current.has(id)) return;
-      seenRef.current.add(id);
+      markSeen(id);
       setProgress(0);
       setPlaying(false);
       setPlaybackBlocked(false);
-      setCurrentId(id);
+      setCurrentSession({ id, autoPlayDelayMs: SOVA_TUTORIALS[id].autoPlayDelayMs });
     };
     window.addEventListener(SOVA_TUTORIAL_EVENT, handleTutorial);
     return () => window.removeEventListener(SOVA_TUTORIAL_EVENT, handleTutorial);
-  }, []);
+  }, [markSeen]);
 
   useEffect(() => {
-    if (!currentId) return;
-    const tutorial = SOVA_TUTORIALS[currentId];
+    if (!currentSession || libraryVisible) return;
+    const tutorial = SOVA_TUTORIALS[currentSession.id];
     const audio = new Audio(tutorial.audioSrc);
     let cancelled = false;
     audio.preload = "auto";
@@ -90,7 +107,7 @@ export function SovaTutorial() {
     audio.addEventListener("ended", markPaused);
     const autoPlayTimer = window.setTimeout(() => {
       void attemptPlayback();
-    }, tutorial.autoPlayDelayMs);
+    }, currentSession.autoPlayDelayMs);
 
     return () => {
       cancelled = true;
@@ -103,17 +120,72 @@ export function SovaTutorial() {
       if (audioRef.current === audio) audioRef.current = null;
       window.__BARSOOM__?.setNarrationActive(false);
     };
-  }, [currentId]);
+  }, [currentSession, libraryVisible]);
 
-  if (!currentId) return null;
-  const tutorial = SOVA_TUTORIALS[currentId];
+  const openTutorial = (id: SovaTutorialId) => {
+    markSeen(id);
+    setProgress(0);
+    setPlaying(false);
+    setPlaybackBlocked(false);
+    setCurrentSession({ id, autoPlayDelayMs: 0 });
+    onCloseLibrary();
+  };
+
+  const resetTutorials = () => {
+    skipFutureRef.current = false;
+    seenRef.current.clear();
+    seenRef.current.add("telescope");
+    setSkipFuture(false);
+    setSeenIds(new Set(["telescope"]));
+    setProgress(0);
+    setPlaying(false);
+    setPlaybackBlocked(false);
+    setCurrentSession({ id: "telescope", autoPlayDelayMs: 0 });
+    onCloseLibrary();
+  };
+
+  if (libraryVisible) {
+    return (
+      <aside id="sova-tutorial-library" className="tutorial-library" role="dialog" aria-modal="false" aria-labelledby="tutorial-library-title">
+        <button className="tutorial-library-close" type="button" onClick={onCloseLibrary} aria-label="Close tutorial library">×</button>
+        <p className="panel-index">SOVA ARCHIVE / MANUAL ACCESS</p>
+        <p className="eyebrow">MISSION TUTORIALS</p>
+        <h2 id="tutorial-library-title">Briefing library</h2>
+        <p className="tutorial-library-intro">Replay any SOVA briefing independently, or reset the sequence so contextual tutorials can appear again.</p>
+        <div className="tutorial-library-list">
+          {Object.values(SOVA_TUTORIALS).map((tutorial) => {
+            const seen = seenIds.has(tutorial.id);
+            return <article className="tutorial-library-entry" key={tutorial.id}>
+              <div>
+                <span>{tutorial.sequence}</span>
+                <h3>{tutorial.title}</h3>
+                <small>{seen ? "HEARD THIS SESSION" : "READY FOR MANUAL PLAYBACK"}</small>
+              </div>
+              <button type="button" onClick={() => openTutorial(tutorial.id)}>{seen ? "REPLAY" : "LISTEN"}</button>
+            </article>;
+          })}
+        </div>
+        <div className="tutorial-library-reset">
+          <div>
+            <strong>RESET TUTORIAL SEQUENCE</strong>
+            <span>Clears skipped and heard status, then starts Briefing 01.</span>
+          </div>
+          <button type="button" onClick={resetTutorials}>RESET &amp; RESTART</button>
+        </div>
+        <span className="sr-only" aria-live="polite">{seenIds.size} of {Object.keys(SOVA_TUTORIALS).length} tutorials heard this session.</span>
+      </aside>
+    );
+  }
+
+  if (!currentSession) return null;
+  const tutorial = SOVA_TUTORIALS[currentSession.id];
 
   const closeTutorial = () => {
     audioRef.current?.pause();
     setProgress(0);
     setPlaying(false);
     setPlaybackBlocked(false);
-    setCurrentId(null);
+    setCurrentSession(null);
   };
 
   const togglePlayback = () => {

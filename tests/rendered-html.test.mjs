@@ -22,6 +22,7 @@ test("server-renders the Barsoom Cauchy Array shell", async () => {
   assert.doesNotMatch(html, /\b(?:MOLA|VIKING)\b/i);
   assert.match(html, /PLANETARY APERTURE/);
   assert.match(html, /AUDIO (?:<!-- -->)?ON/);
+  assert.match(html, /TUTORIALS/);
   assert.match(html, /SOVA \/ ONLINE/);
   assert.match(html, /This is not a live telescope image/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);

@@ -95,6 +95,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
+  const [tutorialLibraryVisible, setTutorialLibraryVisible] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [recoherenceVisible, setRecoherenceVisible] = useState(false);
@@ -217,7 +218,25 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               aria-label={audioMuted ? "Enable Barsoom audio" : "Mute Barsoom audio"}
               aria-pressed={!audioMuted}
             ><i aria-hidden="true" /> AUDIO {audioMuted ? "OFF" : "ON"}</button>
-            <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>CONTROLS <kbd>H</kbd></button>
+            <button
+              className="help-button"
+              type="button"
+              onClick={() => {
+                setTutorialLibraryVisible(false);
+                setHelpVisible((visible) => !visible);
+              }}
+              aria-expanded={helpVisible}
+            >CONTROLS <kbd>H</kbd></button>
+            <button
+              className="tutorials-button"
+              type="button"
+              onClick={() => {
+                setHelpVisible(false);
+                setTutorialLibraryVisible((visible) => !visible);
+              }}
+              aria-expanded={tutorialLibraryVisible}
+              aria-controls="sova-tutorial-library"
+            >TUTORIALS</button>
           </div>
         </div>
       </header>
@@ -279,7 +298,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Press <kbd>~</kbd> to instantiate the observer at that exact coordinate. Right-click once to release the lock and return the solution to cursor-guided focus.</p>
         </>}
       </aside>}
-      <SovaTutorial />
+      <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
       <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY COHERENCE LOST / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>

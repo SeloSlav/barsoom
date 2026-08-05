@@ -11,6 +11,7 @@
 | Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |
 | Toggle help | `H` | Opens or closes the control reference. |
 | Toggle audio | `AUDIO ON/OFF` button | Enables or mutes the ambient score, wind, instrument sonification and astronaut movement sounds. The preference persists in the browser. |
+| Manage tutorials | `TUTORIALS` button | Opens the SOVA briefing library. Each tutorial can be played independently; **Reset & restart** clears session-only skipped/heard state and restarts Briefing 01. |
 
 ## Third-person surface traverse
 
