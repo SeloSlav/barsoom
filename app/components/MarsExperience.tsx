@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
-import { PlanetEngine } from "../planet/PlanetEngine";
+import { PlanetEngine, type ObservedBody } from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
 
 const SIMULATION_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const OBSERVATION_TARGETS: readonly ObservedBody[] = ["Mars", "Phobos", "Deimos"];
 
 function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
   return {
@@ -92,6 +93,7 @@ async function copyTextToClipboard(text: string) {
 
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const bodyMenuRef = useRef<HTMLDivElement>(null);
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
@@ -100,6 +102,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [recoherenceVisible, setRecoherenceVisible] = useState(false);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
+  const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
+  const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
   const coherenceWasLostRef = useRef(false);
   const shareStatusTimeoutRef = useRef<number | null>(null);
 
@@ -140,6 +144,32 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     };
   }, [initialSimulationUtc]);
 
+  useEffect(() => {
+    if (!bodyMenuVisible) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!bodyMenuRef.current?.contains(event.target as Node)) setBodyMenuVisible(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setBodyMenuVisible(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [bodyMenuVisible]);
+
+  const selectObservedBody = (body: ObservedBody) => {
+    setObservedBody(body);
+    setBodyMenuVisible(false);
+    setHelpVisible(false);
+    setTutorialLibraryVisible(false);
+    setObserverAction(null);
+    window.__BARSOOM__?.focusBody(body);
+    canvasRef.current?.focus();
+  };
+
   const shareSpacemanLocation = async () => {
     const location = window.__BARSOOM__?.getSpacemanLocation();
     if (!location) return;
@@ -151,7 +181,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   };
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
-  const surfaceMode = telemetry.controlMode === "surface";
+  const moonMode = observedBody !== "Mars";
+  const surfaceMode = !moonMode && telemetry.controlMode === "surface";
   const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
   const localProxyCoherenceLost = surfaceMode && !telemetry.localProxyCoherent;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
@@ -169,8 +200,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [localProxyCoherenceLost, surfaceMode]);
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}`}>
-      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : "Interactive three-dimensional rendering of Mars"} />
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}`}>
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars"} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
       {localProxyCoherenceLost && <div className="coherence-loss-field" aria-hidden="true" />}
@@ -189,15 +220,35 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       </aside>}
       <header className="mission-header">
         <div className="mission-identity">
-          <div className="brand-lockup">
+          <div className="brand-lockup" ref={bodyMenuRef}>
             <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
             <h1 className="wordmark-row">
-              <span className="wordmark-barsoom">BARSOOM</span>
-              <span className="wordmark-divider" aria-hidden="true">|</span>
-              <span className="wordmark-mars">MARS</span>
+              <button
+                className="wordmark-trigger"
+                type="button"
+                onClick={() => setBodyMenuVisible((visible) => !visible)}
+                aria-expanded={bodyMenuVisible}
+                aria-haspopup="listbox"
+                aria-controls="observation-target-menu"
+              >
+                <span className="wordmark-barsoom">{observedBody.toUpperCase()}</span>
+                <span className="wordmark-divider" aria-hidden="true">|</span>
+                <span className="wordmark-mars">MARS</span>
+                <i className="wordmark-chevron" aria-hidden="true" />
+              </button>
             </h1>
+            {bodyMenuVisible && <ul id="observation-target-menu" className="body-menu" role="listbox" aria-label="Select celestial body">
+              {OBSERVATION_TARGETS.map((body) => <li key={body}>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={body === observedBody}
+                  onClick={() => selectObservedBody(body)}
+                ><span>{body === "Mars" ? "BARSOOM" : body.toUpperCase()}</span><i aria-hidden="true">|</i><b>MARS</b></button>
+              </li>)}
+            </ul>}
           </div>
-          <span className="mission-mode"><i /> {surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED</span>
+          <span className="mission-mode"><i /> {moonMode ? "SATELLITE APERTURE / ORBITAL TRACK LOCKED" : `${surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED`}</span>
         </div>
         <div className="simulation-clock">
           <span>SOURCE EPOCH / UTC</span>
@@ -240,7 +291,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           </div>
         </div>
       </header>
-      <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
+      {!moonMode && <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
         <div className="panel-index">SOLUTION / 01</div>
         <div className="eyebrow">VIRTUAL APERTURE SOLUTION</div>
         <div className="coordinate-grid">
@@ -259,13 +310,13 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
             {shareStatus === "copied" ? "Exact Spaceman location link copied to clipboard." : shareStatus === "error" ? "Could not copy the location link." : ""}
           </span>
         </div>}
-      </section>
-      <section className="altitude-gauge" aria-label="Reconstruction focal height">
+      </section>}
+      {!moonMode && <section className="altitude-gauge" aria-label="Reconstruction focal height">
         <span className="gauge-label">FOCAL<br />STANDOFF</span>
         <div className="gauge-track"><i style={{ height: `${apertureFill}%` }} /><b style={{ bottom: `${apertureFill}%` }} /></div>
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
-      </section>
-      <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>
+      </section>}
+      {!moonMode && <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>}
       {observerAction && !surfaceMode && <aside
         className="observer-action-card"
         style={{ left: observerAction.x, top: observerAction.y }}
@@ -285,21 +336,24 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>
-        <p className="eyebrow">{surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
-        {!surfaceMode && <div className="instrument-principle">
+        <p className="eyebrow">{moonMode ? "SATELLITE TRACK" : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
+        {moonMode ? <div className="instrument-principle">
+          <strong>{observedBody.toUpperCase()} TRACK LOCKED.</strong>
+          <p>The aperture is fixed to a close physical-scale view of {observedBody}. Choose Mars or the other moon from the identity menu to retarget the reconstruction.</p>
+        </div> : !surfaceMode && <div className="instrument-principle">
           <strong>YOU ARE NOT MOVING FASTER THAN LIGHT.</strong>
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
-        {surfaceMode ? <>
+        {!moonMode && (surfaceMode ? <>
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom can exceed the human-scale coherence envelope briefly; if the local proxy cannot recover, the instrument releases it and resumes planetary observation.</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
           <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Press <kbd>~</kbd> to instantiate the observer at that exact coordinate. Right-click once to release the lock and return the solution to cursor-guided focus.</p>
-        </>}
+        </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY COHERENCE LOST / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : localProxyCoherenceLost ? "LOCAL PROXY COHERENCE LOST / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );
