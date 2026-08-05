@@ -7,6 +7,7 @@ import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerra
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
+import { LocalLightingPhaseLock } from "./render/LocalLightingPhaseLock";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
@@ -57,6 +58,7 @@ export class PlanetEngine {
   private readonly atmosphere: AtmosphereRenderer;
   private readonly celestial: CelestialRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
+  private readonly localLightingPhaseLock = new LocalLightingPhaseLock();
   private readonly surfaceTraverse: SurfaceTraverseController;
   private readonly audio: BarsoomAudio;
   private readonly resizeObserver: ResizeObserver;
@@ -280,6 +282,7 @@ export class PlanetEngine {
         this.simulationStartPerformance = performance.now();
         this.simulationRate = rate;
         this.skyState = calculateMarsSky(epoch);
+        this.localLightingPhaseLock.reset();
       },
       instantiateObserver: () => {
         if (!this.surfaceTraverse.active && this.selectionDirection) void this.enterSurfaceTraverse(this.selectionDirection);
@@ -340,21 +343,23 @@ export class PlanetEngine {
     const simulationUtc = new Date(
       this.simulationStartUtc.getTime() + (time - this.simulationStartPerformance) * this.simulationRate,
     );
-    // The model normally advances at 60x real time. Quantizing the Sun to the
-    // former 250 ms sky cadence made its direction (and the whole local shadow
-    // projection) jump by a visible amount four times per second. The
-    // ephemeris calculation is inexpensive, so keep lighting on the render
-    // cadence and let accelerated celestial motion remain continuous.
+    // Keep the accelerated ephemeris continuous in orbit. Close to the surface
+    // the reconstructed field is phase-locked instead: rotating a directional
+    // shadow projection at 60x makes an otherwise stationary ground shimmer.
     this.skyState = calculateMarsSky(simulationUtc);
+    const renderSkyState = this.localLightingPhaseLock.resolve(
+      this.skyState,
+      this.controlState.altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM,
+    );
     const cameraDirection = this.controlState.cameraDirection;
     const daylight = clamp(
-      cameraDirection.x * this.skyState.sunDirection.x +
-        cameraDirection.y * this.skyState.sunDirection.y +
-        cameraDirection.z * this.skyState.sunDirection.z,
+      cameraDirection.x * renderSkyState.sunDirection.x +
+        cameraDirection.y * renderSkyState.sunDirection.y +
+        cameraDirection.z * renderSkyState.sunDirection.z,
       0,
       1,
     );
-    this.updateSurfaceShadows(daylight);
+    this.updateSurfaceShadows(renderSkyState.sunDirection, daylight);
     const viewport = this.renderer.getDrawingBufferSize(this.viewportSize);
     const terrainStats = this.terrain.update(
       this.controlState.cameraAbsolute,
@@ -363,7 +368,7 @@ export class PlanetEngine {
       viewport.y,
       time / 1000,
       this.controlState.altitudeM,
-      this.skyState.sunDirection,
+      renderSkyState.sunDirection,
       this.debug,
     );
     this.surfaceDetails.update(
@@ -371,12 +376,12 @@ export class PlanetEngine {
       this.controlState.cameraDirection,
       this.controlState.altitudeM,
     );
-    this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, this.skyState.sunDirection);
+    this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
     this.updateSelection();
     this.skyCamera.quaternion.copy(this.camera.quaternion);
     this.skyCamera.updateMatrixWorld(true);
     this.celestial.update(
-      this.skyState,
+      renderSkyState,
       viewport.y,
       THREE.MathUtils.degToRad(this.skyCamera.fov),
       this.renderer.getPixelRatio(),
@@ -443,7 +448,7 @@ export class PlanetEngine {
     this.onTelemetry(this.telemetry);
   }
 
-  private updateSurfaceShadows(daylight: number) {
+  private updateSurfaceShadows(sunDirection: MarsSkyState["sunDirection"], daylight: number) {
     const altitudeM = this.controlState.altitudeM;
     const enabled = altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM && daylight > 0.01;
     this.surfaceShadowsEnabled = enabled;
@@ -457,7 +462,7 @@ export class PlanetEngine {
     this.surfaceShadowExtentM = extentM;
     const snap = snappedDirectionalShadowCenter(
       this.controlState.cameraAbsolute,
-      this.skyState.sunDirection,
+      sunDirection,
       extentM,
       RENDER_CONFIG.surfaceShadowMapSize,
       this.shadowSnap,
@@ -578,6 +583,9 @@ export class PlanetEngine {
     await this.terrain.prefetch(destination);
     if (this.disposed || entryRevision !== this.surfaceEntryRevision) return;
     this.surfaceTraverse.teleportTo(destination);
+    // A retargeted local field receives a fresh, internally coherent lighting
+    // solution on its next frame, then remains stable at the new coordinate.
+    this.localLightingPhaseLock.reset();
     this.audio.setSurfaceMode(true);
     this.audio.playObserverTransition(true);
     emitSovaTutorial("spaceman");
@@ -591,6 +599,7 @@ export class PlanetEngine {
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);
     this.surfaceTraverse.deactivate();
+    this.localLightingPhaseLock.reset();
     this.audio.setSurfaceMode(false);
     this.audio.playObserverTransition(false);
     this.controls.setEnabled(true);

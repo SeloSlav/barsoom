@@ -174,6 +174,13 @@ const terrainFragment = /* glsl */ `
     return fract((p.x + p.y) * p.z);
   }
 
+  float stableSurfaceDither(vec3 metres) {
+    // A two-centimetre, planet-anchored mask stays attached to the regolith as
+    // the camera moves. Screen-pixel noise made LOD fades and the final grade
+    // crawl independently over the ground.
+    return hash31(floor(mod(metres, 4096.0) * 50.0));
+  }
+
   vec2 hash22(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
     p3 += dot(p3, p3.yzx + 33.33);
@@ -355,7 +362,7 @@ const terrainFragment = /* glsl */ `
   }
 
   void main() {
-    float dither = hash31(vec3(gl_FragCoord.xy, 0.0));
+    float dither = stableSurfaceDither(vStableMetres);
     if (uFade < 0.999) {
       if (uFadeIn > 0.5 && dither > uFade) discard;
       if (uFadeIn < 0.5 && dither <= 1.0 - uFade) discard;
@@ -518,8 +525,8 @@ const terrainFragment = /* glsl */ `
     colour = mix(colour, hazeColour, haze * (0.42 + 0.58 * daylight));
 
     // A tiny linear-space finish opens the low mid-tones without lifting
-    // true night-side black. It reuses the LOD dither already computed for
-    // this fragment, so the grade adds no texture read or full-screen pass.
+    // true night-side black. It reuses the planet-anchored LOD dither already
+    // computed for this fragment, so the grade adds no texture read or pass.
     float finishingLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     float visibleFinish = smoothstep(0.0025, 0.028, finishingLuma);
     float shadowFinish = (1.0 - smoothstep(0.045, 0.26, finishingLuma)) * visibleFinish;
@@ -629,7 +636,9 @@ const terrainShadowVertex = /* glsl */ `
   attribute float surfaceMask;
   uniform float uMorph;
   uniform vec4 uEdgeMorph;
+  uniform vec3 uTileOriginModulo;
   varying float vSurfaceMask;
+  varying vec3 vStableMetres;
   void main() {
     float westEdge = 1.0 - step(0.00001, tileUv.x);
     float eastEdge = 1.0 - step(0.00001, 1.0 - tileUv.x);
@@ -641,15 +650,35 @@ const terrainShadowVertex = /* glsl */ `
     );
     vec3 morphed = position - morphDelta * max(1.0 - uMorph, stitchedEdgeMorph);
     vSurfaceMask = surfaceMask;
+    vStableMetres = uTileOriginModulo + morphed;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(morphed, 1.0);
   }
 `;
 
 const terrainShadowFragment = /* glsl */ `
   precision highp float;
+  uniform float uFade;
+  uniform float uFadeIn;
   varying float vSurfaceMask;
+  varying vec3 vStableMetres;
+
+  float hash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+  }
+
+  float stableSurfaceDither(vec3 metres) {
+    return hash31(floor(mod(metres, 4096.0) * 50.0));
+  }
+
   void main() {
     if (vSurfaceMask < 0.5) discard;
+    if (uFade < 0.999) {
+      float dither = stableSurfaceDither(vStableMetres);
+      if (uFadeIn > 0.5 && dither > uFade) discard;
+      if (uFadeIn < 0.5 && dither <= 1.0 - uFade) discard;
+    }
     gl_FragColor = vec4(1.0);
   }
 `;
@@ -658,6 +687,9 @@ export type TerrainShadowMaterial = THREE.ShaderMaterial & {
   uniforms: {
     uMorph: { value: number };
     uEdgeMorph: { value: THREE.Vector4 };
+    uTileOriginModulo: { value: THREE.Vector3 };
+    uFade: { value: number };
+    uFadeIn: { value: number };
   };
 };
 
@@ -669,6 +701,9 @@ export function createTerrainShadowMaterial(): TerrainShadowMaterial {
     uniforms: {
       uMorph: { value: 1 },
       uEdgeMorph: { value: new THREE.Vector4() },
+      uTileOriginModulo: { value: new THREE.Vector3() },
+      uFade: { value: 1 },
+      uFadeIn: { value: 1 },
     },
     depthTest: true,
     depthWrite: true,

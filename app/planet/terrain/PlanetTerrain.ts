@@ -515,6 +515,13 @@ export class PlanetTerrain {
       const renderState = mesh.userData.renderState as TileRenderState;
       this.shadowMaterial.uniforms.uMorph.value = renderState.morph;
       this.shadowMaterial.uniforms.uEdgeMorph.value.fromArray(renderState.edgeMorph ?? [0, 0, 0, 0]);
+      this.shadowMaterial.uniforms.uTileOriginModulo.value.set(
+        positiveModulo(node.center!.x, MATERIAL_PERIOD_M),
+        positiveModulo(node.center!.y, MATERIAL_PERIOD_M),
+        positiveModulo(node.center!.z, MATERIAL_PERIOD_M),
+      );
+      this.shadowMaterial.uniforms.uFade.value = renderState.fade;
+      this.shadowMaterial.uniforms.uFadeIn.value = renderState.fadeIn ? 1 : 0;
       this.shadowMaterial.uniformsNeedUpdate = true;
     };
     this.scene.add(mesh);
