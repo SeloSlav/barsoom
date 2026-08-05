@@ -33,7 +33,7 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 - 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric planet vectors transformed into the IAU Mars body frame.
 - Dedicated middle-orbit, right-pan, left-select, cursor-wheel zoom controls and a live orbital HUD/debug overlay.
 
-See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pipelines](docs/DATA_PIPELINES.md), [attribution](docs/ATTRIBUTION.md), and [performance notes](docs/PERFORMANCE.md).
+See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pipelines](docs/DATA_PIPELINES.md), [attribution](docs/ATTRIBUTION.md), [performance notes](docs/PERFORMANCE.md), and the [acceptance verification matrix](docs/VERIFICATION.md).
 
 ## Debugging
 

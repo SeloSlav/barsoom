@@ -21,5 +21,6 @@ window.__BARSOOM__.setDebug("tileBoundaries", true)
 window.__BARSOOM__.querySurface(latitudeDeg, longitudeDeg)
 window.__BARSOOM__.setTerminator(altitudeM)
 window.__BARSOOM__.setNightSide(altitudeM)
+window.__BARSOOM__.setSimulationUtc("2032-04-17T05:23:11.000Z", 0)
 window.__BARSOOM__.getState()
 ```

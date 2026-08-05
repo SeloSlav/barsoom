@@ -17,6 +17,7 @@ export type PlanetEngineApi = {
   querySurface: (latitudeDeg: number, longitudeDeg: number) => Promise<SurfaceQuery>;
   setNightSide: (altitudeM?: number) => void;
   setTerminator: (altitudeM?: number) => void;
+  setSimulationUtc: (utcIso: string, rate?: number) => void;
 };
 
 declare global {
@@ -43,9 +44,9 @@ export class PlanetEngine {
   private pointerDown: { x: number; y: number } | null = null;
   private controlState!: PlanetControlState;
   private skyState: MarsSkyState;
-  private simulationStartUtc = new Date();
-  private simulationStartPerformance = performance.now();
-  private simulationRate = 60;
+  private simulationStartUtc: Date;
+  private simulationStartPerformance: number;
+  private simulationRate: number;
   private lastFrameTime = performance.now();
   private lastSkyUpdate = -Infinity;
   private lastTelemetryTime = -Infinity;
@@ -69,7 +70,15 @@ export class PlanetEngine {
     private readonly canvas: HTMLCanvasElement,
     private readonly onTelemetry: (telemetry: PlanetTelemetry) => void,
     private readonly onError: (message: string | null) => void,
+    initialSimulationUtc: string | Date = new Date(),
+    simulationRate = 60,
   ) {
+    const requestedEpoch = initialSimulationUtc instanceof Date
+      ? new Date(initialSimulationUtc)
+      : new Date(initialSimulationUtc);
+    this.simulationStartUtc = Number.isFinite(requestedEpoch.getTime()) ? requestedEpoch : new Date();
+    this.simulationStartPerformance = performance.now();
+    this.simulationRate = Number.isFinite(simulationRate) ? simulationRate : 60;
     const context = canvas.getContext("webgl2", {
       alpha: false,
       antialias: true,
@@ -170,6 +179,16 @@ export class PlanetEngine {
         const terminator = new THREE.Vector3().crossVectors(sun, reference).normalize();
         const location = cartesianToLatLonElevation(terminator, 1);
         this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, altitudeM);
+      },
+      setSimulationUtc: (utcIso, rate = this.simulationRate) => {
+        const epoch = new Date(utcIso);
+        if (!Number.isFinite(epoch.getTime())) throw new RangeError(`Invalid simulation UTC: ${utcIso}`);
+        if (!Number.isFinite(rate)) throw new RangeError(`Invalid simulation rate: ${rate}`);
+        this.simulationStartUtc = epoch;
+        this.simulationStartPerformance = performance.now();
+        this.simulationRate = rate;
+        this.skyState = calculateMarsSky(epoch);
+        this.lastSkyUpdate = -Infinity;
       },
     };
     this.renderer.setAnimationLoop(this.animate);

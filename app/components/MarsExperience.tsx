@@ -66,7 +66,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     if (!canvasRef.current) return;
     let engine: PlanetEngine;
     try {
-      engine = new PlanetEngine(canvasRef.current, setTelemetry, setError);
+      engine = new PlanetEngine(canvasRef.current, setTelemetry, setError, initialSimulationUtc);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : "WebGL could not start on this device.";
       queueMicrotask(() => setError(message));
@@ -78,7 +78,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     };
     window.addEventListener("keydown", keyHandler);
     return () => { window.removeEventListener("keydown", keyHandler); engine.dispose(); };
-  }, []);
+  }, [initialSimulationUtc]);
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
 

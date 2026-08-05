@@ -23,7 +23,7 @@ Measured on the production build in this repository:
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 58 maths, data, generated-geometry, worker-scheduling, celestial, and navigation integration cases, including every required screenshot altitude. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 59 maths, data, generated-geometry, worker-scheduling, celestial, and navigation integration cases, including every required screenshot altitude and cross-face 2:1 neighbour balancing. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
