@@ -221,9 +221,14 @@ describe("MOLA decoding and global terrain coverage", () => {
     const olympus = await sampleGlobal(latLonElevationToCartesian(18.65, -133.8, 0, 1));
     const hellas = await sampleGlobal(latLonElevationToCartesian(-42.4, 70.5, 0, 1));
     const valles = await sampleGlobal(latLonElevationToCartesian(-13.9, -59.2, 0, 1));
+    const jezeroCenter = await sampleGlobal(latLonElevationToCartesian(18.38, 77.58, 0, 1));
+    const jezeroNorthRim = await sampleGlobal(latLonElevationToCartesian(18.76, 77.58, 0, 1));
+    const jezeroSouthRim = await sampleGlobal(latLonElevationToCartesian(18.0, 77.58, 0, 1));
     expect(olympus.topographyM).toBeGreaterThan(12_000);
     expect(hellas.topographyM).toBeLessThan(-5_000);
     expect(valles.topographyM).toBeLessThan(2_000);
+    expect(jezeroCenter.topographyM).toBeLessThan(jezeroNorthRim.topographyM - 300);
+    expect(jezeroCenter.topographyM).toBeLessThan(jezeroSouthRim.topographyM - 300);
   });
 
   it("samples the same physical edge direction from adjacent root products", async () => {

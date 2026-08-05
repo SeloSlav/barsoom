@@ -2,6 +2,8 @@
 
 Both pipelines are deterministic, build-time tools. Runtime code performs no catalogue or PDS downloads.
 
+The NASA/JPL Viking global JPEG in `public/textures` is a static, build-time orbital albedo asset. It is sampled only at regional and orbital altitudes and cross-fades into deterministic procedural PBR terrain below 1,200 km.
+
 ## MOLA planetary radius and areoid
 
 Source products:

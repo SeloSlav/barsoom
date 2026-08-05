@@ -1,14 +1,25 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { generateTerrainTile, TERRAIN_WORKER_REVISION as WORKER_REVISION } from "../public/workers/terrain-worker.js";
 import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrain/TerrainWorkerPool";
 import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
 import { neighbourTile, parentTile } from "../app/planet/math";
-import { createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
+import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
 import { generateSurfaceScatter } from "../app/planet/render/SurfaceDetailRenderer";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
 describe("terrain worker geometry", () => {
+  it("ships NASA's full orbital JPEG and a surface-visible aerosol atmosphere", async () => {
+    const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global.jpg"));
+    expect(jpeg.byteLength).toBeGreaterThan(900_000);
+    expect([...jpeg.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    const atmosphere = createAtmosphereMaterial();
+    expect(atmosphere.fragmentShader).toContain("dustySky");
+    expect(atmosphere.fragmentShader).toContain("surfaceAlpha");
+    atmosphere.dispose();
+  });
   it("generates a deterministic planet-anchored surface rock field", () => {
     const config = {
       radiusM: 420,
@@ -78,10 +89,14 @@ describe("terrain worker geometry", () => {
     const depth = createTerrainShadowMaterial();
     expect(material.lights).toBe(true);
     expect("directionalLightShadows" in material.uniforms).toBe(true);
+    expect(material.uniforms.uOrbitalTexture.value.name).toContain("NASA JPL Viking");
     expect(material.vertexShader).toContain("shadowmap_pars_vertex");
     expect(material.fragmentShader).toContain("shadowmap_pars_fragment");
+    expect(material.fragmentShader).toContain("distributionGgx");
+    expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
     expect(depth.vertexShader).toContain("morphDelta");
     expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
+    material.uniforms.uOrbitalTexture.value.dispose();
     material.dispose();
     depth.dispose();
   });

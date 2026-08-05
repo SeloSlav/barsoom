@@ -41,8 +41,17 @@ const LANDMARKS = [
   { label: "Olympus Mons", lat: 18.65, lon: -133.8 },
   { label: "Valles Marineris", lat: -13.9, lon: -59.2 },
   { label: "Hellas Planitia", lat: -42.4, lon: 70.5 },
+  { label: "Jezero Crater", lat: 18.38, lon: 77.58 },
+  { label: "Gale Crater", lat: -5.4, lon: 137.8 },
+  { label: "Korolev Crater", lat: 72.77, lon: 164.58 },
   { label: "North polar cap", lat: 86, lon: 30 },
   { label: "Cube face edge", lat: 0, lon: 45 },
+] as const;
+
+const DESCENT_TARGETS = [
+  { label: "Jezero crater", lat: 18.38, lon: 77.58, altitudeM: 65_000 },
+  { label: "Gale crater", lat: -5.4, lon: 137.8, altitudeM: 90_000 },
+  { label: "Korolev ice crater", lat: 72.77, lon: 164.58, altitudeM: 70_000 },
 ] as const;
 
 const QA_ALTITUDES = [
@@ -118,6 +127,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close controls">×</button><p className="eyebrow">PLANET CONTROLS</p>
         <dl><div><dt>Orbit focus</dt><dd>Middle-mouse drag</dd></div><div><dt>Move across Mars</dt><dd>Right-mouse drag</dd></div><div><dt>Zoom at cursor</dt><dd>Mouse wheel</dd></div><div><dt>Select ground</dt><dd>Left click</dd></div><div><dt>Diagnostics</dt><dd>F3</dd></div><div><dt>Tile boundaries</dt><dd>F4</dd></div></dl>
         <p>Wheel movement scales continuously from orbit to a 2.2 m eye-height surface view. The final descent lowers the sightline to keep the horizon and local terrain in frame; middle-drag takes full manual control.</p>
+        <div className="descent-targets"><p className="eyebrow">MOLA CRATER DESCENTS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
         <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
@@ -127,7 +137,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
-      <footer className="mission-footer"><span>MOLA MEGDR 16 PPD · SEEDED LOCAL RELIEF</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL SURFACE FIELD ACTIVE" : "GLOBAL TERRAIN STREAM NOMINAL"}</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
+      <footer className="mission-footer"><span>NASA VIKING ALBEDO · MOLA 16 PPD RELIEF</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL SURFACE FIELD ACTIVE" : "GLOBAL TERRAIN STREAM NOMINAL"}</span><span>ORBITAL IMAGERY / PROCEDURAL SURFACE</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

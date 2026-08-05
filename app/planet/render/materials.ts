@@ -5,6 +5,7 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
   uniforms: {
     uSunDirection: { value: THREE.Vector3 };
     uCameraAltitude: { value: number };
+    uOrbitalTexture: { value: THREE.Texture };
     uTime: { value: number };
     uFade: { value: number };
     uFadeIn: { value: number };
@@ -19,6 +20,27 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uDebugMolaOnly: { value: number };
   };
 };
+
+function createMarsOrbitalTexture() {
+  let texture: THREE.Texture;
+  if (typeof document === "undefined") {
+    const pixels = new Uint8Array([151, 83, 45, 255]);
+    texture = new THREE.DataTexture(pixels, 1, 1, THREE.RGBAFormat);
+    texture.needsUpdate = true;
+  } else {
+    texture = new THREE.TextureLoader().load(
+      "/textures/mars-viking-global.jpg?revision=nasa-viking-jpl-2025",
+    );
+  }
+  texture.name = "NASA JPL Viking Mars global albedo";
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = 8;
+  return texture;
+}
 
 const terrainVertex = /* glsl */ `
   #include <shadowmap_pars_vertex>
@@ -76,6 +98,7 @@ const terrainFragment = /* glsl */ `
 
   uniform vec3 uSunDirection;
   uniform float uCameraAltitude;
+  uniform sampler2D uOrbitalTexture;
   uniform float uTime;
   uniform float uFade;
   uniform float uFadeIn;
@@ -143,6 +166,29 @@ const terrainFragment = /* glsl */ `
     return vec3(0.78, 0.31, 0.47);
   }
 
+  float distributionGgx(vec3 normal, vec3 halfway, float roughness) {
+    float alpha = roughness * roughness;
+    float alpha2 = alpha * alpha;
+    float ndh = max(dot(normal, halfway), 0.0);
+    float denominator = ndh * ndh * (alpha2 - 1.0) + 1.0;
+    return alpha2 / max(3.14159265 * denominator * denominator, 0.00001);
+  }
+
+  float geometrySchlickGgx(float ndv, float roughness) {
+    float r = roughness + 1.0;
+    float k = r * r / 8.0;
+    return ndv / max(ndv * (1.0 - k) + k, 0.00001);
+  }
+
+  float geometrySmith(vec3 normal, vec3 viewDirection, vec3 lightDirection, float roughness) {
+    return geometrySchlickGgx(max(dot(normal, viewDirection), 0.0), roughness) *
+      geometrySchlickGgx(max(dot(normal, lightDirection), 0.0), roughness);
+  }
+
+  vec3 fresnelSchlick(float cosineTheta, vec3 f0) {
+    return f0 + (vec3(1.0) - f0) * pow(clamp(1.0 - cosineTheta, 0.0, 1.0), 5.0);
+  }
+
   void main() {
     float dither = hash31(vec3(gl_FragCoord.xy, 0.0));
     if (uFade < 0.999) {
@@ -180,22 +226,35 @@ const terrainFragment = /* glsl */ `
     vec3 lightRock = vec3(${MATERIAL_CONFIG.lightRock.albedo.join(",")});
     vec3 frost = vec3(${MATERIAL_CONFIG.frost.albedo.join(",")});
 
-    float frostWeight = smoothstep(0.78, 0.96, latitude) * smoothstep(-1500.0, 3200.0, vElevation);
+    // Polar ice sits in low terrain as well as high terrain. The former
+    // elevation gate incorrectly removed both real caps from the rendered
+    // planet, especially the northern lowlands.
+    float capLatitude = smoothstep(0.89, 0.975, latitude);
+    float capBreakup = smoothstep(0.18, 0.78, regional * 0.62 + macro * 0.38);
+    float frostWeight = capLatitude * (0.76 + capBreakup * 0.24);
     float basaltWeight = smoothstep(0.25, 0.72, slope + (1.0 - curvatureProxy) * 0.46);
     float rockWeight = smoothstep(0.18, 0.6, slope + curvatureProxy * 0.24) * (1.0 - frostWeight);
     float dustWeight = clamp(0.62 + macro * 0.32 - slope * 1.7, 0.0, 1.0) * (1.0 - frostWeight);
     vec3 albedo = mix(regolith, dust, dustWeight);
     albedo = mix(albedo, basalt, basaltWeight * 0.72);
     albedo = mix(albedo, lightRock, rockWeight * 0.45);
-    albedo = mix(albedo, frost, frostWeight * (0.64 + grain * 0.28));
+    albedo = mix(albedo, frost, frostWeight * (0.90 + grain * 0.08));
     albedo *= 0.74 + macro * 0.30 + (grain - 0.5) * 0.08;
     albedo *= mix(1.0, 0.90 + metreVariation * 0.16, metreVisibility);
     albedo = mix(albedo, albedo * vec3(0.48, 0.40, 0.37), pebbles * grainVisibility * 0.42);
     albedo += vec3((fineGrain - 0.5) * 0.035 * grainVisibility);
     albedo *= mix(0.63, 1.0, vSurfaceMask);
 
+    float longitude = atan(radial.z, radial.x);
+    float latitudeRadians = asin(clamp(radial.y, -1.0, 1.0));
+    vec2 orbitalUv = vec2(fract(longitude / 6.28318530718 + 0.5), latitudeRadians / 3.14159265359 + 0.5);
+    vec3 orbitalAlbedo = texture2D(uOrbitalTexture, orbitalUv).rgb;
+    float orbitalBlend = smoothstep(120000.0, 1200000.0, uCameraAltitude);
+    albedo = mix(albedo, orbitalAlbedo * 0.88, orbitalBlend);
+
     float roughness = mix(${MATERIAL_CONFIG.regolith.roughness.toFixed(3)}, ${MATERIAL_CONFIG.basalt.roughness.toFixed(3)}, basaltWeight);
     roughness = mix(roughness, ${MATERIAL_CONFIG.frost.roughness.toFixed(3)}, frostWeight);
+    roughness = clamp(roughness + (fineGrain - 0.5) * 0.12 * grainVisibility - pebbles * 0.08, 0.48, 0.99);
     vec3 orbitalMicro = vec3(
       valueNoise(radial * 6200.0 + vec3(0.13,0,0)),
       valueNoise(radial * 6200.0 + vec3(0,0.19,0)),
@@ -213,9 +272,8 @@ const terrainFragment = /* glsl */ `
     normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
 
     vec3 sun = normalize(uSunDirection);
-    float ndl = dot(normal, sun);
-    float daylight = smoothstep(-0.08, 0.07, ndl);
-    float diffuse = max(ndl, 0.0);
+    float ndl = max(dot(normal, sun), 0.0);
+    float daylight = smoothstep(-0.08, 0.07, dot(radial, sun));
     float surfaceShadow = 1.0;
     #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
       #pragma unroll_loop_start
@@ -231,14 +289,20 @@ const terrainFragment = /* glsl */ `
       }
       #pragma unroll_loop_end
     #endif
-    // Thin-atmosphere dust and ground bounce: still dark on the night side, but
-    // enough energy remains in sunlit shadows to retain terrain relief.
-    float bounced = 0.052 + 0.048 * max(dot(radial, sun), 0.0);
     vec3 viewDirection = normalize(-vWorldPosition);
     vec3 halfVector = normalize(sun + viewDirection);
-    float specular = pow(max(dot(normal, halfVector), 0.0), mix(75.0, 8.0, roughness));
-    vec3 colour = albedo * (bounced + diffuse * 1.24 * surfaceShadow) + vec3(1.0, 0.72, 0.47) * specular * (1.0 - roughness) * daylight * surfaceShadow;
-    colour += albedo * 0.014 * (1.0 - daylight);
+    float ndv = max(dot(normal, viewDirection), 0.001);
+    vec3 f0 = vec3(0.028);
+    vec3 fresnel = fresnelSchlick(max(dot(halfVector, viewDirection), 0.0), f0);
+    float distribution = distributionGgx(normal, halfVector, roughness);
+    float geometry = geometrySmith(normal, viewDirection, sun, roughness);
+    vec3 specular = distribution * geometry * fresnel / max(4.0 * ndv * ndl, 0.001);
+    vec3 diffuse = (vec3(1.0) - fresnel) * albedo / 3.14159265;
+    float cavity = clamp(0.72 + regional * 0.16 + metreVariation * 0.12, 0.52, 1.0);
+    vec3 direct = (diffuse + specular) * ndl * 2.15 * surfaceShadow;
+    vec3 skyBounce = albedo * (0.038 + 0.058 * daylight) * cavity;
+    vec3 colour = direct + skyBounce;
+    colour += vec3(0.16, 0.055, 0.025) * albedo * 0.018 * (1.0 - daylight);
 
     float distanceM = length(vWorldPosition);
     float surfaceDensity = exp(-max(uCameraAltitude, 0.0) / ${ATMOSPHERE_CONFIG.scaleHeightM.toFixed(1)});
@@ -265,6 +329,7 @@ const terrainFragment = /* glsl */ `
 `;
 
 export function createTerrainMaterial(): TerrainMaterial {
+  const orbitalTexture = createMarsOrbitalTexture();
   return new THREE.ShaderMaterial({
     name: "Mars procedural PBR terrain",
     vertexShader: terrainVertex,
@@ -272,6 +337,7 @@ export function createTerrainMaterial(): TerrainMaterial {
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.lights, {
       uSunDirection: { value: new THREE.Vector3(1, 0.25, 0.2).normalize() },
       uCameraAltitude: { value: 10_000_000 },
+      uOrbitalTexture: { value: orbitalTexture },
       uTime: { value: 0 },
       uFade: { value: 1 },
       uFadeIn: { value: 1 },
@@ -385,6 +451,7 @@ const atmosphereFragment = /* glsl */ `
 
     vec3 viewRay = normalize(vWorldPosition);
     vec3 cameraFromCenter = -uPlanetCenter;
+    vec3 cameraUp = normalize(cameraFromCenter);
     vec3 sun = normalize(uSunDirection);
     vec2 atmosphereHit = raySphere(cameraFromCenter, viewRay, ATMOSPHERE_RADIUS);
     float rayStart = max(atmosphereHit.x, 0.0);
@@ -438,7 +505,20 @@ const atmosphereFragment = /* glsl */ `
     vec3 viewTransmittance = exp(-(betaRayleigh * opticalViewR + betaDust * opticalViewM));
     float opticalAlpha = 1.0 - dot(viewTransmittance, vec3(0.299, 0.587, 0.114));
     vec3 colour = inscatter * uExposure * ${ATMOSPHERE_CONFIG.limbStrength.toFixed(3)};
-    float alpha = clamp(opticalAlpha * 0.92 + dot(colour, vec3(0.22)), 0.0, 0.94);
+    // The physical single-scatter pass is intentionally thin, but at the
+    // surface it must still resolve as a dusty Martian sky rather than black
+    // space. This term models the long near-ground aerosol path and the subtle
+    // blue-grey aureole around the Sun seen by landers.
+    float nearGround = exp(-max(uCameraAltitude, 0.0) / 18000.0);
+    float viewElevation = dot(viewRay, cameraUp);
+    float horizonGlow = pow(1.0 - clamp(abs(viewElevation), 0.0, 1.0), 2.2);
+    float localDaylight = smoothstep(-0.16, 0.10, dot(cameraUp, sun));
+    float solarAureole = pow(max(dot(viewRay, sun), 0.0), 18.0);
+    vec3 dustySky = mix(vec3(0.13, 0.035, 0.018), vec3(0.70, 0.235, 0.075), horizonGlow);
+    dustySky = mix(dustySky, vec3(0.34, 0.43, 0.52), solarAureole * 0.48);
+    colour += dustySky * nearGround * (0.14 + horizonGlow * 0.38) * (0.22 + localDaylight * 0.78);
+    float surfaceAlpha = nearGround * (0.14 + horizonGlow * 0.46) * (0.30 + localDaylight * 0.70);
+    float alpha = clamp(max(surfaceAlpha, opticalAlpha * 0.92 + dot(colour, vec3(0.22))), 0.0, 0.96);
     gl_FragColor = vec4(max(colour, vec3(0.0)), alpha);
   }
 `;

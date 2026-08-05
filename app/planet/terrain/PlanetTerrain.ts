@@ -524,6 +524,7 @@ export class PlanetTerrain {
     this.geometryPool.length = 0;
     for (const mesh of this.meshPool) mesh.removeFromParent();
     this.meshPool.length = 0;
+    this.material.uniforms.uOrbitalTexture.value.dispose();
     this.material.dispose();
     this.shadowMaterial.dispose();
     this.workers.dispose();
