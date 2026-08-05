@@ -244,7 +244,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                   role="option"
                   aria-selected={body === observedBody}
                   onClick={() => selectObservedBody(body)}
-                ><span>{body === "Mars" ? "BARSOOM" : body.toUpperCase()}</span><i aria-hidden="true">|</i><b>MARS</b></button>
+                ><span>{body.toUpperCase()}</span><i aria-hidden="true">|</i><b>MARS</b></button>
               </li>)}
             </ul>}
           </div>
