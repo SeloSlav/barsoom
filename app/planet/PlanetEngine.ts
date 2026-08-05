@@ -24,6 +24,7 @@ declare global {
 
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly depthStrategy: "reversed" | "logarithmic";
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(RENDER_CONFIG.fovDegrees, 1, 0.1, 50_000_000);
   private readonly skyCamera = new THREE.PerspectiveCamera(RENDER_CONFIG.fovDegrees, 1, 0.01, 50);
@@ -34,6 +35,7 @@ export class PlanetEngine {
   private readonly resizeObserver: ResizeObserver;
   private readonly selection: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   private readonly viewportSize = new THREE.Vector2();
+  private readonly selectionReferenceNormal = new THREE.Vector3(0, 0, 1);
   private selectionDirection: THREE.Vector3 | null = null;
   private pointerDown: { x: number; y: number } | null = null;
   private controlState!: PlanetControlState;
@@ -65,15 +67,26 @@ export class PlanetEngine {
     private readonly onTelemetry: (telemetry: PlanetTelemetry) => void,
     private readonly onError: (message: string | null) => void,
   ) {
+    const context = canvas.getContext("webgl2", {
+      alpha: false,
+      antialias: true,
+      depth: true,
+      stencil: false,
+      powerPreference: "high-performance",
+    });
+    if (!context) throw new Error("Barsoom requires a WebGL 2 capable browser and GPU.");
+    const reversedDepthSupported = context.getExtension("EXT_clip_control") !== null;
+    this.depthStrategy = reversedDepthSupported ? "reversed" : "logarithmic";
     this.renderer = new THREE.WebGLRenderer({
       canvas,
+      context,
       antialias: true,
       alpha: false,
       depth: true,
       stencil: false,
       powerPreference: "high-performance",
-      reversedDepthBuffer: true,
-      logarithmicDepthBuffer: true,
+      reversedDepthBuffer: reversedDepthSupported,
+      logarithmicDepthBuffer: !reversedDepthSupported,
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -217,7 +230,11 @@ export class PlanetEngine {
       triangles: terrainStats.triangles,
       drawCalls: this.renderer.info.render.calls,
       textureMemoryMb: terrainStats.tileDataBytes / (1024 * 1024),
+      geometryMemoryMb: terrainStats.geometryBytes / (1024 * 1024),
       workerQueue: terrainStats.workerQueue,
+      terrainNodes: terrainStats.nodeCount,
+      horizonCulled: terrainStats.horizonCulled,
+      depthStrategy: this.depthStrategy,
       nearM: this.controlState.nearM,
       farM: this.controlState.farM,
       floatingOrigin: { ...this.controlState.cameraAbsolute },
@@ -280,7 +297,7 @@ export class PlanetEngine {
       direction.y * (radius + Math.max(0.4, markerSize * 0.002)) - this.controlState.cameraAbsolute.y,
       direction.z * (radius + Math.max(0.4, markerSize * 0.002)) - this.controlState.cameraAbsolute.z,
     );
-    this.selection.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), direction);
+    this.selection.quaternion.setFromUnitVectors(this.selectionReferenceNormal, direction);
     this.selection.scale.setScalar(markerSize);
     this.selection.visible = true;
   }

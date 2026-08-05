@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-// The terrain worker is intentionally shipped as browser-ready JavaScript.
-// @ts-expect-error It has no separate declaration file.
 import { generateTerrainTile } from "../public/workers/terrain-worker.js";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;

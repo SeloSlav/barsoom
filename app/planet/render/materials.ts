@@ -10,6 +10,7 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uMorph: { value: number };
     uTileLod: { value: number };
     uFaceIndex: { value: number };
+    uTileOriginModulo: { value: THREE.Vector3 };
     uDebugTileBoundaries: { value: number };
     uDebugCubeFaces: { value: number };
     uDebugLod: { value: number };
@@ -27,6 +28,7 @@ const terrainVertex = /* glsl */ `
   attribute float surfaceMask;
 
   uniform float uMorph;
+  uniform vec3 uTileOriginModulo;
 
   varying vec3 vNormal;
   varying vec3 vWorldPosition;
@@ -35,6 +37,7 @@ const terrainVertex = /* glsl */ `
   varying float vAreoidElevation;
   varying vec2 vTileUv;
   varying float vSurfaceMask;
+  varying vec3 vStableMetres;
 
   void main() {
     vec3 morphed = position - morphDelta * (1.0 - uMorph);
@@ -46,6 +49,7 @@ const terrainVertex = /* glsl */ `
     vAreoidElevation = areoidElevation;
     vTileUv = tileUv;
     vSurfaceMask = surfaceMask;
+    vStableMetres = uTileOriginModulo + morphed;
     gl_Position = projectionMatrix * viewMatrix * world;
   }
 `;
@@ -72,6 +76,7 @@ const terrainFragment = /* glsl */ `
   varying float vAreoidElevation;
   varying vec2 vTileUv;
   varying float vSurfaceMask;
+  varying vec3 vStableMetres;
 
   float hash31(vec3 p) {
     p = fract(p * 0.1031);
@@ -91,6 +96,23 @@ const terrainFragment = /* glsl */ `
     float n101 = hash31(i + vec3(1,0,1));
     float n011 = hash31(i + vec3(0,1,1));
     float n111 = hash31(i + vec3(1,1,1));
+    return mix(mix(mix(n000,n100,f.x),mix(n010,n110,f.x),f.y),mix(mix(n001,n101,f.x),mix(n011,n111,f.x),f.y),f.z);
+  }
+
+  float periodicNoiseMetres(vec3 metres, float wavelength) {
+    vec3 p = metres / wavelength;
+    float periodCells = 4096.0 / wavelength;
+    vec3 i = mod(floor(p), periodCells);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n000 = hash31(mod(i + vec3(0,0,0), periodCells));
+    float n100 = hash31(mod(i + vec3(1,0,0), periodCells));
+    float n010 = hash31(mod(i + vec3(0,1,0), periodCells));
+    float n110 = hash31(mod(i + vec3(1,1,0), periodCells));
+    float n001 = hash31(mod(i + vec3(0,0,1), periodCells));
+    float n101 = hash31(mod(i + vec3(1,0,1), periodCells));
+    float n011 = hash31(mod(i + vec3(0,1,1), periodCells));
+    float n111 = hash31(mod(i + vec3(1,1,1), periodCells));
     return mix(mix(mix(n000,n100,f.x),mix(n010,n110,f.x),f.y),mix(mix(n001,n101,f.x),mix(n011,n111,f.x),f.y),f.z);
   }
 
@@ -114,6 +136,21 @@ const terrainFragment = /* glsl */ `
     float macro = valueNoise(radial * 17.0 + vec3(4.1, -8.2, 2.7));
     float regional = valueNoise(radial * 92.0 + vec3(-7.0, 2.0, 11.0));
     float grain = valueNoise(radial * mix(900.0, 18000.0, clamp(uTileLod / 18.0, 0.0, 1.0)));
+    float closeDetail = smoothstep(10.0, 16.0, uTileLod);
+    float metreVisibility = 0.0;
+    float grainVisibility = 0.0;
+    float metreVariation = 0.5;
+    float fineGrain = 0.5;
+    float pebbles = 0.0;
+    if (uTileLod > 9.0) {
+      float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
+      metreVisibility = closeDetail * (1.0 - smoothstep(1.2, 18.0, pixelFootprintM));
+      grainVisibility = closeDetail * (1.0 - smoothstep(0.28, 3.2, pixelFootprintM));
+      metreVariation = periodicNoiseMetres(vStableMetres, 64.0) * 0.58 +
+        periodicNoiseMetres(vStableMetres + vec3(19.0, -7.0, 31.0), 8.0) * 0.42;
+      fineGrain = periodicNoiseMetres(vStableMetres + vec3(-3.0, 11.0, 5.0), 2.0);
+      pebbles = smoothstep(0.76, 0.94, periodicNoiseMetres(vStableMetres + vec3(1.7, 4.3, -2.1), 0.5));
+    }
     float curvatureProxy = clamp((regional - macro) * 1.8 + 0.5, 0.0, 1.0);
 
     vec3 dust = vec3(${MATERIAL_CONFIG.dust.albedo.join(",")});
@@ -131,16 +168,28 @@ const terrainFragment = /* glsl */ `
     albedo = mix(albedo, lightRock, rockWeight * 0.45);
     albedo = mix(albedo, frost, frostWeight * (0.64 + grain * 0.28));
     albedo *= 0.74 + macro * 0.30 + (grain - 0.5) * 0.08;
+    albedo *= mix(1.0, 0.90 + metreVariation * 0.16, metreVisibility);
+    albedo = mix(albedo, albedo * vec3(0.48, 0.40, 0.37), pebbles * grainVisibility * 0.42);
+    albedo += vec3((fineGrain - 0.5) * 0.035 * grainVisibility);
     albedo *= mix(0.63, 1.0, vSurfaceMask);
 
     float roughness = mix(${MATERIAL_CONFIG.regolith.roughness.toFixed(3)}, ${MATERIAL_CONFIG.basalt.roughness.toFixed(3)}, basaltWeight);
     roughness = mix(roughness, ${MATERIAL_CONFIG.frost.roughness.toFixed(3)}, frostWeight);
-    vec3 micro = vec3(
+    vec3 orbitalMicro = vec3(
       valueNoise(radial * 6200.0 + vec3(0.13,0,0)),
       valueNoise(radial * 6200.0 + vec3(0,0.19,0)),
       valueNoise(radial * 6200.0 + vec3(0,0,0.23))
     ) - 0.5;
-    normal = normalize(normal + micro * (0.025 + 0.055 * clamp(uTileLod / 15.0, 0.0, 1.0)));
+    vec3 metreMicro = vec3(0.0);
+    if (uTileLod > 9.0) {
+      metreMicro = vec3(
+        periodicNoiseMetres(vStableMetres + vec3(0.0, 1.3, 2.7), 2.0),
+        periodicNoiseMetres(vStableMetres + vec3(3.1, 0.0, 1.1), 2.0),
+        periodicNoiseMetres(vStableMetres + vec3(2.2, 4.7, 0.0), 2.0)
+      ) - 0.5;
+    }
+    metreMicro -= radial * dot(metreMicro, radial);
+    normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
 
     vec3 sun = normalize(uSunDirection);
     float ndl = dot(normal, sun);
@@ -192,6 +241,7 @@ export function createTerrainMaterial(): TerrainMaterial {
       uMorph: { value: 1 },
       uTileLod: { value: 0 },
       uFaceIndex: { value: 0 },
+      uTileOriginModulo: { value: new THREE.Vector3() },
       uDebugTileBoundaries: { value: 0 },
       uDebugCubeFaces: { value: 0 },
       uDebugLod: { value: 0 },

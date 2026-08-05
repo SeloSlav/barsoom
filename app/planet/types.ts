@@ -37,7 +37,11 @@ export type PlanetTelemetry = {
   triangles: number;
   drawCalls: number;
   textureMemoryMb: number;
+  geometryMemoryMb: number;
   workerQueue: number;
+  terrainNodes: number;
+  horizonCulled: number;
+  depthStrategy: "reversed" | "logarithmic";
   nearM: number;
   farM: number;
   floatingOrigin: Vec3;
@@ -55,4 +59,3 @@ export type DebugFlags = {
   molaOnly: boolean;
   horizonCulling: boolean;
 };
-

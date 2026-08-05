@@ -11,7 +11,8 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
   return {
     latitudeDeg: 18.65, longitudeDeg: -133.8, altitudeM: 10_000_000, elevationM: 0, groundWidthM: 0,
     activeTiles: 0, loadingTiles: 0, queuedTiles: 0, minLod: 0, maxLod: 0, triangles: 0, drawCalls: 0,
-    textureMemoryMb: 0, workerQueue: 0, nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
+    textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
+    depthStrategy: "logarithmic", nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
     frameMs: 16.67, fps: 60, simulationUtc,
   };
 }
@@ -105,11 +106,11 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
         <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
-        <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>Tile memory</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
-        <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
+        <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>Nodes</span><b>{telemetry.terrainNodes} retained</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Horizon</span><b>{telemetry.horizonCulled} culled</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>MOLA cache</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Geometry</span><b>{telemetry.geometryMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth mode</span><b>{telemetry.depthStrategy}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
+        <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly", "horizonCulling"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag === "horizonCulling" ? "horizon audit" : flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
       </aside>}
-      <footer className="mission-footer"><span>MOLA MEGDR 4 PPD · IAU 2000</span><span className="footer-center"><i /> GLOBAL TERRAIN STREAM NOMINAL</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
+      <footer className="mission-footer"><span>MOLA MEGDR 16 PPD · IAU 2000</span><span className="footer-center"><i /> GLOBAL TERRAIN STREAM NOMINAL</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

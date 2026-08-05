@@ -17,8 +17,7 @@ test("server-renders the Barsoom planetary survey shell", async () => {
   const html = await response.text();
   assert.match(html, /<title>Barsoom — Seamless Mars Planetary Survey<\/title>/i);
   assert.match(html, /BARSOOM/);
-  assert.match(html, /MOLA MEGDR 4 PPD/);
+  assert.match(html, /MOLA MEGDR 16 PPD/);
   assert.match(html, /PLANETARY SURVEY/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });
-

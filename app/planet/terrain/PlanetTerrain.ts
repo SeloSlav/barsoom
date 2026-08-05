@@ -36,6 +36,7 @@ class PlanetTileNode {
   lastUsedFrame = -1;
   childrenReadyAt = -1;
   triangleCount = 0;
+  geometryBytes = 0;
   failureCount = 0;
   forcedSplitUntilFrame = -1;
 
@@ -54,10 +55,14 @@ export type TerrainFrameStats = {
   triangles: number;
   workerQueue: number;
   tileDataBytes: number;
+  geometryBytes: number;
+  nodeCount: number;
   horizonCulled: number;
 };
 
 const FACE_INDEX = { px: 0, nx: 1, py: 2, ny: 3, pz: 4, nz: 5 } as const;
+const MATERIAL_PERIOD_M = 4096;
+const positiveModulo = (value: number, period: number) => ((value % period) + period) % period;
 
 export class PlanetTerrain {
   private readonly roots: PlanetTileNode[];
@@ -78,6 +83,8 @@ export class PlanetTerrain {
   private cameraAbsolute: Vec3 = { x: 0, y: 0, z: MARS_REFERENCE_RADIUS_M + 1 };
   private viewportHeight = 1080;
   private fovRadians = Math.PI / 4;
+  private debugDisableHorizonCulling = false;
+  private geometryBytes = 0;
   private stats: TerrainFrameStats = {
     activeTiles: 0,
     loadingTiles: 0,
@@ -87,6 +94,8 @@ export class PlanetTerrain {
     triangles: 0,
     workerQueue: 0,
     tileDataBytes: 0,
+    geometryBytes: 0,
+    nodeCount: 6,
     horizonCulled: 0,
   };
 
@@ -112,6 +121,7 @@ export class PlanetTerrain {
     this.cameraAbsolute = cameraAbsolute;
     this.viewportHeight = viewportHeight;
     this.fovRadians = THREE.MathUtils.degToRad(camera.fov);
+    this.debugDisableHorizonCulling = debug.horizonCulling;
     this.projectionScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projectionScreen);
 
@@ -149,6 +159,8 @@ export class PlanetTerrain {
     this.stats.queuedTiles = queued;
     this.stats.workerQueue = this.workers.queuedCount + this.workers.activeCount;
     this.stats.tileDataBytes = this.loader.cacheBytes;
+    this.stats.geometryBytes = this.geometryBytes;
+    this.stats.nodeCount = this.allNodes.size;
     if (this.stats.minLod === 99) this.stats.minLod = 0;
     return { ...this.stats };
   }
@@ -172,12 +184,12 @@ export class PlanetTerrain {
     }
 
     this.forceBalancedNeighbours(node);
-    this.ensureChildren(node);
-    for (const child of node.children) {
+    const children = this.ensureChildren(node);
+    for (const child of children) {
       child.lastWantedFrame = this.frame;
       this.ensureRequested(child, visibility.screenError + child.key.lod * 0.1);
     }
-    const allChildrenReady = node.children.every((child) => child.state === "ready");
+    const allChildrenReady = children.every((child) => child.state === "ready");
     if (!allChildrenReady) {
       node.childrenReadyAt = -1;
       this.addVisible(node, { fade: 1, morph: 1 });
@@ -187,7 +199,7 @@ export class PlanetTerrain {
     if (node.childrenReadyAt < 0) node.childrenReadyAt = this.nowS;
     const transition = Math.min(1, Math.max(0, (this.nowS - node.childrenReadyAt) / TERRAIN_CONFIG.morphDurationS));
     if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1 });
-    for (const child of node.children) {
+    for (const child of children) {
       if (transition < 1) {
         const childVisibility = this.visibility(child);
         if (childVisibility.visible) this.addVisible(child, { fade: transition, morph: transition });
@@ -241,7 +253,7 @@ export class PlanetTerrain {
       ? Math.acos(Math.min(1, MARS_REFERENCE_RADIUS_M / cameraRadius))
       : 0;
     const separation = Math.acos(Math.max(-1, Math.min(1, dot3(centerDirection, cameraDirection))));
-    if (separation > horizonAngle + angularRadius * 1.28 + 0.025) {
+    if (!this.debugDisableHorizonCulling && separation > horizonAngle + angularRadius * 1.28 + 0.025) {
       return { visible: false, horizon: true, screenError: 0 };
     }
 
@@ -324,11 +336,21 @@ export class PlanetTerrain {
       this.material.uniforms.uMorph.value = renderState.morph;
       this.material.uniforms.uTileLod.value = node.key.lod;
       this.material.uniforms.uFaceIndex.value = FACE_INDEX[node.key.face];
+      this.material.uniforms.uTileOriginModulo.value.set(
+        positiveModulo(node.center!.x, MATERIAL_PERIOD_M),
+        positiveModulo(node.center!.y, MATERIAL_PERIOD_M),
+        positiveModulo(node.center!.z, MATERIAL_PERIOD_M),
+      );
     };
     this.scene.add(mesh);
     node.mesh = mesh;
     node.center = generated.center;
     node.triangleCount = generated.triangleCount;
+    node.geometryBytes = generated.positions.byteLength + generated.normals.byteLength +
+      generated.planetDirections.byteLength + generated.elevations.byteLength +
+      generated.areoidElevations.byteLength + generated.morphDelta.byteLength +
+      generated.tileUv.byteLength + generated.surface.byteLength + generated.indices.byteLength;
+    this.geometryBytes += node.geometryBytes;
     node.state = "ready";
     node.failureCount = 0;
     this.readyNodes.add(node);
@@ -412,6 +434,8 @@ export class PlanetTerrain {
     if (this.meshPool.length < 24) this.meshPool.push(node.mesh);
     node.mesh = null;
     node.center = null;
+    this.geometryBytes = Math.max(0, this.geometryBytes - node.geometryBytes);
+    node.geometryBytes = 0;
     node.state = "idle";
     this.readyNodes.delete(node);
   }

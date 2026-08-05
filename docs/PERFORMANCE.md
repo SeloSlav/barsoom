@@ -23,7 +23,22 @@ Measured on the production build in this repository:
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 26 maths/data cases. The server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 37 maths, data, generated-geometry, and navigation integration cases. The separate server-render check verifies production metadata and removal of the starter.
+
+## Terrain generation benchmark
+
+`npm run benchmark:terrain` runs the exact browser worker generator against a committed 16-PPD MOLA tile after twelve warm-up jobs. On the development machine (Windows, Node 24.3.0), 120 LOD-12 tiles measured:
+
+| Metric | Result |
+|---|---:|
+| Generated payload per tile | 65,428 bytes |
+| Mean generation time | 2.61 ms |
+| Median generation time | 2.48 ms |
+| 95th percentile | 3.69 ms |
+| Maximum | 4.23 ms |
+| Two-worker P95 throughput estimate | 542 tiles/s |
+
+This is a repeatable CPU throughput measurement, not a substitute for the live `F3` GPU/frame-time telemetry. The pre-implementation repository had no renderer or terrain job to benchmark, so its corresponding throughput and frame-time measurements are not applicable rather than zero.
 
 ## Frame-time instrumentation
 
