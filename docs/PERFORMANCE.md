@@ -22,8 +22,9 @@ Measured on the production build in this repository:
 | Maximum active tile budget | 220 |
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
+| Near-surface solar shadow map | 2,048² below 80 km on the illuminated side |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 59 maths, data, generated-geometry, worker-scheduling, celestial, and navigation integration cases, including every required screenshot altitude and cross-face 2:1 neighbour balancing. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 61 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
@@ -42,7 +43,7 @@ This is a repeatable CPU throughput measurement, not a substitute for the live `
 
 ## Frame-time instrumentation
 
-The `F3` overlay reports exponentially smoothed frame time/FPS, active/loading tiles, retained nodes, selected LOD range, horizon rejections, triangles, draw calls, decoded MOLA memory, GPU geometry memory, worker queue, active depth strategy, near/far planes and camera-relative origin. The horizon-audit toggle temporarily disables occlusion culling so its effect is directly measurable. Resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs.
+The `F3` overlay reports exponentially smoothed frame time/FPS, active/loading tiles, retained nodes, selected LOD range, horizon rejections, triangles, draw calls, decoded MOLA memory, GPU geometry memory, worker queue, active depth strategy, local shadow extent, near/far planes and camera-relative origin. The horizon-audit toggle temporarily disables occlusion culling so its effect is directly measurable. Resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs.
 
 No geometry, material, texture or network request is constructed in the steady-state render loop. Tile-node arrays grow only on first subdivision. Mesh and geometry containers are reused. The asynchronous request queue rejects stale jobs after rapid movement, and every MOLA request uses browser HTTP caching.
 

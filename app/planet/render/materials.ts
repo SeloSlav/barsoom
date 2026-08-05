@@ -21,6 +21,8 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
 };
 
 const terrainVertex = /* glsl */ `
+  #include <shadowmap_pars_vertex>
+
   attribute vec3 planetDirection;
   attribute float elevation;
   attribute float areoidElevation;
@@ -51,12 +53,26 @@ const terrainVertex = /* glsl */ `
     vTileUv = tileUv;
     vSurfaceMask = surfaceMask;
     vStableMetres = uTileOriginModulo + morphed;
+    #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+      vec3 shadowNormal = normalize(mat3(modelMatrix) * normal);
+      #pragma unroll_loop_start
+      for (int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i++) {
+        vec4 shadowWorld = world;
+        shadowWorld.xyz += shadowNormal * directionalLightShadows[i].shadowNormalBias;
+        vDirectionalShadowCoord[i] = directionalShadowMatrix[i] * shadowWorld;
+      }
+      #pragma unroll_loop_end
+    #endif
     gl_Position = projectionMatrix * viewMatrix * world;
   }
 `;
 
 const terrainFragment = /* glsl */ `
   precision highp float;
+
+  #include <common>
+  #include <packing>
+  #include <shadowmap_pars_fragment>
 
   uniform vec3 uSunDirection;
   uniform float uCameraAltitude;
@@ -200,13 +216,28 @@ const terrainFragment = /* glsl */ `
     float ndl = dot(normal, sun);
     float daylight = smoothstep(-0.08, 0.07, ndl);
     float diffuse = max(ndl, 0.0);
+    float surfaceShadow = 1.0;
+    #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+      #pragma unroll_loop_start
+      for (int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i++) {
+        surfaceShadow *= getShadow(
+          directionalShadowMap[i],
+          directionalLightShadows[i].shadowMapSize,
+          directionalLightShadows[i].shadowIntensity,
+          directionalLightShadows[i].shadowBias,
+          directionalLightShadows[i].shadowRadius,
+          vDirectionalShadowCoord[i]
+        );
+      }
+      #pragma unroll_loop_end
+    #endif
     // Thin-atmosphere dust and ground bounce: still dark on the night side, but
     // enough energy remains in sunlit shadows to retain terrain relief.
     float bounced = 0.052 + 0.048 * max(dot(radial, sun), 0.0);
     vec3 viewDirection = normalize(-vWorldPosition);
     vec3 halfVector = normalize(sun + viewDirection);
     float specular = pow(max(dot(normal, halfVector), 0.0), mix(75.0, 8.0, roughness));
-    vec3 colour = albedo * (bounced + diffuse * 1.24) + vec3(1.0, 0.72, 0.47) * specular * (1.0 - roughness) * daylight;
+    vec3 colour = albedo * (bounced + diffuse * 1.24 * surfaceShadow) + vec3(1.0, 0.72, 0.47) * specular * (1.0 - roughness) * daylight * surfaceShadow;
     colour += albedo * 0.014 * (1.0 - daylight);
 
     float distanceM = length(vWorldPosition);
@@ -238,7 +269,7 @@ export function createTerrainMaterial(): TerrainMaterial {
     name: "Mars procedural PBR terrain",
     vertexShader: terrainVertex,
     fragmentShader: terrainFragment,
-    uniforms: {
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.lights, {
       uSunDirection: { value: new THREE.Vector3(1, 0.25, 0.2).normalize() },
       uCameraAltitude: { value: 10_000_000 },
       uTime: { value: 0 },
@@ -253,7 +284,8 @@ export function createTerrainMaterial(): TerrainMaterial {
       uDebugLod: { value: 0 },
       uDebugNormals: { value: 0 },
       uDebugMolaOnly: { value: 0 },
-    },
+    }]),
+    lights: true,
     depthWrite: true,
     depthTest: true,
     transparent: false,
@@ -261,6 +293,43 @@ export function createTerrainMaterial(): TerrainMaterial {
     toneMapped: true,
     glslVersion: THREE.GLSL1,
   }) as TerrainMaterial;
+}
+
+const terrainShadowVertex = /* glsl */ `
+  attribute vec3 morphDelta;
+  attribute float surfaceMask;
+  uniform float uMorph;
+  varying float vSurfaceMask;
+  void main() {
+    vec3 morphed = position - morphDelta * (1.0 - uMorph);
+    vSurfaceMask = surfaceMask;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(morphed, 1.0);
+  }
+`;
+
+const terrainShadowFragment = /* glsl */ `
+  precision highp float;
+  varying float vSurfaceMask;
+  void main() {
+    if (vSurfaceMask < 0.5) discard;
+    gl_FragColor = vec4(1.0);
+  }
+`;
+
+export type TerrainShadowMaterial = THREE.ShaderMaterial & {
+  uniforms: { uMorph: { value: number } };
+};
+
+export function createTerrainShadowMaterial(): TerrainShadowMaterial {
+  return new THREE.ShaderMaterial({
+    name: "Mars morph-aware terrain shadow depth",
+    vertexShader: terrainShadowVertex,
+    fragmentShader: terrainShadowFragment,
+    uniforms: { uMorph: { value: 1 } },
+    depthTest: true,
+    depthWrite: true,
+    side: THREE.FrontSide,
+  }) as TerrainShadowMaterial;
 }
 
 const atmosphereVertex = /* glsl */ `

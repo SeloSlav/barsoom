@@ -315,6 +315,63 @@ export function splitHighLow(value: Vec3): { high: Vec3; low: Vec3 } {
   return { high: { x: hx, y: hy, z: hz }, low: { x: lx, y: ly, z: lz } };
 }
 
+export type DirectionalShadowSnap = {
+  sun: Vec3;
+  right: Vec3;
+  up: Vec3;
+  centerAbsolute: Vec3;
+  centerRelative: Vec3;
+  texelWorldM: number;
+};
+
+export function snappedDirectionalShadowCenter(
+  cameraAbsolute: Vec3,
+  sunDirectionInput: Vec3,
+  extentM: number,
+  mapSize: number,
+  result: DirectionalShadowSnap = {
+    sun: { x: 0, y: 0, z: 0 },
+    right: { x: 0, y: 0, z: 0 },
+    up: { x: 0, y: 0, z: 0 },
+    centerAbsolute: { x: 0, y: 0, z: 0 },
+    centerRelative: { x: 0, y: 0, z: 0 },
+    texelWorldM: 0,
+  },
+) {
+  const sunLength = Math.max(1e-12, length3(sunDirectionInput));
+  const sx = sunDirectionInput.x / sunLength;
+  const sy = sunDirectionInput.y / sunLength;
+  const sz = sunDirectionInput.z / sunLength;
+  result.sun.x = sx; result.sun.y = sy; result.sun.z = sz;
+  const referenceX = Math.abs(sy) > 0.9 ? 1 : 0;
+  const referenceY = referenceX === 1 ? 0 : 1;
+  let rightX = referenceY * sz;
+  let rightY = -referenceX * sz;
+  let rightZ = referenceX * sy - referenceY * sx;
+  const rightLength = Math.max(1e-12, Math.hypot(rightX, rightY, rightZ));
+  rightX /= rightLength; rightY /= rightLength; rightZ /= rightLength;
+  result.right.x = rightX; result.right.y = rightY; result.right.z = rightZ;
+  const upX = sy * rightZ - sz * rightY;
+  const upY = sz * rightX - sx * rightZ;
+  const upZ = sx * rightY - sy * rightX;
+  result.up.x = upX; result.up.y = upY; result.up.z = upZ;
+  const texelWorldM = Math.max(1e-6, extentM * 2 / Math.max(1, mapSize));
+  result.texelWorldM = texelWorldM;
+  const cameraRight = cameraAbsolute.x * rightX + cameraAbsolute.y * rightY + cameraAbsolute.z * rightZ;
+  const cameraUp = cameraAbsolute.x * upX + cameraAbsolute.y * upY + cameraAbsolute.z * upZ;
+  const alongSun = cameraAbsolute.x * sx + cameraAbsolute.y * sy + cameraAbsolute.z * sz;
+  const snappedRight = Math.round(cameraRight / texelWorldM) * texelWorldM;
+  const snappedUp = Math.round(cameraUp / texelWorldM) * texelWorldM;
+  const centerX = rightX * snappedRight + upX * snappedUp + sx * alongSun;
+  const centerY = rightY * snappedRight + upY * snappedUp + sy * alongSun;
+  const centerZ = rightZ * snappedRight + upZ * snappedUp + sz * alongSun;
+  result.centerAbsolute.x = centerX; result.centerAbsolute.y = centerY; result.centerAbsolute.z = centerZ;
+  result.centerRelative.x = centerX - cameraAbsolute.x;
+  result.centerRelative.y = centerY - cameraAbsolute.y;
+  result.centerRelative.z = centerZ - cameraAbsolute.z;
+  return result;
+}
+
 export function raySphereIntersection(
   rayOrigin: Vec3,
   rayDirectionInput: Vec3,

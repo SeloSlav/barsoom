@@ -27,6 +27,8 @@ export const RENDER_CONFIG = {
   orbitalNearM: 20,
   surfaceNearM: 0.08,
   atmosphereQualitySteps: 6,
+  surfaceShadowMapSize: 2048,
+  surfaceShadowMaxAltitudeM: 80_000,
   adaptiveResolution: true,
   targetFrameMs: 16.67,
 } as const;

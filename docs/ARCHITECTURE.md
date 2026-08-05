@@ -33,7 +33,7 @@ All tiles use one fixed grid topology (24×24 cells) and edge skirts. Neighbour 
 3. Camera-relative terrain renders with the shared Sun direction and generated material shader.
 4. A bounded ray-marched atmosphere pass integrates Rayleigh and dust/Mie single scattering, view and solar optical depth, transmittance, and Mars shadowing. The terrain shader applies matching aerial perspective to distant ground.
 
-The renderer probes `EXT_clip_control` before construction. Supported GPUs use reversed depth; other WebGL 2 devices use logarithmic depth instead, never both simultaneously. Near/far planes change with altitude. ACES tone mapping and a single exposure preserve a bright Sun, readable day terrain and a dark night side.
+The renderer probes `EXT_clip_control` before construction. Supported GPUs use reversed depth; other WebGL 2 devices use logarithmic depth instead, never both simultaneously. Near/far planes change with altitude. Below 80 km on the illuminated side, a 2,048² directional solar shadow map follows the camera; its orthographic centre is snapped in absolute Mars-fixed light-plane coordinates before conversion back to camera-relative space, so floating-origin motion cannot make shadows swim. A morph-aware depth material excludes skirts and follows tile geomorphing. ACES tone mapping and a single exposure preserve a bright Sun, readable day terrain and a dark night side.
 
 ## Astronomy
 

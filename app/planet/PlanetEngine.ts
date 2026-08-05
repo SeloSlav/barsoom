@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
-import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection } from "./math";
+import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
@@ -30,6 +30,13 @@ export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly depthStrategy: "reversed" | "logarithmic";
   private readonly scene = new THREE.Scene();
+  private readonly sunShadowLight = new THREE.DirectionalLight(0xffffff, 1);
+  private readonly sunShadowTarget = new THREE.Object3D();
+  private readonly shadowSun = new THREE.Vector3();
+  private readonly shadowSnap: DirectionalShadowSnap = {
+    sun: { x: 0, y: 0, z: 0 }, right: { x: 0, y: 0, z: 0 }, up: { x: 0, y: 0, z: 0 },
+    centerAbsolute: { x: 0, y: 0, z: 0 }, centerRelative: { x: 0, y: 0, z: 0 }, texelWorldM: 0,
+  };
   private readonly camera = new THREE.PerspectiveCamera(RENDER_CONFIG.fovDegrees, 1, 0.1, 50_000_000);
   private readonly skyCamera = new THREE.PerspectiveCamera(RENDER_CONFIG.fovDegrees, 1, 0.01, 50);
   private readonly terrain: PlanetTerrain;
@@ -53,6 +60,8 @@ export class PlanetEngine {
   private smoothedFrameMs = 16.67;
   private framesSinceQualityChange = 0;
   private qualityScale = 1;
+  private surfaceShadowsEnabled = false;
+  private surfaceShadowExtentM = 0;
   private paused = false;
   private disposed = false;
   private telemetry: PlanetTelemetry | null = null;
@@ -103,6 +112,8 @@ export class PlanetEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.14;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.debug.checkShaderErrors = true;
     this.renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
       const details = [
@@ -116,6 +127,17 @@ export class PlanetEngine {
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
     this.scene.background = null;
+
+    this.sunShadowLight.name = "Mars local directional sunlight shadows";
+    this.sunShadowTarget.name = "Mars shadow-map snapped target";
+    this.sunShadowLight.target = this.sunShadowTarget;
+    this.sunShadowLight.castShadow = false;
+    this.sunShadowLight.shadow.mapSize.set(RENDER_CONFIG.surfaceShadowMapSize, RENDER_CONFIG.surfaceShadowMapSize);
+    this.sunShadowLight.shadow.bias = -0.00012;
+    this.sunShadowLight.shadow.normalBias = 0.8;
+    this.sunShadowLight.shadow.radius = 1.35;
+    this.sunShadowLight.shadow.intensity = 0.88;
+    this.scene.add(this.sunShadowTarget, this.sunShadowLight);
 
     this.skyState = calculateMarsSky(this.simulationStartUtc);
     this.terrain = new PlanetTerrain(this.scene);
@@ -229,6 +251,7 @@ export class PlanetEngine {
       0,
       1,
     );
+    this.updateSurfaceShadows(daylight);
     const viewport = this.renderer.getDrawingBufferSize(this.viewportSize);
     const terrainStats = this.terrain.update(
       this.controlState.cameraAbsolute,
@@ -291,6 +314,8 @@ export class PlanetEngine {
       terrainNodes: terrainStats.nodeCount,
       horizonCulled: terrainStats.horizonCulled,
       depthStrategy: this.depthStrategy,
+      surfaceShadows: this.surfaceShadowsEnabled,
+      shadowExtentM: this.surfaceShadowExtentM,
       nearM: this.controlState.nearM,
       farM: this.controlState.farM,
       floatingOrigin: { ...this.controlState.cameraAbsolute },
@@ -299,6 +324,42 @@ export class PlanetEngine {
       simulationUtc: simulationUtc.toISOString(),
     };
     this.onTelemetry(this.telemetry);
+  }
+
+  private updateSurfaceShadows(daylight: number) {
+    const altitudeM = this.controlState.altitudeM;
+    const enabled = altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM && daylight > 0.01;
+    this.surfaceShadowsEnabled = enabled;
+    this.sunShadowLight.castShadow = enabled;
+    if (!enabled) {
+      this.surfaceShadowExtentM = 0;
+      return;
+    }
+
+    const extentM = clamp(800 + altitudeM * 2.2, 800, 120_000);
+    this.surfaceShadowExtentM = extentM;
+    const snap = snappedDirectionalShadowCenter(
+      this.controlState.cameraAbsolute,
+      this.skyState.sunDirection,
+      extentM,
+      RENDER_CONFIG.surfaceShadowMapSize,
+      this.shadowSnap,
+    );
+    this.shadowSun.set(snap.sun.x, snap.sun.y, snap.sun.z);
+    this.sunShadowTarget.position.set(snap.centerRelative.x, snap.centerRelative.y, snap.centerRelative.z);
+    const lightDistanceM = extentM * 2.5 + 60_000;
+    this.sunShadowLight.position.copy(this.sunShadowTarget.position).addScaledVector(this.shadowSun, lightDistanceM);
+
+    const shadowCamera = this.sunShadowLight.shadow.camera;
+    shadowCamera.left = -extentM;
+    shadowCamera.right = extentM;
+    shadowCamera.top = extentM;
+    shadowCamera.bottom = -extentM;
+    shadowCamera.near = 1;
+    shadowCamera.far = lightDistanceM * 2;
+    shadowCamera.updateProjectionMatrix();
+    this.sunShadowTarget.updateMatrixWorld(true);
+    this.sunShadowLight.updateMatrixWorld(true);
   }
 
   private adjustQuality() {
@@ -387,6 +448,9 @@ export class PlanetEngine {
     this.selection.removeFromParent();
     this.selection.geometry.dispose();
     this.selection.material.dispose();
+    this.sunShadowLight.removeFromParent();
+    this.sunShadowTarget.removeFromParent();
+    this.sunShadowLight.shadow.dispose();
     this.renderer.dispose();
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
     this.canvas.removeEventListener("pointerup", this.onSelectionPointerUp);

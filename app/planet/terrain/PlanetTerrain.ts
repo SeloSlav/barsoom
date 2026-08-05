@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { MARS_REFERENCE_RADIUS_M, TERRAIN_CONFIG } from "../constants";
+import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG, TERRAIN_CONFIG } from "../constants";
 import {
   childTiles,
   dot3,
@@ -15,7 +15,7 @@ import {
 import { MolaTileLoader } from "../mola";
 import { proceduralDetailHeight } from "../noise";
 import type { DebugFlags, TileEdge, TileKey, Vec3 } from "../types";
-import { createTerrainMaterial, type TerrainMaterial } from "../render/materials";
+import { createTerrainMaterial, createTerrainShadowMaterial, type TerrainMaterial } from "../render/materials";
 import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPool";
 
 type TileState = "idle" | "loading-data" | "queued" | "ready" | "failed";
@@ -97,6 +97,7 @@ export class PlanetTerrain {
   private readonly loader = new MolaTileLoader();
   private readonly workers = new TerrainWorkerPool();
   private readonly material = createTerrainMaterial();
+  private readonly shadowMaterial = createTerrainShadowMaterial();
   private readonly projectionScreen = new THREE.Matrix4();
   private readonly frustum = new THREE.Frustum();
   private readonly sphere = new THREE.Sphere();
@@ -107,6 +108,7 @@ export class PlanetTerrain {
   private viewportHeight = 1080;
   private fovRadians = Math.PI / 4;
   private debugDisableHorizonCulling = false;
+  private surfaceShadowsEnabled = false;
   private geometryBytes = 0;
   private stats: TerrainFrameStats = {
     activeTiles: 0,
@@ -145,6 +147,8 @@ export class PlanetTerrain {
     this.viewportHeight = viewportHeight;
     this.fovRadians = THREE.MathUtils.degToRad(camera.fov);
     this.debugDisableHorizonCulling = debug.horizonCulling;
+    this.surfaceShadowsEnabled = cameraAltitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM &&
+      dot3(normalize3(cameraAbsolute), sunDirection) > 0.01;
     this.projectionScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projectionScreen);
 
@@ -363,6 +367,12 @@ export class PlanetTerrain {
         positiveModulo(node.center!.z, MATERIAL_PERIOD_M),
       );
     };
+    mesh.customDepthMaterial = this.shadowMaterial;
+    mesh.receiveShadow = true;
+    mesh.onBeforeShadow = () => {
+      const renderState = mesh.userData.renderState as TileRenderState;
+      this.shadowMaterial.uniforms.uMorph.value = renderState.morph;
+    };
     this.scene.add(mesh);
     node.mesh = mesh;
     node.center = generated.center;
@@ -384,6 +394,7 @@ export class PlanetTerrain {
       return;
     }
     node.mesh.visible = true;
+    node.mesh.castShadow = this.surfaceShadowsEnabled;
     node.mesh.position.set(
       node.center!.x - this.cameraAbsolute.x,
       node.center!.y - this.cameraAbsolute.y,
@@ -451,6 +462,8 @@ export class PlanetTerrain {
     const geometry = node.mesh.geometry;
     node.mesh.visible = false;
     node.mesh.onBeforeRender = () => {};
+    node.mesh.onBeforeShadow = () => {};
+    node.mesh.castShadow = false;
     if (this.geometryPool.length < 24) this.geometryPool.push(geometry);
     else geometry.dispose();
     if (this.meshPool.length < 24) this.meshPool.push(node.mesh);
@@ -507,6 +520,7 @@ export class PlanetTerrain {
     for (const mesh of this.meshPool) mesh.removeFromParent();
     this.meshPool.length = 0;
     this.material.dispose();
+    this.shadowMaterial.dispose();
     this.workers.dispose();
   }
 }

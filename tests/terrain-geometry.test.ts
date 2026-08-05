@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { generateTerrainTile } from "../public/workers/terrain-worker.js";
 import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
 import { neighbourTile, parentTile } from "../app/planet/math";
+import { createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
@@ -30,6 +31,19 @@ describe("terrain worker geometry", () => {
       }
     }
     expect(neighbourBalanceAncestors(splitTile, "east").neighbour.face).not.toBe(splitTile.face);
+  });
+
+  it("configures morph-aware directional cast shadows without skirt occluders", () => {
+    const material = createTerrainMaterial();
+    const depth = createTerrainShadowMaterial();
+    expect(material.lights).toBe(true);
+    expect("directionalLightShadows" in material.uniforms).toBe(true);
+    expect(material.vertexShader).toContain("shadowmap_pars_vertex");
+    expect(material.fragmentShader).toContain("shadowmap_pars_fragment");
+    expect(depth.vertexShader).toContain("morphDelta");
+    expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
+    material.dispose();
+    depth.dispose();
   });
 
   it("bakes sampled MOLA elevations into the radial vertex positions", () => {

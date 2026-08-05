@@ -49,6 +49,8 @@ export type PlanetTelemetry = {
   terrainNodes: number;
   horizonCulled: number;
   depthStrategy: "reversed" | "logarithmic";
+  surfaceShadows: boolean;
+  shadowExtentM: number;
   nearM: number;
   farM: number;
   floatingOrigin: Vec3;

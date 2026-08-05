@@ -8,7 +8,7 @@ This matrix distinguishes automated evidence from the live GPU evidence still re
 |---|---|
 | Type safety | `npx tsc --noEmit` passes |
 | Code quality | `npm run lint` passes |
-| Maths, data, geometry, scheduling, astronomy, and controls | `npm test` passes 59 tests |
+| Maths, data, geometry, scheduling, astronomy, controls, material configuration, and shadow precision | `npm test` passes 61 tests |
 | Production application | `npm run build` passes |
 | Rendered shell and metadata | `node --test tests/rendered-html.test.mjs` passes |
 | Static runtime delivery | Page, MOLA manifest/tiles, star binary, and terrain worker return HTTP 200 on port 5190 |
@@ -28,7 +28,7 @@ This matrix distinguishes automated evidence from the live GPU evidence still re
 | 12 | Orbit/ground atmosphere | Bounded single-scattering shader with optical depth, transmittance, Mars shadow and terrain aerial perspective | Awaiting orbit/ground visual observation |
 | 13 | Catalogue stars | 6,682-record HYG binary, SHA/header/count/magnitude/colour tests | Proven |
 | 14 | Mars-centred Sun and planets | Astronomy Engine vectors, Mars body-frame transform and deterministic celestial tests | Proven |
-| 15 | Shared bright Sun lighting | One calculated Sun direction feeds terrain, atmosphere, terminator and disc; angular-size tests | Source/data proof complete; visual brightness pending |
+| 15 | Shared bright Sun lighting | One calculated Sun direction feeds terrain, atmosphere, terminator, disc and a texel-snapped local cast-shadow map; angular-size tests | Source/data proof complete; visual brightness/shadows pending |
 | 16 | Planetary precision stability | Double-precision CPU state, camera-relative tiles, high/low tests, adaptive near/far depth strategy | Awaiting close-range jitter observation |
 | 17 | Demand-streamed high resolution | LRU MOLA loader, visible quadtree selection, static per-tile requests, bounded caches | Proven by source and scheduling tests |
 | 18 | No major streaming stalls | Worker priority/cancellation tests and 4.87 ms CPU P95 | Awaiting live 1080p F3 frame profile |

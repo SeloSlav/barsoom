@@ -16,6 +16,7 @@ import {
   parentTile,
   raySphereIntersection,
   rayTerrainIntersection,
+  snappedDirectionalShadowCenter,
   splitHighLow,
   surfaceNormalAndSlope,
   tileKeyToString,
@@ -180,5 +181,35 @@ describe("continuous detail, zoom, and floating origin", () => {
     expect(split.high.y + split.low.y).toBe(camera.y);
     expect(split.high.z + split.low.z).toBe(camera.z);
     expect(MARS_REFERENCE_RADIUS_M).toBe(3_389_500);
+  });
+
+  it("snaps local solar shadows in absolute light-plane texels at planetary coordinates", () => {
+    const sun = { x: 0.71, y: 0.28, z: -0.64 };
+    const camera = { x: 3_390_124.75, y: -1_234_567.25, z: 2_345_678.5 };
+    const first = snappedDirectionalShadowCenter(camera, sun, 8_192, 2_048);
+    expect(first.texelWorldM).toBe(8);
+    expect(dot3(first.sun, first.right)).toBeCloseTo(0, 12);
+    expect(dot3(first.sun, first.up)).toBeCloseTo(0, 12);
+    expect(dot3(first.right, first.up)).toBeCloseTo(0, 12);
+    expect(length3(first.sun)).toBeCloseTo(1, 12);
+    expect(length3(first.right)).toBeCloseTo(1, 12);
+    expect(length3(first.up)).toBeCloseTo(1, 12);
+    const snappedRight = dot3(first.centerAbsolute, first.right) / first.texelWorldM;
+    const snappedUp = dot3(first.centerAbsolute, first.up) / first.texelWorldM;
+    expect(snappedRight).toBeCloseTo(Math.round(snappedRight), 8);
+    expect(snappedUp).toBeCloseTo(Math.round(snappedUp), 8);
+    const subTexelCamera = {
+      x: camera.x + first.right.x * 2 + first.up.x * 1.5,
+      y: camera.y + first.right.y * 2 + first.up.y * 1.5,
+      z: camera.z + first.right.z * 2 + first.up.z * 1.5,
+    };
+    const moved = snappedDirectionalShadowCenter(subTexelCamera, sun, 8_192, 2_048);
+    const rightStep = (dot3(moved.centerAbsolute, first.right) - dot3(first.centerAbsolute, first.right)) / first.texelWorldM;
+    const upStep = (dot3(moved.centerAbsolute, first.up) - dot3(first.centerAbsolute, first.up)) / first.texelWorldM;
+    expect(rightStep).toBeCloseTo(Math.round(rightStep), 7);
+    expect(upStep).toBeCloseTo(Math.round(upStep), 7);
+    expect(Math.abs(rightStep)).toBeLessThan(1.000001);
+    expect(Math.abs(upStep)).toBeLessThan(1.000001);
+    expect(length3(moved.centerRelative)).toBeLessThan(first.texelWorldM);
   });
 });
