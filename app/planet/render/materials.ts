@@ -243,44 +243,84 @@ const terrainFragment = /* glsl */ `
     return weights / max(weights.x + weights.y + weights.z, 0.0001);
   }
 
-  mat2 rotateSurfaceUv(float angle) {
-    float cosine = cos(angle);
-    float sine = sin(angle);
-    return mat2(cosine, sine, -sine, cosine);
+  vec4 surfaceVariantHash(vec2 cell, float seed) {
+    vec2 seededCell = cell + vec2(seed * 17.13, seed * -9.47);
+    return vec4(hash22(seededCell), hash22(seededCell + vec2(41.7, -29.4)));
   }
 
-  float surfaceMapBlend(vec2 projectedMetres, float seed) {
-    float variation = valueNoise(vec3(projectedMetres / 14.0, seed * 9.31 + 2.7));
-    return smoothstep(0.20, 0.80, variation);
+  vec2 surfaceQuarterTurn(vec2 value, float turn) {
+    if (turn < 1.0) return value;
+    if (turn < 2.0) return vec2(-value.y, value.x);
+    if (turn < 3.0) return -value;
+    return vec2(value.y, -value.x);
   }
 
-  vec2 surfaceMapUv(vec2 projectedMetres, float seed, bool secondary) {
-    float angle = secondary ? -0.91 + seed * 0.83 : 0.47 + seed * 1.71;
-    float scaleM = secondary ? 5.65 : 3.15;
-    vec2 offset = hash22(vec2(seed * 17.13 + (secondary ? 8.1 : 1.7), seed * 5.73)) * 19.0;
-    return rotateSurfaceUv(angle) * projectedMetres / scaleM + offset;
+  vec2 inverseSurfaceQuarterTurn(vec2 value, float turn) {
+    if (turn < 1.0) return value;
+    if (turn < 2.0) return vec2(value.y, -value.x);
+    if (turn < 3.0) return -value;
+    return vec2(-value.y, value.x);
+  }
+
+  vec2 surfaceVariantUv(vec2 projectedMetres, vec4 variant) {
+    float turn = floor(variant.z * 4.0);
+    float scaleM = mix(3.0, 6.4, variant.w);
+    return surfaceQuarterTurn(projectedMetres, turn) / scaleM + variant.xy * 37.0;
+  }
+
+  vec4 sampleStochasticSurfaceMap(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
+    // Each 5.3 m world cell blends the four variants anchored at its corners.
+    // Adjacent cells share corner variants, so the result is seamless, while
+    // every cell receives new phase, quarter-turn and physical scale choices.
+    // Unlike two globally repeated UVs, this has no short repeating lattice.
+    vec2 patchUv = projectedMetres / 5.3 - 0.5;
+    vec2 cell = floor(patchUv);
+    vec2 blendWeight = fract(patchUv);
+    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight);
+    vec4 variant00 = surfaceVariantHash(cell, seed);
+    vec4 variant10 = surfaceVariantHash(cell + vec2(1.0, 0.0), seed);
+    vec4 variant01 = surfaceVariantHash(cell + vec2(0.0, 1.0), seed);
+    vec4 variant11 = surfaceVariantHash(cell + vec2(1.0, 1.0), seed);
+    vec4 sample00 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant00));
+    vec4 sample10 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant10));
+    vec4 sample01 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant01));
+    vec4 sample11 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant11));
+    return mix(
+      mix(sample00, sample10, blendWeight.x),
+      mix(sample01, sample11, blendWeight.x),
+      blendWeight.y
+    );
   }
 
   vec3 sampleSurfaceDiffuseProjection(vec2 projectedMetres, float seed) {
-    vec3 primary = texture2D(uSurfaceDiffuse, surfaceMapUv(projectedMetres, seed, false)).rgb;
-    vec3 secondary = texture2D(uSurfaceDiffuse, surfaceMapUv(projectedMetres, seed, true)).rgb;
-    return mix(primary, secondary, surfaceMapBlend(projectedMetres, seed));
+    return sampleStochasticSurfaceMap(uSurfaceDiffuse, projectedMetres, seed).rgb;
   }
 
   float sampleSurfaceRoughnessProjection(vec2 projectedMetres, float seed) {
-    float primary = texture2D(uSurfaceRoughness, surfaceMapUv(projectedMetres, seed, false)).r;
-    float secondary = texture2D(uSurfaceRoughness, surfaceMapUv(projectedMetres, seed, true)).r;
-    return mix(primary, secondary, surfaceMapBlend(projectedMetres, seed));
+    return sampleStochasticSurfaceMap(uSurfaceRoughness, projectedMetres, seed).r;
+  }
+
+  vec3 sampleSurfaceNormalVariant(vec2 projectedMetres, vec4 variant) {
+    float turn = floor(variant.z * 4.0);
+    vec3 mapped = texture2D(uSurfaceNormal, surfaceVariantUv(projectedMetres, variant)).xyz * 2.0 - 1.0;
+    mapped.xy = inverseSurfaceQuarterTurn(mapped.xy, turn);
+    return mapped;
   }
 
   vec3 sampleSurfaceNormalProjection(vec2 projectedMetres, float seed) {
-    float primaryAngle = 0.47 + seed * 1.71;
-    float secondaryAngle = -0.91 + seed * 0.83;
-    vec3 primary = texture2D(uSurfaceNormal, surfaceMapUv(projectedMetres, seed, false)).xyz * 2.0 - 1.0;
-    vec3 secondary = texture2D(uSurfaceNormal, surfaceMapUv(projectedMetres, seed, true)).xyz * 2.0 - 1.0;
-    primary.xy = rotateSurfaceUv(-primaryAngle) * primary.xy;
-    secondary.xy = rotateSurfaceUv(-secondaryAngle) * secondary.xy;
-    return normalize(mix(primary, secondary, surfaceMapBlend(projectedMetres, seed)));
+    vec2 patchUv = projectedMetres / 5.3 - 0.5;
+    vec2 cell = floor(patchUv);
+    vec2 blendWeight = fract(patchUv);
+    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight);
+    vec3 sample00 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell, seed));
+    vec3 sample10 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(1.0, 0.0), seed));
+    vec3 sample01 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(0.0, 1.0), seed));
+    vec3 sample11 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(1.0, 1.0), seed));
+    return normalize(mix(
+      mix(sample00, sample10, blendWeight.x),
+      mix(sample01, sample11, blendWeight.x),
+      blendWeight.y
+    ));
   }
 
   vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights) {
@@ -382,8 +422,10 @@ const terrainFragment = /* glsl */ `
       vec3 martianRock = photographedRock * vec3(1.10, 0.67, 0.46);
       martianRock *= 0.88 + macro * 0.22;
       albedo = mix(albedo, martianRock, surfacePbrBlend * (1.0 - frostWeight));
-      mappedRoughness = sampleSurfaceRoughness(vStableMetres, textureWeights);
-      mappedNormal = sampleSurfaceNormal(vStableMetres, normal, textureWeights);
+      if (surfaceMaterialResponse > 0.001) {
+        mappedRoughness = sampleSurfaceRoughness(vStableMetres, textureWeights);
+        mappedNormal = sampleSurfaceNormal(vStableMetres, normal, textureWeights);
+      }
     }
 
     float longitude = atan(radial.z, radial.x);

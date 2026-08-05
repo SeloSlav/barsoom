@@ -108,7 +108,19 @@ describe("terrain worker geometry", () => {
     expect(material.metalness).toBe(0);
     expect(material.roughness).toBeLessThan(0.97);
     expect(material.emissiveIntensity).toBeGreaterThanOrEqual(0.2);
+    expect(material.emissive.r * material.emissiveIntensity).toBeGreaterThanOrEqual(0.2);
+    expect(material.emissive.g * material.emissiveIntensity).toBeGreaterThanOrEqual(0.2);
+    expect(material.emissive.b * material.emissiveIntensity).toBeGreaterThanOrEqual(0.2);
+    expect(material.normalScale.x).toBeLessThanOrEqual(0.25);
+    expect(material.normalScale.y).toBeLessThanOrEqual(0.25);
     expect(material.vertexColors).toBe(true);
+    expect(material.map?.name).toContain("diffuse");
+    expect(material.normalMap?.name).toContain("normal");
+    expect(material.roughnessMap?.name).toContain("roughness");
+    expect(material.emissiveMap).toBe(material.map);
+    material.map?.dispose();
+    material.normalMap?.dispose();
+    material.roughnessMap?.dispose();
     material.dispose();
   });
   it("seats surface rocks on the exact rendered terrain triangle", () => {
@@ -220,11 +232,13 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("distributionGgx");
     expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
-    expect(material.fragmentShader).toContain("rotateSurfaceUv");
+    expect(material.fragmentShader).toContain("sampleStochasticSurfaceMap");
+    expect(material.fragmentShader).toContain("surfaceVariantHash");
+    expect(material.fragmentShader).toContain("surfaceQuarterTurn");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuseProjection");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughnessProjection");
     expect(material.fragmentShader).toContain("sampleSurfaceNormalProjection");
-    expect(material.fragmentShader).toContain("surfaceMapBlend");
+    expect(material.fragmentShader).not.toContain("surfaceMapBlend");
     expect(material.fragmentShader).not.toContain("sampleRandomizedSurfaceDiffuse");
     expect(material.fragmentShader).not.toContain("surfaceAntiTile");
     expect(material.fragmentShader).toContain("surfaceAlbedoVisibility");

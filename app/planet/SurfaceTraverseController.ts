@@ -28,8 +28,16 @@ const CAMERA_HEIGHT_SMOOTH_TIME_S = 0.34;
 const CAMERA_MAX_HEIGHT_SPEED_M_S = 8;
 const SURFACE_NORMAL_FOLLOW_RATE = 8;
 const BOOT_SOLE_CLEARANCE_M = 0.025;
+export const MARS_JUMP_ANTICIPATION_DURATION_S = 0.22;
+const JUMP_LAUNCH_POSE_RELEASE_S = 0.3;
+const JUMP_LANDING_POSE_DURATION_S = 0.28;
 
 type AnimationName = "idle" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
+
+type JumpPoseWeights = {
+  squat: number;
+  descent: number;
+};
 
 export type TraverseSurfaceSample = {
   heightM: number;
@@ -62,6 +70,34 @@ export function normalizeMarsSurfaceDirection(direction: Vec3): Vec3 {
 
 export function marsJumpApexHeight(launchSpeedMps = MARS_TRAVERSE_JUMP_SPEED_M_S) {
   return (launchSpeedMps * launchSpeedMps) / (2 * MARS_SURFACE_GRAVITY_M_S2);
+}
+
+function smoothStep01(value: number) {
+  const t = clamp(value, 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+export function marsJumpPoseWeights(
+  anticipationSeconds: number,
+  airborne: boolean,
+  airborneSeconds: number,
+  verticalVelocityMps: number,
+  landingSeconds: number,
+): JumpPoseWeights {
+  const anticipation = anticipationSeconds > 0
+    ? smoothStep01(1 - anticipationSeconds / MARS_JUMP_ANTICIPATION_DURATION_S)
+    : 0;
+  const launch = airborne
+    ? 1 - smoothStep01(airborneSeconds / JUMP_LAUNCH_POSE_RELEASE_S)
+    : 0;
+  const landing = smoothStep01(landingSeconds / JUMP_LANDING_POSE_DURATION_S) * 0.58;
+  const descent = airborne
+    ? smoothStep01((-verticalVelocityMps - 0.2) / 1.8)
+    : 0;
+  return {
+    squat: Math.max(anticipation, launch, landing),
+    descent,
+  };
 }
 
 export function applyWowCameraDrag(
@@ -190,9 +226,12 @@ export class SurfaceTraverseController {
   private readonly cameraSurfaceDirection = new THREE.Vector3();
   private readonly relativeTarget = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
+  private readonly poseEuler = new THREE.Euler();
+  private readonly poseQuaternion = new THREE.Quaternion();
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
+  private readonly poseBones = new Map<string, THREE.Bone>();
   private mixer: THREE.AnimationMixer | null = null;
   private currentAction: THREE.AnimationAction | null = null;
   private model: THREE.Object3D | null = null;
@@ -209,6 +248,7 @@ export class SurfaceTraverseController {
   private surfaceNormalInitialized = false;
   private verticalOffsetM = 0;
   private verticalVelocityMps = 0;
+  private jumpAnticipationSeconds = 0;
   private airborneSeconds = 0;
   private landingSeconds = 0;
   private footstepCountdown = 0;
@@ -262,10 +302,12 @@ export class SurfaceTraverseController {
       const center = bounds.getCenter(new THREE.Vector3());
       this.model.position.set(-center.x, -bounds.min.y, -center.z);
       this.model.traverse((child) => {
-        if (!(child instanceof THREE.Mesh)) return;
-        child.castShadow = true;
-        child.receiveShadow = true;
-        child.frustumCulled = false;
+        if (child instanceof THREE.Bone) this.poseBones.set(child.name, child);
+        if (child instanceof THREE.Mesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.frustumCulled = false;
+        }
       });
       this.root.add(this.model);
 
@@ -299,6 +341,7 @@ export class SurfaceTraverseController {
     this.surfaceNormalInitialized = false;
     this.verticalOffsetM = 0;
     this.verticalVelocityMps = 0;
+    this.jumpAnticipationSeconds = 0;
     this.airborneSeconds = 0;
     this.landingSeconds = 0;
     this.footstepCountdown = 0;
@@ -384,18 +427,32 @@ export class SurfaceTraverseController {
   }
 
   private updateJump(deltaSeconds: number) {
+    let physicsDeltaSeconds = deltaSeconds;
+    if (this.jumpAnticipationSeconds > 0) {
+      this.jumpAnticipationSeconds -= deltaSeconds;
+      if (this.jumpAnticipationSeconds > 0) return false;
+
+      // Preserve the complete ballistic arc even when the anticipation timer
+      // expires part-way through a rendered frame.
+      physicsDeltaSeconds = Math.max(0, -this.jumpAnticipationSeconds);
+      this.jumpAnticipationSeconds = 0;
+      this.verticalVelocityMps = MARS_TRAVERSE_JUMP_SPEED_M_S;
+      this.verticalOffsetM = 0.001;
+      this.airborneSeconds = 0;
+      this.onAudioEvent({ type: "jump" });
+    }
     if (this.verticalOffsetM <= 0 && this.verticalVelocityMps <= 0) {
       this.verticalOffsetM = 0;
       return false;
     }
-    this.airborneSeconds += deltaSeconds;
-    this.verticalVelocityMps -= MARS_SURFACE_GRAVITY_M_S2 * deltaSeconds;
-    this.verticalOffsetM += this.verticalVelocityMps * deltaSeconds;
+    this.airborneSeconds += physicsDeltaSeconds;
+    this.verticalVelocityMps -= MARS_SURFACE_GRAVITY_M_S2 * physicsDeltaSeconds;
+    this.verticalOffsetM += this.verticalVelocityMps * physicsDeltaSeconds;
     if (this.verticalOffsetM <= 0) {
       this.verticalOffsetM = 0;
       this.verticalVelocityMps = 0;
       this.airborneSeconds = 0;
-      this.landingSeconds = 0.28;
+      this.landingSeconds = JUMP_LANDING_POSE_DURATION_S;
       this.footstepCountdown = 0;
       this.onAudioEvent({ type: "land" });
       return false;
@@ -404,11 +461,14 @@ export class SurfaceTraverseController {
   }
 
   private updateAnimation(speedMps: number, airborne: boolean, deltaSeconds: number) {
-    if (airborne) {
-      this.playAnimation(this.verticalVelocityMps > -0.4 && this.airborneSeconds < 0.9 ? "jump" : "jump_idle");
+    if (this.jumpAnticipationSeconds > 0 || airborne) {
+      // This model has no authored jump clips. Idle supplies a stable base pose
+      // for the procedural rig layer below instead of silently playing a
+      // one-shot fallback animation.
+      this.playAnimation("idle");
     } else if (this.landingSeconds > 0) {
       this.landingSeconds = Math.max(0, this.landingSeconds - deltaSeconds);
-      this.playAnimation("jump_land");
+      this.playAnimation("idle");
     } else if (speedMps >= RUN_SPEED_M_S - 0.1) {
       this.playAnimation("run");
     } else if (speedMps > 0) {
@@ -417,6 +477,56 @@ export class SurfaceTraverseController {
       this.playAnimation("idle");
     }
     this.mixer?.update(deltaSeconds);
+    this.applyJumpPose(airborne);
+  }
+
+  private rotatePoseBone(name: string, xDegrees: number, yDegrees: number, zDegrees: number, weight: number) {
+    if (weight <= 0) return;
+    const bone = this.poseBones.get(name);
+    if (!bone) return;
+    this.poseEuler.set(
+      THREE.MathUtils.degToRad(xDegrees * weight),
+      THREE.MathUtils.degToRad(yDegrees * weight),
+      THREE.MathUtils.degToRad(zDegrees * weight),
+    );
+    this.poseQuaternion.setFromEuler(this.poseEuler);
+    bone.quaternion.multiply(this.poseQuaternion);
+  }
+
+  private applyJumpPose(airborne: boolean) {
+    const weights = marsJumpPoseWeights(
+      this.jumpAnticipationSeconds,
+      airborne,
+      this.airborneSeconds,
+      this.verticalVelocityMps,
+      this.landingSeconds,
+    );
+
+    if (weights.squat > 0) {
+      const body = this.poseBones.get("Body");
+      if (body) body.position.y -= 0.00215 * weights.squat;
+      this.rotatePoseBone("Chest", 7, 0, 0, weights.squat);
+      this.rotatePoseBone("UpperLegL", 30, 0, 0, weights.squat);
+      this.rotatePoseBone("LowerLegL", 0, 0, -34, weights.squat);
+      this.rotatePoseBone("UpperLegR", 0, 0, -30, weights.squat);
+      this.rotatePoseBone("LowerLegR", 34, 0, 0, weights.squat);
+      this.rotatePoseBone("UpperArmL", 0, 0, 16, weights.squat);
+      this.rotatePoseBone("UpperArmR", 0, 0, -16, weights.squat);
+    }
+
+    if (weights.descent > 0) {
+      // Spread the arms forward and away from the torso as downward speed
+      // builds, while keeping a little flex in the knees for the landing.
+      this.rotatePoseBone("Chest", 8, 0, 0, weights.descent);
+      this.rotatePoseBone("UpperArmL", 24, 0, -28, weights.descent);
+      this.rotatePoseBone("LowerArmL", 0, 0, -16, weights.descent);
+      this.rotatePoseBone("UpperArmR", 24, 0, 28, weights.descent);
+      this.rotatePoseBone("LowerArmR", 0, 0, 16, weights.descent);
+      this.rotatePoseBone("UpperLegL", 8, 0, 0, weights.descent);
+      this.rotatePoseBone("LowerLegL", 0, 0, -9, weights.descent);
+      this.rotatePoseBone("UpperLegR", 0, 0, -8, weights.descent);
+      this.rotatePoseBone("LowerLegR", 9, 0, 0, weights.descent);
+    }
   }
 
   private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {
@@ -451,11 +561,11 @@ export class SurfaceTraverseController {
   update(deltaSeconds: number): PlanetControlState {
     const delta = clamp(deltaSeconds, 0, 0.05);
     this.setLocalBasis();
-    const speedMps = this.updateMovement(delta);
+    const speedMps = this.jumpAnticipationSeconds > 0 ? 0 : this.updateMovement(delta);
     this.setLocalBasis();
     const airborne = this.updateJump(delta);
     this.updateAnimation(speedMps, airborne, delta);
-    this.updateFootsteps(speedMps, airborne, delta);
+    this.updateFootsteps(speedMps, airborne || this.jumpAnticipationSeconds > 0, delta);
 
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
@@ -584,14 +694,17 @@ export class SurfaceTraverseController {
     }
     if (event.code === "Space") {
       event.preventDefault();
-      if (!event.repeat && this.verticalOffsetM <= 0.001 && this.verticalVelocityMps === 0) {
-        this.verticalVelocityMps = MARS_TRAVERSE_JUMP_SPEED_M_S;
-        this.verticalOffsetM = 0.001;
+      if (
+        !event.repeat &&
+        this.jumpAnticipationSeconds === 0 &&
+        this.verticalOffsetM <= 0.001 &&
+        this.verticalVelocityMps === 0 &&
+        this.landingSeconds === 0
+      ) {
+        this.jumpAnticipationSeconds = MARS_JUMP_ANTICIPATION_DURATION_S;
         this.airborneSeconds = 0;
         this.landingSeconds = 0;
         this.footstepCountdown = 0;
-        this.playAnimation("jump");
-        this.onAudioEvent({ type: "jump" });
       }
     }
     this.keys.add(event.code);

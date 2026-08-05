@@ -20,9 +20,17 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      // Vite enables console forwarding automatically in agent sessions. If
+      // the HMR socket disconnects, its unhandled-rejection reporter can try
+      // to send over that closed transport and replace the original error
+      // with `send was called before connect`. Browser console output and HMR
+      // still work normally with only the forwarding bridge disabled.
+      forwardConsole: false,
+      ...(isCodexSeatbeltSandbox
+        ? { watch: { useFsEvents: false, usePolling: true } }
+        : {}),
+    },
     plugins: [
       vinext(),
       cloudflare({

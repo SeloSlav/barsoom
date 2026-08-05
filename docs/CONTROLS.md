@@ -6,7 +6,7 @@
 | Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point with no yaw, pitch, pole, or roll limit. Rotations can wrap repeatedly; only a near-ground endpoint inside terrain is rejected. The first middle drag takes full manual control from the automatic approach composition. |
 | Pan across Mars | Hold right mouse and drag | Clears any locked zoom point, then translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
 | Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. With no selection, the surface point under the cursor anchors inward zoom. With a reticle selection, both inward and outward zoom remain locked to that point. An untouched descent eases from orbital nadir into a 48-degree RTS-style approach below 350 km AGL. |
-| Lock zoom point | Left click | Places the scale-aware geographic acquisition reticle and locks wheel zoom to that surface point until cleared or replaced. |
+| Lock zoom point | Left click | Places the scale-aware geographic acquisition reticle, locks wheel zoom, and opens an **Instantiate observer** action beside that surface point. |
 | Clear zoom point | Right click | Removes the reticle and returns wheel input to free cursor zoom. Holding the button and dragging continues to pan normally. |
 | Toggle diagnostics | `F3` | FPS, timing, tiles, LOD, triangles, calls, tile memory, worker queue, depth range and floating origin. |
 | Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |
@@ -27,7 +27,7 @@
 | Zoom camera | Mouse wheel | Changes follow distance out to 39 m. Zooming all the way in enters first person; one outward step restores close third person. |
 | Mars jump | `Space` | Launches at 4.8 m/s and falls at Mars surface gravity, 3.721 m/s². |
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |
-| Return to survey | `Escape` | Leaves the astronaut and returns to planetary survey above the same location. |
+| Return to survey | `Escape` | Leaves the astronaut and returns to the maximum-altitude planetary view, centred above the same location. |
 
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 

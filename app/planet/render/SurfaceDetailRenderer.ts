@@ -39,15 +39,65 @@ export type SurfaceRockSupport = {
   normal: Vec3;
 };
 
+function createSurfaceRockTexture(
+  path: string,
+  name: string,
+  fallback: [number, number, number, number],
+  colour = false,
+) {
+  let texture: THREE.Texture;
+  if (typeof document === "undefined") {
+    texture = new THREE.DataTexture(new Uint8Array(fallback), 1, 1, THREE.RGBAFormat);
+    texture.needsUpdate = true;
+  } else {
+    texture = new THREE.TextureLoader().load(path);
+  }
+  texture.name = name;
+  texture.colorSpace = colour ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = 8;
+  return texture;
+}
+
 export function createSurfaceRockMaterial() {
+  const diffuse = createSurfaceRockTexture(
+    "/textures/mars-rock-diffuse.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Surface rock diffuse texture",
+    [128, 78, 48, 255],
+    true,
+  );
+  const normal = createSurfaceRockTexture(
+    "/textures/mars-rock-normal-gl.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Surface rock OpenGL normal texture",
+    [128, 128, 255, 255],
+  );
+  const roughness = createSurfaceRockTexture(
+    "/textures/mars-rock-roughness.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Surface rock roughness texture",
+    [235, 235, 235, 255],
+  );
   return new THREE.MeshStandardMaterial({
     color: 0xffffff,
-    roughness: 0.94,
+    map: diffuse,
+    normalMap: normal,
+    // The terrain normal map describes shallow ground relief. On a faceted
+    // boulder its former strength overwhelmed the mesh normals and turned
+    // broad faces away from every light source.
+    normalScale: new THREE.Vector2(0.2, 0.2),
+    roughnessMap: roughness,
+    roughness: 0.9,
     metalness: 0,
     flatShading: true,
     vertexColors: true,
-    emissive: 0x281008,
-    emissiveIntensity: 0.22,
+    // This is the same texture-backed dusty-sky bounce used conceptually by
+    // the terrain shader. White is intentional: emissiveMap already supplies
+    // the rock colour. The former near-black multiplier erased that map.
+    emissive: 0xffffff,
+    emissiveMap: diffuse,
+    emissiveIntensity: 0.24,
   });
 }
 
@@ -240,8 +290,10 @@ export class SurfaceDetailRenderer {
         mesh: new THREE.InstancedMesh(boulderGeometry, createSurfaceRockMaterial(), BOULDER_FIELD.maximumInstances),
         config: BOULDER_FIELD,
         instances: [],
-        dark: new THREE.Color(0x642a18),
-        light: new THREE.Color(0xb85d32),
+        // Instance colours multiply the diffuse map. Keep them light enough
+        // to colour-grade the rock without crushing its photographed detail.
+        dark: new THREE.Color(0xc07a59),
+        light: new THREE.Color(0xf0b48b),
         maxAltitudeM: SURFACE_DETAIL_MAX_ALTITUDE_M,
         groundingCursor: 0,
         groundingRefreshBudget: BOULDER_GROUNDING_REFRESH_BUDGET,
@@ -250,8 +302,8 @@ export class SurfaceDetailRenderer {
         mesh: new THREE.InstancedMesh(rockGeometry, createSurfaceRockMaterial(), ROCK_FIELD.maximumInstances),
         config: ROCK_FIELD,
         instances: [],
-        dark: new THREE.Color(0x542419),
-        light: new THREE.Color(0xa55331),
+        dark: new THREE.Color(0xb96f52),
+        light: new THREE.Color(0xeaaa80),
         maxAltitudeM: 1_500,
         groundingCursor: 0,
         groundingRefreshBudget: ROCK_GROUNDING_REFRESH_BUDGET,
@@ -369,6 +421,9 @@ export class SurfaceDetailRenderer {
     for (const field of this.fields) {
       field.mesh.removeFromParent();
       field.mesh.geometry.dispose();
+      field.mesh.material.map?.dispose();
+      field.mesh.material.normalMap?.dispose();
+      field.mesh.material.roughnessMap?.dispose();
       field.mesh.material.dispose();
     }
   }

@@ -65,19 +65,40 @@ const QA_ALTITUDES = [
   { label: "Surface", metres: SURFACE_EYE_HEIGHT_M },
 ] as const;
 
+type ObserverActionPosition = { x: number; y: number };
+
+function positionObserverAction(x: number, y: number): ObserverActionPosition {
+  const cardWidth = 196;
+  const cardHeight = 58;
+  const edgeGap = 12;
+  const targetGap = 20;
+  const fitsToRight = x + targetGap + cardWidth <= window.innerWidth - edgeGap;
+  return {
+    x: fitsToRight ? x + targetGap : Math.max(edgeGap, x - targetGap - cardWidth),
+    y: Math.min(Math.max(edgeGap, y - 18), window.innerHeight - cardHeight - edgeGap),
+  };
+}
+
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [debug, setDebug] = useState<DebugFlags>({ overlay: false, tileBoundaries: false, cubeFaces: false, lodColours: false, normals: false, molaOnly: false, horizonCulling: false });
 
   useEffect(() => {
     if (!canvasRef.current) return;
     let engine: PlanetEngine | null = null;
     try {
-      engine = new PlanetEngine(canvasRef.current, setTelemetry, setError, initialSimulationUtc);
+      engine = new PlanetEngine(
+        canvasRef.current,
+        setTelemetry,
+        setError,
+        initialSimulationUtc,
+        (position) => setObserverAction(position ? positionObserverAction(position.x, position.y) : null),
+      );
       setAudioMuted(engine.getAudioMuted());
     } catch (caught) {
       engine?.dispose();
@@ -154,6 +175,14 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>
       <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>
+      {observerAction && !surfaceMode && <aside
+        className="observer-action-card"
+        style={{ left: observerAction.x, top: observerAction.y }}
+        aria-label="Selected surface observer action"
+      >
+        <span>COORDINATE PHASE LOCKED</span>
+        <button type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate observer</button>
+      </aside>}
       {helpVisible && <aside className="help-panel">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>

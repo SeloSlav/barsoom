@@ -4,10 +4,12 @@ import {
   MARS_TRAVERSE_JUMP_SPEED_M_S,
 } from "../app/planet/constants";
 import {
+  MARS_JUMP_ANTICIPATION_DURATION_S,
   applyWowCameraDrag,
   applyWowCameraZoom,
   isWowAutoRunKey,
   marsJumpApexHeight,
+  marsJumpPoseWeights,
   normalizeMarsSurfaceDirection,
   randomMarsSurfaceDirection,
   smoothCameraHeight,
@@ -23,6 +25,25 @@ describe("surface traverse physics", () => {
       8,
     );
     expect(marsJumpApexHeight()).toBeGreaterThan(3);
+  });
+
+  it("anticipates takeoff with a squat and changes to a falling pose on descent", () => {
+    const starting = marsJumpPoseWeights(
+      MARS_JUMP_ANTICIPATION_DURATION_S,
+      false,
+      0,
+      0,
+      0,
+    );
+    const crouched = marsJumpPoseWeights(0.001, false, 0, 0, 0);
+    const ascending = marsJumpPoseWeights(0, true, 0.5, 2.5, 0);
+    const descending = marsJumpPoseWeights(0, true, 1.8, -2.5, 0);
+
+    expect(starting.squat).toBe(0);
+    expect(crouched.squat).toBeGreaterThan(0.99);
+    expect(ascending.descent).toBe(0);
+    expect(descending.descent).toBeGreaterThan(0.9);
+    expect(descending.squat).toBe(0);
   });
 
   it("generates unit-length surface directions across the sphere", () => {

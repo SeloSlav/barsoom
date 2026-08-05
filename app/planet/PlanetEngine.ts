@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { BarsoomAudio } from "../audio/BarsoomAudio";
-import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
+import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
 import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
@@ -21,6 +21,7 @@ export type PlanetEngineApi = {
   setNightSide: (altitudeM?: number) => void;
   setTerminator: (altitudeM?: number) => void;
   setSimulationUtc: (utcIso: string, rate?: number) => void;
+  instantiateObserver: () => void;
   teleportRandomSurface: () => void;
   exitSurfaceTraverse: () => void;
   getAudioMuted: () => boolean;
@@ -90,6 +91,7 @@ export class PlanetEngine {
     private readonly onTelemetry: (telemetry: PlanetTelemetry) => void,
     private readonly onError: (message: string | null) => void,
     initialSimulationUtc: string | Date = new Date(),
+    private readonly onSelectionChange: (position: { x: number; y: number } | null) => void = () => {},
     simulationRate = 60,
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
@@ -267,6 +269,9 @@ export class PlanetEngine {
         this.simulationRate = rate;
         this.skyState = calculateMarsSky(epoch);
         this.lastSkyUpdate = -Infinity;
+      },
+      instantiateObserver: () => {
+        if (!this.surfaceTraverse.active && this.selectionDirection) this.enterSurfaceTraverse(this.selectionDirection);
       },
       teleportRandomSurface: () => this.enterSurfaceTraverse(null),
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
@@ -479,6 +484,7 @@ export class PlanetEngine {
     if (!hit) return;
     this.selectionDirection = new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z);
     this.controls.setZoomAnchor(this.selectionDirection);
+    this.onSelectionChange({ x: event.clientX, y: event.clientY });
     this.audio.playPhaseLock();
     void this.terrain.prefetch(this.selectionDirection);
   };
@@ -510,6 +516,7 @@ export class PlanetEngine {
     this.pointerDown = null;
     this.selectionDirection = null;
     this.controls.setZoomAnchor(null);
+    this.onSelectionChange(null);
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
@@ -548,7 +555,7 @@ export class PlanetEngine {
     this.audio.playObserverTransition(false);
     this.controls.setEnabled(true);
     this.clearSelection();
-    this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, 1_200);
+    this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, MAX_CAMERA_ALTITUDE_M);
     this.lastTelemetryTime = -Infinity;
   }
 
