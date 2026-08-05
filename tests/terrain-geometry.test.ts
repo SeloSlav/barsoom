@@ -98,4 +98,28 @@ describe("terrain worker geometry", () => {
     }
     expect(restored.center).toEqual(first.center);
   });
+
+  it("adds deterministic mesh relief at playable ground scales", () => {
+    const base = {
+      key: { face: "px", lod: 4, x: 8, y: 8 },
+      gridSize: 2,
+      heightsM: new Int16Array(4),
+      areoidM: new Int16Array(4),
+    } as const;
+    const request = {
+      jobId: 20,
+      key: { face: "px", lod: 16, x: 32_768, y: 32_768 },
+      base,
+      segments: 64,
+      skirtM: 140,
+    } as const;
+    const first = generateTerrainTile(request);
+    const second = generateTerrainTile({ ...request, jobId: 21 });
+    const surfaceCount = (request.segments + 1) ** 2;
+    const elevations = Array.from(first.elevations.slice(0, surfaceCount));
+
+    expect(Math.max(...elevations) - Math.min(...elevations)).toBeGreaterThan(1);
+    expect(Buffer.from(second.positions.buffer)).toEqual(Buffer.from(first.positions.buffer));
+    expect(Buffer.from(second.elevations.buffer)).toEqual(Buffer.from(first.elevations.buffer));
+  });
 });

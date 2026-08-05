@@ -56,6 +56,15 @@ const DETAIL_OCTAVES = [
   { frequency: 3_300, amplitude: 2.8 },
   { frequency: 8_200, amplitude: 0.82 },
   { frequency: 20_500, amplitude: 0.22 },
+  // Near-ground geometry bands. These resolve from roughly 70 m down to
+  // metre scale, providing deterministic playable relief instead of relying
+  // on a flat fragment-shader grain once the camera reaches the surface.
+  { frequency: 48_000, amplitude: 12 },
+  { frequency: 110_000, amplitude: 5.2 },
+  { frequency: 250_000, amplitude: 2.1 },
+  { frequency: 560_000, amplitude: 0.85 },
+  { frequency: 1_250_000, amplitude: 0.32 },
+  { frequency: 2_800_000, amplitude: 0.11 },
 ] as const;
 
 export function proceduralDetailHeight(direction: Vec3, resolvedOctaves = DETAIL_OCTAVES.length) {
@@ -86,4 +95,3 @@ export function proceduralDetailHeight(direction: Vec3, resolvedOctaves = DETAIL
 export function resolvedDetailOctavesForLod(lod: number) {
   return Math.max(0, Math.min(DETAIL_OCTAVES.length, lod - 2));
 }
-

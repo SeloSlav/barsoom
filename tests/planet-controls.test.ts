@@ -131,6 +131,39 @@ describe("PlanetControls integration", () => {
     expect(crossedFarSide).toBe(true);
   });
 
+  it("eases into an RTS approach near the ground without overriding manual orbit", () => {
+    const { canvas, camera, controls } = trackedHarness();
+    controls.setLocation(-13.9, -59.2, 10_000);
+    let frame = controls.update(1 / 60);
+    for (let step = 0; step < 180; step += 1) frame = controls.update(1 / 60);
+    const approach = controls.getState();
+    expect(approach.automaticApproachEnabled).toBe(true);
+    expect(approach.approachPitchDeg).toBeCloseTo(48, 2);
+    expect(Math.acos(dot3(approach.orbitDirection, frame.focusDirection)) * 180 / Math.PI).toBeCloseTo(48, 2);
+    expect(frame.altitudeM).toBeCloseTo(10_000, 3);
+
+    const forwardBeforePan = camera.getWorldDirection(new THREE.Vector3());
+    const focusBeforePan = { ...frame.focusDirection };
+    pointer(canvas, "pointerdown", 2, 400, 300);
+    pointer(canvas, "pointermove", 2, 485, 265);
+    pointer(canvas, "pointerup", 2, 485, 265);
+    frame = controls.update(1 / 60);
+    expect(dot3(focusBeforePan, frame.focusDirection)).toBeLessThan(0.99999999);
+    expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-10);
+    expect(controls.getState().automaticApproachEnabled).toBe(true);
+
+    pointer(canvas, "pointerdown", 1, 400, 300);
+    pointer(canvas, "pointermove", 1, 520, 245);
+    pointer(canvas, "pointerup", 1, 520, 245);
+    const manualDirection = { ...controls.getState().orbitDirection };
+    expect(controls.getState().automaticApproachEnabled).toBe(false);
+    for (let step = 0; step < 180; step += 1) controls.update(1 / 60);
+    const settledManualDirection = controls.getState().orbitDirection;
+    expect(settledManualDirection.x).toBeCloseTo(manualDirection.x, 12);
+    expect(settledManualDirection.y).toBeCloseTo(manualDirection.y, 12);
+    expect(settledManualDirection.z).toBeCloseTo(manualDirection.z, 12);
+  });
+
   it("crosses the longitude seam and remains finite while panning over a pole", () => {
     const { canvas, controls } = trackedHarness();
     controls.setLocation(0, 179.8, 1_000_000);
@@ -161,8 +194,8 @@ describe("PlanetControls integration", () => {
     const beforeFace = directionToFaceUv(beforeFrame.focusDirection).face;
     const forwardBefore = camera.getWorldDirection(new THREE.Vector3());
     pointer(canvas, "pointerdown", 2, 400, 300);
-    pointer(canvas, "pointermove", 2, 160, 300);
-    pointer(canvas, "pointerup", 2, 160, 300);
+    pointer(canvas, "pointermove", 2, 640, 300);
+    pointer(canvas, "pointerup", 2, 640, 300);
     const afterFrame = controls.update(1 / 60);
     const afterFace = directionToFaceUv(afterFrame.focusDirection).face;
     expect(afterFace).not.toBe(beforeFace);

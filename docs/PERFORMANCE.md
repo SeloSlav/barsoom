@@ -24,7 +24,7 @@ Measured on the production build in this repository:
 | Adaptive render scale floor | 0.72 |
 | Near-surface solar shadow map | 2,048² below 80 km on the illuminated side |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 61 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 63 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, the automatic RTS approach/manual-control handoff, deterministic playable-scale relief, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
@@ -33,11 +33,11 @@ Measured on the production build in this repository:
 | Metric | Result |
 |---|---:|
 | Generated payload per tile | 65,428 bytes |
-| Mean generation time | 3.39 ms |
-| Median generation time | 3.23 ms |
-| 95th percentile | 4.87 ms |
-| Maximum | 5.76 ms |
-| Two-worker P95 throughput estimate | 411 tiles/s |
+| Mean generation time | 3.71 ms |
+| Median generation time | 3.71 ms |
+| 95th percentile | 4.95 ms |
+| Maximum | 5.49 ms |
+| Two-worker P95 throughput estimate | 404 tiles/s |
 
 This is a repeatable CPU throughput measurement, not a substitute for the live `F3` GPU/frame-time telemetry. The pre-implementation repository had no renderer or terrain job to benchmark, so its corresponding throughput and frame-time measurements are not applicable rather than zero.
 

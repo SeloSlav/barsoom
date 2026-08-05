@@ -116,7 +116,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {helpVisible && <aside className="help-panel">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close controls">×</button><p className="eyebrow">PLANET CONTROLS</p>
         <dl><div><dt>Orbit focus</dt><dd>Middle-mouse drag</dd></div><div><dt>Move across Mars</dt><dd>Right-mouse drag</dd></div><div><dt>Zoom at cursor</dt><dd>Mouse wheel</dd></div><div><dt>Select ground</dt><dd>Left click</dd></div><div><dt>Diagnostics</dt><dd>F3</dd></div><div><dt>Tile boundaries</dt><dd>F4</dd></div></dl>
-        <p>Wheel movement scales continuously from intercontinental orbit changes to centimetres near the regolith.</p>
+        <p>Wheel movement scales continuously from orbit to the regolith. Below 350 km, an untouched descent eases into a 48-degree RTS approach; middle-drag takes full manual control.</p>
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
         <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>

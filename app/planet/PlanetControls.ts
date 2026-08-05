@@ -45,7 +45,6 @@ export class PlanetControls {
   private readonly scratchB = new THREE.Vector3();
   private readonly scratchC = new THREE.Vector3();
   private readonly scratchD = new THREE.Vector3();
-  private readonly scratchQuaternion = new THREE.Quaternion();
   private readonly yawQuaternion = new THREE.Quaternion();
   private readonly pitchQuaternion = new THREE.Quaternion();
   private zoomAnchor: THREE.Vector3 | null = null;
@@ -53,6 +52,8 @@ export class PlanetControls {
   private desiredCameraDistanceM = this.cameraDistanceM;
   private desiredAltitudeM = 10_000_000;
   private altitudeM = 10_000_000;
+  private automaticApproachEnabled = true;
+  private automaticApproachPitchRad = 0;
   private drag: PointerDrag | null = null;
   private disposed = false;
 
@@ -117,6 +118,9 @@ export class PlanetControls {
   };
 
   private orbit(dx: number, dy: number) {
+    // Once the player takes the orbit control, their orientation is
+    // authoritative. Automatic approach pitch never fights a middle drag.
+    this.automaticApproachEnabled = false;
     // Rotate one fixed camera offset around an unchanged focus point.
     const oldOrbit = this.scratchA.copy(this.orbitDirection);
     const oldUp = this.scratchB.copy(this.viewUp);
@@ -232,11 +236,48 @@ export class PlanetControls {
     if (this.focusDirection.angleTo(this.zoomAnchor) < 1e-7) this.zoomAnchor = null;
   }
 
+  private updateAutomaticApproach(deltaSeconds: number) {
+    if (!this.automaticApproachEnabled) return;
+
+    // Preserve a nadir view at planetary scale, then ease into an oblique
+    // RTS-style view for the final descent. At low altitude the camera sits
+    // laterally from its ground focus instead of collapsing directly onto it,
+    // which keeps nearby relief visible and gives panning somewhere to go.
+    const transition = clamp((this.altitudeM - 25_000) / (350_000 - 25_000), 0, 1);
+    const smoothTransition = transition * transition * (3 - 2 * transition);
+    const targetPitchRad = THREE.MathUtils.degToRad(48) * (1 - smoothTransition);
+    const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 7.5);
+    const nextPitchRad = THREE.MathUtils.lerp(
+      this.automaticApproachPitchRad,
+      targetPitchRad,
+      smoothing,
+    );
+    const pitchDeltaRad = nextPitchRad - this.automaticApproachPitchRad;
+    this.automaticApproachPitchRad = Math.abs(targetPitchRad - nextPitchRad) < 1e-8
+      ? targetPitchRad
+      : nextPitchRad;
+    if (Math.abs(pitchDeltaRad) < 1e-10) return;
+
+    const screenRight = this.scratchC
+      .crossVectors(this.scratchD.copy(this.orbitDirection).multiplyScalar(-1), this.viewUp)
+      .normalize();
+    this.pitchQuaternion.setFromAxisAngle(screenRight, pitchDeltaRad);
+    this.orbitDirection.applyQuaternion(this.pitchQuaternion).normalize();
+    this.viewUp.applyQuaternion(this.pitchQuaternion);
+    this.viewUp.addScaledVector(this.orbitDirection, -this.viewUp.dot(this.orbitDirection)).normalize();
+
+    // Re-solve the offset after changing its direction so approach pitching
+    // does not itself move the camera toward or away from the ground.
+    this.updateFocusAbsolute();
+    this.cameraDistanceM = this.distanceForAltitude(this.altitudeM);
+  }
+
   update(deltaSeconds: number): PlanetControlState {
     if (this.disposed) throw new Error("PlanetControls has been disposed");
     // MOLA may arrive after the camera target was established. Re-solve the
     // distance from the authoritative requested AGL so streamed macro terrain
     // cannot silently move the camera above the public maximum or below ground.
+    this.updateAutomaticApproach(deltaSeconds);
     this.updateFocusAbsolute();
     this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 10.5);
@@ -307,12 +348,14 @@ export class PlanetControls {
   }
 
   setLocation(latitudeDeg: number, longitudeDeg: number, altitudeM = this.desiredAltitudeM) {
-    const oldFocus = this.scratchA.copy(this.focusDirection);
     const direction = latLonElevationToCartesian(latitudeDeg, longitudeDeg, 0, 1);
     this.focusDirection.set(direction.x, direction.y, direction.z).normalize();
-    this.scratchQuaternion.setFromUnitVectors(oldFocus, this.focusDirection);
-    this.orbitDirection.applyQuaternion(this.scratchQuaternion).normalize();
-    this.viewUp.applyQuaternion(this.scratchQuaternion).normalize();
+    this.orbitDirection.copy(this.focusDirection);
+    this.viewUp.set(0, 1, 0).addScaledVector(this.orbitDirection, -this.orbitDirection.y);
+    if (this.viewUp.lengthSq() < 1e-10) this.viewUp.set(0, 0, 1);
+    this.viewUp.normalize();
+    this.automaticApproachEnabled = true;
+    this.automaticApproachPitchRad = 0;
     this.updateFocusAbsolute();
     this.altitudeM = this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
     this.cameraDistanceM = this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
@@ -337,6 +380,8 @@ export class PlanetControls {
       desiredAltitudeM: this.desiredAltitudeM,
       cameraDistanceM: this.cameraDistanceM,
       orbitDirection: { x: this.orbitDirection.x, y: this.orbitDirection.y, z: this.orbitDirection.z },
+      automaticApproachEnabled: this.automaticApproachEnabled,
+      approachPitchDeg: THREE.MathUtils.radToDeg(this.automaticApproachPitchRad),
     };
   }
 
