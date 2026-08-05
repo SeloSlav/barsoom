@@ -31,6 +31,11 @@ type WorkerSlot = {
   job: QueueJob | null;
 };
 
+// Public workers are not fingerprinted by Vite. Keep this in lockstep with
+// public/workers/terrain-worker.js so a new geometry algorithm always gets a
+// new browser cache key and an old cached worker can never masquerade as new.
+export const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v3";
+
 export class TerrainWorkerPool {
   private nextJobId = 1;
   private readonly slots: WorkerSlot[] = [];
@@ -42,7 +47,10 @@ export class TerrainWorkerPool {
     const count = Math.max(1, Math.min(TERRAIN_CONFIG.workerCount, available - 1 || 1));
     for (let index = 0; index < count; index += 1) {
       const slot: WorkerSlot = {
-        worker: new Worker("/workers/terrain-worker.js", { type: "module", name: `mars-terrain-${index}` }),
+        worker: new Worker(
+          `/workers/terrain-worker.js?revision=${encodeURIComponent(TERRAIN_WORKER_REVISION)}`,
+          { type: "module", name: `mars-terrain-${index}` },
+        ),
         job: null,
       };
       slot.worker.onmessage = (event) => this.onMessage(slot, event.data);
@@ -112,7 +120,12 @@ export class TerrainWorkerPool {
     }
   }
 
-  private onMessage(slot: WorkerSlot, data: GeneratedTileGeometry & { type: string; jobId: number; message?: string }) {
+  private onMessage(slot: WorkerSlot, data: GeneratedTileGeometry & {
+    type: string;
+    jobId: number;
+    message?: string;
+    revision?: string;
+  }) {
     const job = slot.job;
     slot.job = null;
     if (!job || data.jobId !== job.id) {
@@ -124,6 +137,10 @@ export class TerrainWorkerPool {
       job.reject(new DOMException("Terrain job superseded", "AbortError"));
     } else if (data.type === "error") {
       job.reject(new Error(data.message || "Terrain worker failed"));
+    } else if (data.revision !== TERRAIN_WORKER_REVISION) {
+      job.reject(new Error(
+        `Terrain worker revision mismatch: expected ${TERRAIN_WORKER_REVISION}, received ${data.revision ?? "unversioned"}`,
+      ));
     } else {
       const rawCenter = data.center as unknown as Vec3 | [number, number, number];
       const center = Array.isArray(rawCenter)

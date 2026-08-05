@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { generateTerrainTile } from "../public/workers/terrain-worker.js";
+import { generateTerrainTile, TERRAIN_WORKER_REVISION as WORKER_REVISION } from "../public/workers/terrain-worker.js";
+import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrain/TerrainWorkerPool";
 import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
 import { neighbourTile, parentTile } from "../app/planet/math";
 import { createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
@@ -7,6 +8,22 @@ import { createTerrainMaterial, createTerrainShadowMaterial } from "../app/plane
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
 describe("terrain worker geometry", () => {
+  it("uses the same cache-busting revision in the client and worker", () => {
+    expect(WORKER_REVISION).toBe(CLIENT_REVISION);
+    const generated = generateTerrainTile({
+      jobId: 0,
+      key: { face: "px", lod: 0, x: 0, y: 0 },
+      base: {
+        key: { face: "px", lod: 0, x: 0, y: 0 },
+        gridSize: 2,
+        heightsM: new Int16Array(4),
+        areoidM: new Int16Array(4),
+      },
+      segments: 1,
+      skirtM: 140,
+    });
+    expect(generated.revision).toBe(CLIENT_REVISION);
+  });
   it("uses complementary parent/child dither masks throughout an LOD transition", () => {
     for (const transition of [0.01, 0.2, 0.5, 0.8, 0.99]) {
       for (let sample = 0; sample < 1_000; sample += 1) {

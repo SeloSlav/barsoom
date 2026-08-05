@@ -32,6 +32,11 @@ type MolaManifest = {
   tiles: Record<string, { path: string; bytes: number; crc32: string; sha256: string }>;
 };
 
+export function versionedMolaAssetUrl(path: string, sha256: string) {
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}revision=${encodeURIComponent(sha256.slice(0, 20))}`;
+}
+
 export function crc32(bytes: Uint8Array) {
   let crc = 0xffffffff;
   for (const byte of bytes) {
@@ -140,7 +145,7 @@ export class MolaTileLoader {
   }
 
   private manifest() {
-    this.manifestPromise ??= fetch("/data/mola/manifest.json").then(async (response) => {
+    this.manifestPromise ??= fetch("/data/mola/manifest.json", { cache: "no-cache" }).then(async (response) => {
       if (!response.ok) throw new Error(`MOLA manifest request failed (${response.status})`);
       const manifest = (await response.json()) as MolaManifest;
       if (manifest.format !== "barsoom-mola-cubesphere" || manifest.version !== 1) {
@@ -173,7 +178,7 @@ export class MolaTileLoader {
       const manifest = await this.manifest();
       const entry = manifest.tiles[key];
       if (!entry) throw new Error(`MOLA asset is missing from manifest: ${key}`);
-      const response = await fetch(entry.path, { cache: "force-cache" });
+      const response = await fetch(versionedMolaAssetUrl(entry.path, entry.sha256), { cache: "force-cache" });
       if (!response.ok) throw new Error(`MOLA tile request failed (${response.status})`);
       const decoded = decodeMolaTile(await response.arrayBuffer(), tile);
       this.cache.set(key, decoded);
@@ -243,4 +248,3 @@ export class MolaTileLoader {
     });
   }
 }
-

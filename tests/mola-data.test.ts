@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { directionToTile, faceUvToDirection, latLonElevationToCartesian, neighbourTile, tileBounds, tileKeyToString } from "../app/planet/math";
-import { decodeMolaTile, MolaTileLoader, sampleMolaTile } from "../app/planet/mola";
+import { decodeMolaTile, MolaTileLoader, sampleMolaTile, versionedMolaAssetUrl } from "../app/planet/mola";
 import { decodePdsInt16Sample } from "../app/planet/pds";
 import type { TileKey, Vec3 } from "../app/planet/types";
 
@@ -38,6 +38,12 @@ async function sampleGlobal(direction: Vec3) {
 }
 
 describe("MOLA decoding and global terrain coverage", () => {
+  it("fingerprints static terrain URLs so revised elevation data cannot stay cached", () => {
+    expect(versionedMolaAssetUrl("/data/mola/px/4/1/2.bin", "abcdef0123456789abcdef"))
+      .toBe("/data/mola/px/4/1/2.bin?revision=abcdef0123456789abcd");
+    expect(versionedMolaAssetUrl("/tile?source=mola", "0123456789abcdef012345"))
+      .toBe("/tile?source=mola&revision=0123456789abcdef0123");
+  });
   it("decodes signed, scaled big-endian PDS values", () => {
     const bytes = new Uint8Array([0xff, 0x9c, 0x01, 0xf4]);
     const encoding = { sampleType: "MSB_INTEGER" as const, sampleBits: 16 as const, offset: 3_396_000, scalingFactor: 1 };
@@ -66,7 +72,7 @@ describe("MOLA decoding and global terrain coverage", () => {
           tiles: { "px/1/0/0": { path: "/parent.bin", bytes: parentBytes.byteLength, crc32: "", sha256: "" } },
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      if (url.endsWith("/parent.bin")) return new Response(parentBytes.slice(0), { status: 200 });
+      if (url.startsWith("/parent.bin?revision=")) return new Response(parentBytes.slice(0), { status: 200 });
       return new Response("missing", { status: 404 });
     }) as typeof fetch;
     try {

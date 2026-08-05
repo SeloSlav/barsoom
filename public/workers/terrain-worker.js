@@ -1,5 +1,6 @@
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 const PLANET_SEED = 0x4d415253;
+const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v3";
 const DETAIL_OCTAVES = [
   [38, 310],
   [91, 142],
@@ -247,6 +248,7 @@ function generate(message) {
 
   return {
     type: "generated",
+    revision: TERRAIN_WORKER_REVISION,
     jobId,
     center,
     positions,
@@ -262,7 +264,7 @@ function generate(message) {
   };
 }
 
-export { generate as generateTerrainTile };
+export { generate as generateTerrainTile, TERRAIN_WORKER_REVISION };
 
 if (typeof self !== "undefined") self.onmessage = (event) => {
   if (event.data?.type !== "generate") return;
