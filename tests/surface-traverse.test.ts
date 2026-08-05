@@ -131,9 +131,9 @@ describe("surface traverse physics", () => {
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {
-    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 5_100)).toBe(5_101.4);
-    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 108)).toBe(101.4);
-    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 112)).toBe(113.4);
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 5_101.4)).toBe(5_101.4);
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 108)).toBe(101.4);
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 113.4)).toBe(113.4);
   });
 
   it("follows terrain elevation with continuous, speed-bounded camera motion", () => {

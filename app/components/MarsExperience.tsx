@@ -14,7 +14,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
-    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey",
+    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true,
   };
 }
 
@@ -123,6 +123,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
   const surfaceMode = telemetry.controlMode === "surface";
+  const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   const toggleDebug = (flag: keyof DebugFlags) => {
@@ -136,10 +137,19 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : "Interactive three-dimensional rendering of Mars"} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
+      {surfaceSettling && <div className="surface-entry-screen" role="status" aria-live="polite">
+        <i aria-hidden="true" />
+        <span>RESOLVING LOCAL FIELD</span>
+        <small>TERRAIN PHASE CONVERGENCE</small>
+      </div>}
       <header className="mission-header">
         <div className="mission-identity">
           <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
-          <div className="wordmark-row"><h1>BARSOOM</h1><b>MARS</b></div>
+          <h1 className="wordmark-row">
+            <span className="wordmark-barsoom">BARSOOM</span>
+            <span className="wordmark-divider" aria-hidden="true">|</span>
+            <span className="wordmark-mars">MARS</span>
+          </h1>
           <span className="mission-mode"><i /> {surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED</span>
         </div>
         <div className="simulation-clock">

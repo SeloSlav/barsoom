@@ -59,6 +59,7 @@ export type PlanetTelemetry = {
   fps: number;
   simulationUtc: string;
   controlMode: "survey" | "surface";
+  surfaceReady: boolean;
 };
 
 export type DebugFlags = {

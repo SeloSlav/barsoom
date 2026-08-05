@@ -32,6 +32,9 @@ const CAMERA_MAX_HEIGHT_SPEED_M_S = 8;
 const CAMERA_TERRAIN_REBASE_THRESHOLD_M = 12;
 const CAMERA_ENTRY_WHEEL_LOCK_S = 0.45;
 const SURFACE_NORMAL_FOLLOW_RATE = 8;
+const ENTRY_READY_MIN_LOD = 14;
+const ENTRY_READY_STABLE_S = 0.32;
+const ENTRY_READY_MAX_WAIT_S = 4.5;
 const BOOT_SOLE_CLEARANCE_M = 0.025;
 export const MARS_JUMP_ANTICIPATION_DURATION_S = 0.22;
 const JUMP_LAUNCH_POSE_RELEASE_S = 0.3;
@@ -47,6 +50,7 @@ type JumpPoseWeights = {
 export type TraverseSurfaceSample = {
   heightM: number;
   normal: Vec3;
+  lod?: number;
 };
 
 export function randomMarsSurfaceDirection(random: () => number = Math.random): Vec3 {
@@ -171,17 +175,15 @@ export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: nu
 
 export function rebaseCameraAnchorForTerrainChange(
   cameraAnchorHeightM: number,
-  previousGroundHeightM: number,
-  nextGroundHeightM: number,
+  desiredCameraAnchorHeightM: number,
   thresholdM = CAMERA_TERRAIN_REBASE_THRESHOLD_M,
 ) {
-  const terrainDeltaM = nextGroundHeightM - previousGroundHeightM;
   if (
     !Number.isFinite(cameraAnchorHeightM) ||
-    !Number.isFinite(terrainDeltaM) ||
-    Math.abs(terrainDeltaM) < Math.max(0, thresholdM)
+    !Number.isFinite(desiredCameraAnchorHeightM) ||
+    Math.abs(desiredCameraAnchorHeightM - cameraAnchorHeightM) < Math.max(0, thresholdM)
   ) return cameraAnchorHeightM;
-  return cameraAnchorHeightM + terrainDeltaM;
+  return desiredCameraAnchorHeightM;
 }
 
 export function wowCameraOrbitDistances(cameraPitchRad: number, cameraDistanceM: number) {
@@ -263,6 +265,16 @@ export class SurfaceTraverseController {
   private readonly orientation = new THREE.Matrix4();
   private readonly poseEuler = new THREE.Euler();
   private readonly poseQuaternion = new THREE.Quaternion();
+  private readonly poseWorldQuaternion = new THREE.Quaternion();
+  private readonly poseHip = new THREE.Vector3();
+  private readonly poseKnee = new THREE.Vector3();
+  private readonly poseEnd = new THREE.Vector3();
+  private readonly poseFoot = new THREE.Vector3();
+  private readonly poseAxis = new THREE.Vector3();
+  private readonly poseBend = new THREE.Vector3();
+  private readonly poseDesiredKnee = new THREE.Vector3();
+  private readonly poseDirection = new THREE.Vector3();
+  private readonly poseLocalDirection = new THREE.Vector3();
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
@@ -292,6 +304,10 @@ export class SurfaceTraverseController {
   private surveyFovDegrees: number;
   private autoRun = false;
   private entryWheelLockSeconds = 0;
+  private entryReady = false;
+  private entryStableSeconds = 0;
+  private entryElapsedSeconds = 0;
+  private entryPreviousGroundHeightM = Number.NaN;
   private disposed = false;
   active = false;
 
@@ -387,6 +403,10 @@ export class SurfaceTraverseController {
     this.mouseButtons.clear();
     this.autoRun = false;
     this.entryWheelLockSeconds = CAMERA_ENTRY_WHEEL_LOCK_S;
+    this.entryReady = false;
+    this.entryStableSeconds = 0;
+    this.entryElapsedSeconds = 0;
+    this.entryPreviousGroundHeightM = Number.NaN;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -413,6 +433,10 @@ export class SurfaceTraverseController {
 
   getSurfaceDirection(): Vec3 {
     return { x: this.direction.x, y: this.direction.y, z: this.direction.z };
+  }
+
+  get surfaceReady() {
+    return !this.active || this.entryReady;
   }
 
   private setLocalBasis() {
@@ -532,6 +556,82 @@ export class SurfaceTraverseController {
     bone.quaternion.multiply(this.poseQuaternion);
   }
 
+  private aimPoseBoneAtWorldPoint(bone: THREE.Bone, child: THREE.Object3D, target: THREE.Vector3) {
+    bone.getWorldPosition(this.poseDirection);
+    this.poseDirection.subVectors(target, this.poseDirection).normalize();
+    bone.getWorldQuaternion(this.poseWorldQuaternion).invert();
+    this.poseDirection.applyQuaternion(this.poseWorldQuaternion);
+    this.poseLocalDirection.copy(child.position).normalize();
+    this.poseQuaternion.setFromUnitVectors(this.poseLocalDirection, this.poseDirection);
+    bone.quaternion.multiply(this.poseQuaternion);
+    bone.updateWorldMatrix(true, true);
+  }
+
+  private plantLeftFootFromRightLeg() {
+    const upperLeft = this.poseBones.get("UpperLegL");
+    const lowerLeft = this.poseBones.get("LowerLegL");
+    const footLeft = this.poseBones.get("FootL");
+    const upperRight = this.poseBones.get("UpperLegR");
+    const lowerRight = this.poseBones.get("LowerLegR");
+    const footRight = this.poseBones.get("FootR");
+    const lowerLeftEnd = lowerLeft?.children[0];
+    if (!upperLeft || !lowerLeft || !lowerLeftEnd || !footLeft || !upperRight || !lowerRight || !footRight) return;
+
+    upperLeft.updateWorldMatrix(true, true);
+    upperRight.updateWorldMatrix(true, true);
+    footLeft.updateWorldMatrix(true, false);
+    footRight.updateWorldMatrix(true, false);
+    upperLeft.getWorldPosition(this.poseHip);
+    lowerLeft.getWorldPosition(this.poseKnee);
+    lowerLeftEnd.getWorldPosition(this.poseEnd);
+    footLeft.getWorldPosition(this.poseFoot);
+    const upperLength = this.poseHip.distanceTo(this.poseKnee);
+    const lowerLength = this.poseKnee.distanceTo(this.poseEnd);
+
+    // Use the visually correct right knee as the pole direction, mirrored in
+    // model space. The feet are authored with different bone roll, so copying
+    // local Euler angles across sides twists the left boot.
+    upperRight.getWorldPosition(this.poseDirection);
+    lowerRight.getWorldPosition(this.poseBend);
+    this.poseBend.sub(this.poseDirection);
+    footRight.getWorldPosition(this.poseAxis);
+    this.poseAxis.sub(this.poseDirection).normalize();
+    this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis)).normalize();
+    this.model?.getWorldQuaternion(this.poseWorldQuaternion).invert();
+    this.poseBend.applyQuaternion(this.poseWorldQuaternion);
+    this.poseBend.x *= -1;
+    this.poseBend.applyQuaternion(this.poseWorldQuaternion.invert());
+
+    this.poseAxis.subVectors(this.poseFoot, this.poseHip);
+    const targetDistance = this.poseAxis.length();
+    if (targetDistance <= 1e-6 || upperLength <= 1e-6 || lowerLength <= 1e-6) return;
+    this.poseAxis.multiplyScalar(1 / targetDistance);
+    this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis));
+    if (this.poseBend.lengthSq() <= 1e-8) {
+      this.poseBend.set(0, 0, 1);
+      this.model?.getWorldQuaternion(this.poseWorldQuaternion);
+      this.poseBend.applyQuaternion(this.poseWorldQuaternion);
+      this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis));
+    }
+    this.poseBend.normalize();
+
+    const reachableDistance = clamp(
+      targetDistance,
+      Math.abs(upperLength - lowerLength) + 1e-5,
+      upperLength + lowerLength - 1e-5,
+    );
+    const kneeAlongAxis = (
+      upperLength ** 2 - lowerLength ** 2 + reachableDistance ** 2
+    ) / (2 * reachableDistance);
+    const kneeAwayFromAxis = Math.sqrt(Math.max(0, upperLength ** 2 - kneeAlongAxis ** 2));
+    this.poseDesiredKnee.copy(this.poseHip)
+      .addScaledVector(this.poseAxis, kneeAlongAxis)
+      .addScaledVector(this.poseBend, kneeAwayFromAxis);
+
+    this.aimPoseBoneAtWorldPoint(upperLeft, lowerLeft, this.poseDesiredKnee);
+    this.aimPoseBoneAtWorldPoint(lowerLeft, lowerLeftEnd, this.poseFoot);
+  }
+
   private applyJumpPose(airborne: boolean) {
     const weights = marsJumpPoseWeights(
       this.jumpAnticipationSeconds,
@@ -545,11 +645,6 @@ export class SurfaceTraverseController {
       const body = this.poseBones.get("Body");
       if (body) body.position.y -= 0.0028 * weights.squat;
       this.rotatePoseBone("Chest", 7, 0, 0, weights.squat);
-      // The left leg has different local bone roll from the right. These
-      // compound rotations mirror the right leg's world-space bend without
-      // twisting the left knee sideways.
-      this.rotatePoseBone("UpperLegL", 48.3, 7.5, 16.7, weights.squat);
-      this.rotatePoseBone("LowerLegL", 12.7, -4.9, -42.4, weights.squat);
       this.rotatePoseBone("UpperLegR", 0, 0, -30, weights.squat);
       this.rotatePoseBone("LowerLegR", 34, 0, 0, weights.squat);
       this.rotatePoseBone("UpperArmL", 0, 0, 16, weights.squat);
@@ -564,11 +659,11 @@ export class SurfaceTraverseController {
       this.rotatePoseBone("LowerArmL", 0, 0, -16, weights.descent);
       this.rotatePoseBone("UpperArmR", 24, 0, 28, weights.descent);
       this.rotatePoseBone("LowerArmR", 0, 0, 16, weights.descent);
-      this.rotatePoseBone("UpperLegL", 6.8, -0.9, 4.4, weights.descent);
-      this.rotatePoseBone("LowerLegL", 4, -2.7, -7.3, weights.descent);
       this.rotatePoseBone("UpperLegR", 0, 0, -8, weights.descent);
       this.rotatePoseBone("LowerLegR", 9, 0, 0, weights.descent);
     }
+
+    if (weights.squat > 0 || weights.descent > 0) this.plantLeftFootFromRightLeg();
   }
 
   private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {
@@ -624,18 +719,20 @@ export class SurfaceTraverseController {
     this.updateAnimation(speedMps, airborne, delta);
     this.updateFootsteps(speedMps, airborne || this.jumpAnticipationSeconds > 0, delta);
 
-    const previousGroundHeightM = this.groundHeightM;
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
-    if (this.cameraAnchorInitialized) {
-      const rebasedCameraAnchorHeightM = rebaseCameraAnchorForTerrainChange(
-        this.cameraAnchorHeightM,
-        previousGroundHeightM,
-        this.groundHeightM,
-      );
-      if (rebasedCameraAnchorHeightM !== this.cameraAnchorHeightM) {
-        this.cameraAnchorHeightM = rebasedCameraAnchorHeightM;
-        this.cameraAnchorVelocityMps = 0;
+    if (!this.entryReady) {
+      this.entryElapsedSeconds += delta;
+      const heightStable = Number.isFinite(this.entryPreviousGroundHeightM) &&
+        Math.abs(this.groundHeightM - this.entryPreviousGroundHeightM) <= Math.max(0.05, delta * 0.35);
+      this.entryStableSeconds = (surface.lod ?? 0) >= ENTRY_READY_MIN_LOD && heightStable
+        ? this.entryStableSeconds + delta
+        : 0;
+      this.entryPreviousGroundHeightM = this.groundHeightM;
+      if (this.entryStableSeconds >= ENTRY_READY_STABLE_S || this.entryElapsedSeconds >= ENTRY_READY_MAX_WAIT_S) {
+        this.entryReady = true;
+        this.cameraAnchorInitialized = false;
+        this.cameraCollisionFraction = 1;
       }
     }
     this.sampledSurfaceNormal.set(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
@@ -670,7 +767,7 @@ export class SurfaceTraverseController {
     // position and look direction at every terrain-normal discontinuity.
     this.headingVector(this.cameraYawRad, this.forward);
     const firstPerson = this.cameraDistanceM <= CAMERA_FIRST_PERSON_DISTANCE_M;
-    this.root.visible = this.active && !firstPerson;
+    this.root.visible = this.active && this.entryReady && !firstPerson;
     const targetHeightM = firstPerson ? CAMERA_FIRST_PERSON_HEIGHT_M : CAMERA_TARGET_HEIGHT_M;
     const desiredCameraAnchorHeightM = this.groundHeightM + this.verticalOffsetM +
       BOOT_SOLE_CLEARANCE_M + targetHeightM;
@@ -679,14 +776,23 @@ export class SurfaceTraverseController {
       this.cameraAnchorVelocityMps = 0;
       this.cameraAnchorInitialized = true;
     } else {
-      const heightMotion = smoothCameraHeight(
+      const rebasedCameraAnchorHeightM = rebaseCameraAnchorForTerrainChange(
         this.cameraAnchorHeightM,
         desiredCameraAnchorHeightM,
-        this.cameraAnchorVelocityMps,
-        delta,
       );
-      this.cameraAnchorHeightM = heightMotion.heightM;
-      this.cameraAnchorVelocityMps = heightMotion.velocityMps;
+      if (rebasedCameraAnchorHeightM !== this.cameraAnchorHeightM) {
+        this.cameraAnchorHeightM = rebasedCameraAnchorHeightM;
+        this.cameraAnchorVelocityMps = 0;
+      } else {
+        const heightMotion = smoothCameraHeight(
+          this.cameraAnchorHeightM,
+          desiredCameraAnchorHeightM,
+          this.cameraAnchorVelocityMps,
+          delta,
+        );
+        this.cameraAnchorHeightM = heightMotion.heightM;
+        this.cameraAnchorVelocityMps = heightMotion.velocityMps;
+      }
     }
     this.targetAbsolute.copy(this.direction).multiplyScalar(
       MARS_REFERENCE_RADIUS_M + this.cameraAnchorHeightM,

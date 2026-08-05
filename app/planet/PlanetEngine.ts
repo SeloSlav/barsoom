@@ -75,6 +75,7 @@ export class PlanetEngine {
   private surfaceShadowExtentM = 0;
   private paused = false;
   private disposed = false;
+  private surfaceEntryRevision = 0;
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
     overlay: false,
@@ -270,14 +271,14 @@ export class PlanetEngine {
         this.skyState = calculateMarsSky(epoch);
       },
       instantiateObserver: () => {
-        if (!this.surfaceTraverse.active && this.selectionDirection) this.enterSurfaceTraverse(this.selectionDirection);
+        if (!this.surfaceTraverse.active && this.selectionDirection) void this.enterSurfaceTraverse(this.selectionDirection);
       },
       instantiateObserverAt: (latitudeDeg, longitudeDeg) => {
         if (this.surfaceTraverse.active) return;
         const target = latLonElevationToCartesian(latitudeDeg, longitudeDeg, 0, 1);
-        this.enterSurfaceTraverse(new THREE.Vector3(target.x, target.y, target.z));
+        void this.enterSurfaceTraverse(new THREE.Vector3(target.x, target.y, target.z));
       },
-      teleportRandomSurface: () => this.enterSurfaceTraverse(null),
+      teleportRandomSurface: () => { void this.enterSurfaceTraverse(null); },
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
       getAudioMuted: () => this.getAudioMuted(),
       setAudioMuted: (muted) => this.setAudioMuted(muted),
@@ -413,6 +414,7 @@ export class PlanetEngine {
       fps: 1000 / Math.max(0.01, this.smoothedFrameMs),
       simulationUtc: simulationUtc.toISOString(),
       controlMode: this.surfaceTraverse.active ? "surface" : "survey",
+      surfaceReady: this.surfaceTraverse.surfaceReady,
     };
     this.onTelemetry(this.telemetry);
   }
@@ -528,7 +530,7 @@ export class PlanetEngine {
   private onKeyDown = (event: KeyboardEvent) => {
     if (event.code === "Backquote" && !event.repeat) {
       event.preventDefault();
-      this.enterSurfaceTraverse();
+      void this.enterSurfaceTraverse();
     } else if (event.code === "Escape" && this.surfaceTraverse.active) {
       event.preventDefault();
       this.exitSurfaceTraverse();
@@ -541,18 +543,23 @@ export class PlanetEngine {
     }
   };
 
-  private enterSurfaceTraverse(targetDirection: THREE.Vector3 | null = this.selectionDirection) {
-    const lockedTarget = targetDirection?.clone() ?? null;
+  private async enterSurfaceTraverse(targetDirection: THREE.Vector3 | null = this.selectionDirection) {
+    const destination = targetDirection?.clone() ?? new THREE.Vector3().copy(
+      randomMarsDaylightDirection(this.skyState.sunDirection),
+    );
+    const entryRevision = ++this.surfaceEntryRevision;
     this.controls.setEnabled(false);
     this.clearSelection();
-    if (lockedTarget) this.surfaceTraverse.teleportTo(lockedTarget);
-    else this.surfaceTraverse.teleportTo(randomMarsDaylightDirection(this.skyState.sunDirection));
+    await this.terrain.prefetch(destination);
+    if (this.disposed || entryRevision !== this.surfaceEntryRevision) return;
+    this.surfaceTraverse.teleportTo(destination);
     this.audio.setSurfaceMode(true);
     this.audio.playObserverTransition(true);
     this.lastTelemetryTime = -Infinity;
   }
 
   private exitSurfaceTraverse() {
+    this.surfaceEntryRevision += 1;
     if (!this.surfaceTraverse.active) return;
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);

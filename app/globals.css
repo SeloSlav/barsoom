@@ -27,13 +27,19 @@ button { font: inherit; }
 
 .instrument-grid { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .15; background-image: linear-gradient(rgba(255,188,139,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(255,188,139,.08) 1px, transparent 1px); background-size: 80px 80px; mask-image: radial-gradient(circle at center, #000 0, transparent 70%); }
 
+.surface-entry-screen { position: absolute; inset: 0; z-index: 8; display: grid; place-content: center; justify-items: center; gap: 9px; pointer-events: none; color: rgba(255,228,211,.82); background: radial-gradient(circle at center, rgba(35,15,10,.96), rgba(3,3,5,.995) 58%); font: 600 9px/1 var(--font-geist-mono), monospace; letter-spacing: .22em; }
+.surface-entry-screen i { width: 22px; height: 22px; border: 1px solid rgba(255,155,99,.24); border-top-color: var(--rust-bright); border-radius: 50%; animation: surface-entry-spin .9s linear infinite; }
+.surface-entry-screen small { color: rgba(239,225,214,.38); font: inherit; font-size: 6.5px; letter-spacing: .16em; }
+@keyframes surface-entry-spin { to { transform: rotate(360deg); } }
+
 .mission-header { position: absolute; z-index: 3; top: 0; left: 0; right: 0; min-height: 102px; padding: 22px 28px 18px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; pointer-events: none; border-bottom: 1px solid rgba(255,255,255,.07); background: linear-gradient(180deg, rgba(3,3,5,.78), rgba(3,3,5,.18)); }
 
 .mission-identity { display: grid; justify-items: start; line-height: 1; }
 .mission-kicker, .eyebrow { color: var(--muted); font: 600 9px/1.2 var(--font-geist-mono), monospace; letter-spacing: .24em; }
-.wordmark-row { margin: 4px 0 7px; display: flex; align-items: flex-end; gap: 9px; }
-.mission-identity h1 { margin: 0; color: #fff7f1; font: 320 31px/.9 var(--font-geist-sans), sans-serif; letter-spacing: .36em; text-shadow: 0 0 30px rgba(255,117,67,.26); }
-.wordmark-row b { margin-bottom: 1px; padding: 3px 5px; color: var(--rust-bright); border: 1px solid rgba(255,155,99,.3); font: 600 7px/1 var(--font-geist-mono), monospace; letter-spacing: .16em; }
+.wordmark-row { margin: 4px 0 7px; padding: 6px 9px 6px 11px; display: inline-flex; align-items: center; gap: 8px; color: #fff7f1; border: 1px solid rgba(255,155,99,.3); font: 520 14px/1 var(--font-geist-sans), sans-serif; text-shadow: 0 0 30px rgba(255,117,67,.26); }
+.wordmark-barsoom { letter-spacing: .34em; }
+.wordmark-divider { color: rgba(239,225,214,.35); font-weight: 300; }
+.wordmark-mars { color: var(--rust-bright); font: 600 12px/1 var(--font-geist-mono), monospace; letter-spacing: .2em; }
 .mission-mode { color: rgba(255,218,192,.72); font: 520 9px/1 var(--font-geist-mono), monospace; letter-spacing: .14em; }
 .mission-mode i, .footer-center i, .array-state i { display: inline-block; width: 5px; height: 5px; margin: 0 7px 1px 0; border-radius: 50%; background: var(--green); box-shadow: 0 0 9px rgba(140,228,189,.8); }
 
@@ -121,7 +127,8 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
 
 @media (max-width: 760px) {
   .mission-header { min-height: 84px; padding: 16px; grid-template-columns: 1fr auto; }
-  .mission-identity h1 { font-size: 23px; }
+  .wordmark-row { padding: 5px 7px 5px 9px; gap: 6px; font-size: 12px; }
+  .wordmark-mars { font-size: 10px; }
   .simulation-clock, .array-state { display: none; }
   .coordinate-panel { left: 14px; bottom: 48px; width: calc(100vw - 58px); }
   .coordinate-grid strong { font-size: 12px; }
@@ -134,4 +141,4 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
   .observer-action-card { font-size: 8px; }
 }
 
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .surface-entry-screen i { animation: none; } }
