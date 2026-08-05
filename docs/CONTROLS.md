@@ -24,7 +24,7 @@
 | Mouse-run | Hold both mouse buttons | Moves forward while the camera remains under mouse control. |
 | Auto-walk / auto-run | `R` | First press starts walking, second press switches to running, and third press stops. Pressing forward or backward also cancels it. |
 | Auto-run | `Num Lock` | Toggles continuous running. Pressing forward or backward cancels it. |
-| Zoom camera | Mouse wheel | Changes follow distance continuously from first person toward planetary scale. Crossing the former 39 m camera limit (about a 75 m reconstructed field on the reference viewport) starts a three-second local-proxy coherence grace period. Crossing inward restores coherence; remaining outside the envelope terminates surface traverse and resumes maximum-altitude planetary observation above the same location. Zooming all the way in enters first person, and one outward step restores close third person. |
+| Zoom camera | Mouse wheel | Changes follow distance continuously from first person toward planetary scale. Crossing 200 m camera distance starts a three-second local-proxy coherence grace period. Crossing inward restores coherence; remaining outside the envelope terminates surface traverse and resumes maximum-altitude planetary observation above the same location. Zooming all the way in enters first person, and one outward step restores close third person. |
 | Mars jump | `Space` | Launches at 4.8 m/s and falls at Mars surface gravity, 3.721 m/s². |
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |
 | Return to survey | `Escape` | Leaves the astronaut and returns to the maximum-altitude planetary view, centred above the same location. |

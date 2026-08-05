@@ -20,11 +20,10 @@ const CAMERA_DEFAULT_DISTANCE_M = 7;
 const CAMERA_FIRST_PERSON_DISTANCE_M = 0;
 const CAMERA_FIRST_PERSON_ENTER_DISTANCE_M = 0.85;
 const CAMERA_FIRST_PERSON_EXIT_DISTANCE_M = 2.2;
-// The former follow-camera maximum produced the roughly 75 m reconstructed
-// field shown by the HUD on a typical viewport. It now marks the point where
-// the human-scale proxy stops claiming local coherence; it must not stop the
-// planetary zoom path.
-export const LOCAL_PROXY_COHERENCE_DISTANCE_M = 39;
+// Keep the local proxy stable well beyond ordinary third-person framing. Past
+// this distance the human-scale solution enters its recoverable coherence-loss
+// state; the planetary zoom path itself remains unrestricted.
+export const LOCAL_PROXY_COHERENCE_DISTANCE_M = 200;
 const CAMERA_MAX_DISTANCE_M = MAX_CAMERA_ALTITUDE_M;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
 const CAMERA_FIRST_PERSON_HEIGHT_M = 1.68;

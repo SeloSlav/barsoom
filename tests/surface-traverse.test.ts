@@ -138,6 +138,7 @@ describe("surface traverse physics", () => {
   });
 
   it("zooms through first person, crosses the local coherence boundary, and reaches planetary scale", () => {
+    expect(LOCAL_PROXY_COHERENCE_DISTANCE_M).toBe(200);
     expect(applyWowCameraZoom(2.3, -120)).toBeGreaterThan(0.85);
     expect(applyWowCameraZoom(0.9, -120)).toBe(0);
     expect(applyWowCameraZoom(0, 120)).toBe(2.2);
