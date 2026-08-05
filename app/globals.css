@@ -1,6 +1,11 @@
 @import "tailwindcss";
 
 :root {
+  /* Keep the HUD typography valid when a local Vinext dev render has not yet
+     injected the next/font variable classes. Production overrides these on
+     <body> with the self-hosted Geist families. */
+  --font-geist-sans: "Geist", Arial, sans-serif;
+  --font-geist-mono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --rust: #d96d3d;
   --rust-bright: #ff9b63;
   --hud: rgba(12, 13, 16, 0.72);
