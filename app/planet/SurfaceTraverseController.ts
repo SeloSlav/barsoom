@@ -685,7 +685,7 @@ export class SurfaceTraverseController {
       this.rotatePoseBone("LowerArmR", 0, 0, 16, weights.descent);
     }
 
-    if (weights.squat > 0 || weights.descent > 0) {
+    if (weights.squat > 0) {
       this.plantFoot("L");
       this.plantFoot("R");
     }
