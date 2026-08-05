@@ -66,16 +66,25 @@ describe("terrain worker geometry", () => {
     expect(child?.normal.z).toBeCloseTo(0, 12);
   });
 
-  it("ships an 8K USGS orbital mosaic, full PBR maps, and a surface-visible aerosol atmosphere", async () => {
+  it("ships an 8K USGS orbital mosaic, rock and ice PBR maps, and a surface-visible aerosol atmosphere", async () => {
     const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global-8k.jpg"));
     const diffuse = await readFile(path.join(process.cwd(), "public/textures/mars-rock-diffuse.jpg"));
     const normal = await readFile(path.join(process.cwd(), "public/textures/mars-rock-normal-gl.jpg"));
     const roughness = await readFile(path.join(process.cwd(), "public/textures/mars-rock-roughness.jpg"));
+    const iceDiffuse = await readFile(path.join(process.cwd(), "public/textures/mars-ice-diffuse.jpg"));
+    const iceNormal = await readFile(path.join(process.cwd(), "public/textures/mars-ice-normal-gl.jpg"));
+    const iceRoughness = await readFile(path.join(process.cwd(), "public/textures/mars-ice-roughness.jpg"));
     expect(jpeg.byteLength).toBeGreaterThan(9_000_000);
     expect([...jpeg.subarray(0, 2)]).toEqual([0xff, 0xd8]);
     expect(diffuse.byteLength).toBeGreaterThan(750_000);
     expect(normal.byteLength).toBeGreaterThan(1_300_000);
     expect(roughness.byteLength).toBeGreaterThan(450_000);
+    expect(iceDiffuse.byteLength).toBeGreaterThan(900_000);
+    expect(iceNormal.byteLength).toBeGreaterThan(1_000_000);
+    expect(iceRoughness.byteLength).toBeGreaterThan(400_000);
+    for (const iceMap of [iceDiffuse, iceNormal, iceRoughness]) {
+      expect([...iceMap.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    }
     const atmosphere = createAtmosphereMaterial();
     expect(atmosphere.fragmentShader).toContain("dustySky");
     expect(atmosphere.fragmentShader).toContain("surfaceAlpha");
@@ -227,6 +236,9 @@ describe("terrain worker geometry", () => {
     expect(material.uniforms.uSurfaceDiffuse.value.name).toContain("rocks ground 02 diffuse");
     expect(material.uniforms.uSurfaceNormal.value.name).toContain("OpenGL normal");
     expect(material.uniforms.uSurfaceRoughness.value.name).toContain("roughness");
+    expect(material.uniforms.uIceSurfaceDiffuse.value.name).toContain("Ice 001 diffuse");
+    expect(material.uniforms.uIceSurfaceNormal.value.name).toContain("Ice 001 OpenGL normal");
+    expect(material.uniforms.uIceSurfaceRoughness.value.name).toContain("Ice 001 roughness");
     expect(material.vertexShader).toContain("shadowmap_pars_vertex");
     expect(material.fragmentShader).toContain("shadowmap_pars_fragment");
     expect(material.fragmentShader).toContain("distributionGgx");
@@ -245,6 +257,10 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("surfaceMaterialResponse");
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
+    expect(material.fragmentShader).toContain("sampleSurfaceDiffuse(uIceSurfaceDiffuse");
+    expect(material.fragmentShader).toContain("sampleSurfaceNormal(uIceSurfaceNormal");
+    expect(material.fragmentShader).toContain("sampleSurfaceRoughness(uIceSurfaceRoughness");
+    expect(material.fragmentShader).toContain("mix(martianRock, martianIce, frostWeight)");
     expect(depth.vertexShader).toContain("morphDelta");
     expect(material.vertexShader).toContain("uEdgeMorph");
     expect(depth.vertexShader).toContain("uEdgeMorph");
@@ -254,6 +270,9 @@ describe("terrain worker geometry", () => {
     material.uniforms.uSurfaceDiffuse.value.dispose();
     material.uniforms.uSurfaceNormal.value.dispose();
     material.uniforms.uSurfaceRoughness.value.dispose();
+    material.uniforms.uIceSurfaceDiffuse.value.dispose();
+    material.uniforms.uIceSurfaceNormal.value.dispose();
+    material.uniforms.uIceSurfaceRoughness.value.dispose();
     material.dispose();
     depth.dispose();
   });
