@@ -5,10 +5,13 @@ import {
 } from "../app/planet/constants";
 import {
   applyWowCameraDrag,
+  applyWowCameraZoom,
+  isWowAutoRunKey,
   marsJumpApexHeight,
   normalizeMarsSurfaceDirection,
   randomMarsSurfaceDirection,
   smoothCameraHeight,
+  wowCameraOrbitDistances,
   wowMouseAutoRun,
 } from "../app/planet/SurfaceTraverseController";
 
@@ -68,6 +71,29 @@ describe("surface traverse physics", () => {
     expect(wowMouseAutoRun(true, true)).toBe(true);
     expect(wowMouseAutoRun(true, false)).toBe(false);
     expect(wowMouseAutoRun(false, true)).toBe(false);
+  });
+
+  it("supports WoW autorun bindings", () => {
+    expect(isWowAutoRunKey("NumLock")).toBe(true);
+    expect(isWowAutoRunKey("KeyR")).toBe(true);
+    expect(isWowAutoRunKey("KeyW")).toBe(false);
+  });
+
+  it("orbits the physical camera vertically around the character", () => {
+    const level = wowCameraOrbitDistances(0, 10);
+    const lookingDown = wowCameraOrbitDistances(-Math.PI / 6, 10);
+    const lookingUp = wowCameraOrbitDistances(Math.PI / 6, 10);
+
+    expect(level).toEqual({ horizontalM: 10, verticalM: -0 });
+    expect(lookingDown.horizontalM).toBeCloseTo(8.660254, 6);
+    expect(lookingDown.verticalM).toBeCloseTo(5, 12);
+    expect(lookingUp.verticalM).toBeCloseTo(-5, 12);
+  });
+
+  it("zooms through first person and back to a close third-person view", () => {
+    expect(applyWowCameraZoom(2.3, -120)).toBe(0);
+    expect(applyWowCameraZoom(0, 120)).toBe(2.2);
+    expect(applyWowCameraZoom(39, 120)).toBe(39);
   });
 
   it("follows terrain elevation with continuous, speed-bounded camera motion", () => {

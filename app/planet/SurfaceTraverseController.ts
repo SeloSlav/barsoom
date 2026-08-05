@@ -14,11 +14,14 @@ import type { TraverseAudioEvent } from "../audio/BarsoomAudio";
 const WALK_SPEED_M_S = 4.2;
 const RUN_SPEED_M_S = 7.2;
 const PLAYER_HEIGHT_M = 1.82;
-const CAMERA_MIN_DISTANCE_M = 3.2;
-const CAMERA_MAX_DISTANCE_M = 14;
+const CAMERA_DEFAULT_DISTANCE_M = 7;
+const CAMERA_FIRST_PERSON_DISTANCE_M = 0;
+const CAMERA_FIRST_PERSON_EXIT_DISTANCE_M = 2.2;
+const CAMERA_MAX_DISTANCE_M = 39;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
-const CAMERA_ORBIT_ELEVATION_RAD = THREE.MathUtils.degToRad(14);
-const CAMERA_INITIAL_LOOK_PITCH_RAD = -CAMERA_ORBIT_ELEVATION_RAD;
+const CAMERA_FIRST_PERSON_HEIGHT_M = 1.68;
+const CAMERA_COLLISION_CLEARANCE_M = 0.35;
+const CAMERA_INITIAL_LOOK_PITCH_RAD = THREE.MathUtils.degToRad(-14);
 const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-85);
 const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(85);
 const CAMERA_HEIGHT_SMOOTH_TIME_S = 0.34;
@@ -88,6 +91,36 @@ export function wowMouseAutoRun(leftMouseHeld: boolean, rightMouseHeld: boolean)
   return leftMouseHeld && rightMouseHeld;
 }
 
+export function isWowAutoRunKey(code: string) {
+  return code === "NumLock" || code === "KeyR";
+}
+
+export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: number) {
+  if (!Number.isFinite(cameraDistanceM) || !Number.isFinite(wheelDeltaPixels) || wheelDeltaPixels === 0) {
+    return clamp(cameraDistanceM, CAMERA_FIRST_PERSON_DISTANCE_M, CAMERA_MAX_DISTANCE_M);
+  }
+  if (wheelDeltaPixels > 0 && cameraDistanceM <= CAMERA_FIRST_PERSON_DISTANCE_M) {
+    return CAMERA_FIRST_PERSON_EXIT_DISTANCE_M;
+  }
+
+  const nextDistanceM = clamp(
+    cameraDistanceM * Math.exp(wheelDeltaPixels * 0.0012),
+    CAMERA_FIRST_PERSON_DISTANCE_M,
+    CAMERA_MAX_DISTANCE_M,
+  );
+  if (wheelDeltaPixels < 0 && nextDistanceM < CAMERA_FIRST_PERSON_EXIT_DISTANCE_M) {
+    return CAMERA_FIRST_PERSON_DISTANCE_M;
+  }
+  return nextDistanceM;
+}
+
+export function wowCameraOrbitDistances(cameraPitchRad: number, cameraDistanceM: number) {
+  return {
+    horizontalM: Math.cos(cameraPitchRad) * cameraDistanceM,
+    verticalM: -Math.sin(cameraPitchRad) * cameraDistanceM,
+  };
+}
+
 export type CameraHeightMotion = {
   heightM: number;
   velocityMps: number;
@@ -154,6 +187,7 @@ export class SurfaceTraverseController {
   private readonly modelRight = new THREE.Vector3();
   private readonly move = new THREE.Vector3();
   private readonly scratch = new THREE.Vector3();
+  private readonly cameraSurfaceDirection = new THREE.Vector3();
   private readonly relativeTarget = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
   private readonly keys = new Set<string>();
@@ -168,7 +202,7 @@ export class SurfaceTraverseController {
   private headingRad = 0;
   private cameraYawRad = 0;
   private cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
-  private cameraDistanceM = 7;
+  private cameraDistanceM = CAMERA_DEFAULT_DISTANCE_M;
   private cameraAnchorHeightM = 0;
   private cameraAnchorVelocityMps = 0;
   private cameraAnchorInitialized = false;
@@ -180,6 +214,7 @@ export class SurfaceTraverseController {
   private footstepCountdown = 0;
   private groundHeightM = 0;
   private surveyFovDegrees: number;
+  private autoRun = false;
   private disposed = false;
   active = false;
 
@@ -258,7 +293,7 @@ export class SurfaceTraverseController {
     this.headingRad = headingRad;
     this.cameraYawRad = this.headingRad;
     this.cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
-    this.cameraDistanceM = 7;
+    this.cameraDistanceM = CAMERA_DEFAULT_DISTANCE_M;
     this.cameraAnchorVelocityMps = 0;
     this.cameraAnchorInitialized = false;
     this.surfaceNormalInitialized = false;
@@ -269,6 +304,7 @@ export class SurfaceTraverseController {
     this.footstepCountdown = 0;
     this.keys.clear();
     this.mouseButtons.clear();
+    this.autoRun = false;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -288,6 +324,7 @@ export class SurfaceTraverseController {
     this.localFill.visible = false;
     this.keys.clear();
     this.mouseButtons.clear();
+    this.autoRun = false;
     this.camera.fov = this.surveyFovDegrees;
     this.camera.updateProjectionMatrix();
   }
@@ -324,7 +361,7 @@ export class SurfaceTraverseController {
       }
     }
 
-    let forwardInput = Number(this.keys.has("KeyW") || this.keys.has("ArrowUp"))
+    let forwardInput = Number(this.autoRun || this.keys.has("KeyW") || this.keys.has("ArrowUp"))
       - Number(this.keys.has("KeyS") || this.keys.has("ArrowDown"));
     if (wowMouseAutoRun(this.mouseButtons.has(0), rightMouse)) forwardInput += 1;
     let strafeInput = Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ"));
@@ -453,8 +490,11 @@ export class SurfaceTraverseController {
     // planar and can change during LOD morphs, which used to snap both camera
     // position and look direction at every terrain-normal discontinuity.
     this.headingVector(this.cameraYawRad, this.forward);
+    const firstPerson = this.cameraDistanceM <= CAMERA_FIRST_PERSON_DISTANCE_M;
+    this.root.visible = this.active && !firstPerson;
+    const targetHeightM = firstPerson ? CAMERA_FIRST_PERSON_HEIGHT_M : CAMERA_TARGET_HEIGHT_M;
     const desiredCameraAnchorHeightM = this.groundHeightM + this.verticalOffsetM +
-      BOOT_SOLE_CLEARANCE_M + CAMERA_TARGET_HEIGHT_M;
+      BOOT_SOLE_CLEARANCE_M + targetHeightM;
     if (!this.cameraAnchorInitialized) {
       this.cameraAnchorHeightM = desiredCameraAnchorHeightM;
       this.cameraAnchorVelocityMps = 0;
@@ -472,26 +512,39 @@ export class SurfaceTraverseController {
     this.targetAbsolute.copy(this.direction).multiplyScalar(
       MARS_REFERENCE_RADIUS_M + this.cameraAnchorHeightM,
     );
-    // Keep the physical camera in a collision-safe orbit. View pitch is
-    // independent so looking up is not cancelled when Mars pushes the camera
-    // above the ground behind the astronaut.
-    const horizontalDistance = Math.cos(CAMERA_ORBIT_ELEVATION_RAD) * this.cameraDistanceM;
-    const verticalDistance = Math.sin(CAMERA_ORBIT_ELEVATION_RAD) * this.cameraDistanceM;
+    // WoW keeps the character at the orbit focus: pitch moves the physical
+    // camera above/below that focus instead of merely tilting a fixed camera.
+    // This is the visual difference between a true MMO follow camera and an
+    // FPS-style freelook mounted on a third-person boom.
+    const orbit = wowCameraOrbitDistances(this.cameraPitchRad, this.cameraDistanceM);
     this.cameraAbsolute.copy(this.targetAbsolute)
-      .addScaledVector(this.forward, -horizontalDistance)
-      .addScaledVector(this.up, verticalDistance);
+      .addScaledVector(this.forward, -orbit.horizontalM)
+      .addScaledVector(this.up, orbit.verticalM);
+
+    // Emulate WoW's camera collision by shortening/lifting the orbit at the
+    // terrain rather than allowing an upward look to bury the camera in Mars.
+    this.cameraSurfaceDirection.copy(this.cameraAbsolute).normalize();
+    const cameraSurfaceHeightM = this.terrainSurface(this.cameraSurfaceDirection).heightM;
+    const minimumCameraRadiusM = MARS_REFERENCE_RADIUS_M + cameraSurfaceHeightM + CAMERA_COLLISION_CLEARANCE_M;
+    if (this.cameraAbsolute.lengthSq() < minimumCameraRadiusM * minimumCameraRadiusM) {
+      this.cameraAbsolute.setLength(minimumCameraRadiusM);
+    }
 
     this.cameraDirection.copy(this.cameraAbsolute).normalize();
     const cameraAltitudeM = Math.max(
-      0.65,
-      this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - this.groundHeightM,
+      CAMERA_COLLISION_CLEARANCE_M,
+      this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - cameraSurfaceHeightM,
     );
 
     this.root.position.copy(this.playerAbsolute).sub(this.cameraAbsolute);
     this.camera.position.set(0, 0, 0);
     this.camera.up.copy(this.up);
-    this.relativeTarget.copy(this.forward).multiplyScalar(Math.cos(this.cameraPitchRad))
-      .addScaledVector(this.up, Math.sin(this.cameraPitchRad));
+    if (firstPerson) {
+      this.relativeTarget.copy(this.forward).multiplyScalar(Math.cos(this.cameraPitchRad))
+        .addScaledVector(this.up, Math.sin(this.cameraPitchRad));
+    } else {
+      this.relativeTarget.copy(this.targetAbsolute).sub(this.cameraAbsolute).normalize();
+    }
     this.camera.lookAt(this.relativeTarget);
     this.camera.near = 0.05;
     this.camera.far = Math.max(
@@ -518,6 +571,17 @@ export class SurfaceTraverseController {
     if (!this.active) return;
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+    if (isWowAutoRunKey(event.code)) {
+      event.preventDefault();
+      if (!event.repeat) this.autoRun = !this.autoRun;
+      return;
+    }
+    if (["KeyW", "KeyS", "ArrowUp", "ArrowDown"].includes(event.code)) {
+      this.autoRun = false;
+    }
+    if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
+      event.preventDefault();
+    }
     if (event.code === "Space") {
       event.preventDefault();
       if (!event.repeat && this.verticalOffsetM <= 0.001 && this.verticalVelocityMps === 0) {
@@ -540,6 +604,7 @@ export class SurfaceTraverseController {
   private onBlur = () => {
     this.keys.clear();
     this.mouseButtons.clear();
+    this.pointerId = null;
   };
 
   private onContextMenu = (event: MouseEvent) => {
@@ -550,6 +615,10 @@ export class SurfaceTraverseController {
     if (!this.active || (event.button !== 0 && event.button !== 2)) return;
     event.preventDefault();
     this.mouseButtons.add(event.button);
+    // A free-looked camera becomes the character's facing direction as soon
+    // as RMB is depressed, even before the pointer moves. That also makes a
+    // left+right mouse run advance toward the view immediately.
+    if (event.button === 2) this.headingRad = this.cameraYawRad;
     this.pointerId = event.pointerId;
     this.pointerX = event.clientX;
     this.pointerY = event.clientY;
@@ -598,8 +667,8 @@ export class SurfaceTraverseController {
   private onWheel = (event: WheelEvent) => {
     if (!this.active) return;
     event.preventDefault();
-    const factor = Math.exp(event.deltaY * 0.0012);
-    this.cameraDistanceM = clamp(this.cameraDistanceM * factor, CAMERA_MIN_DISTANCE_M, CAMERA_MAX_DISTANCE_M);
+    const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
+    this.cameraDistanceM = applyWowCameraZoom(this.cameraDistanceM, event.deltaY * modeScale);
   };
 
   dispose() {

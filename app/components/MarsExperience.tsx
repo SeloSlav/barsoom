@@ -154,16 +154,6 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>
       <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>
-      <div className={`traverse-controls${surfaceMode ? " active" : ""}`} aria-live="polite">
-        <span>{surfaceMode ? "OBSERVER PROXY / KINEMATIC SOLVE" : "EMBODIED VIEW / LOCAL SOLUTION"}</span>
-        {surfaceMode ? <>
-          <strong><kbd>WASD</kbd> TRANSLATE <i /> <kbd>RMB</kbd> ORIENT <i /> <kbd>SPACE</kbd> BALLISTIC STEP</strong>
-          <small><kbd>~</kbd> RETARGET FIELD <i /> <kbd>ESC</kbd> COLLAPSE LOCAL SOLUTION</small>
-        </> : <>
-          <strong>PRESS <kbd>~</kbd> TO INSTANTIATE OBSERVER</strong>
-          <small>UNBIASED SURFACE SAMPLE · THIRD-PERSON SCALE PROXY</small>
-        </>}
-      </div>
       {helpVisible && <aside className="help-panel">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>
@@ -173,7 +163,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with MOLA priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
         {surfaceMode ? <>
-          <dl><div><dt>Translate / turn</dt><dd>W S / A D</dd></div><div><dt>Lateral step</dt><dd>Q / E</dd></div><div><dt>Fast solve</dt><dd>Hold Shift</dd></div><div><dt>Orient proxy</dt><dd>Right-mouse drag</dd></div><div><dt>Decouple viewpoint</dt><dd>Left-mouse drag</dd></div><div><dt>Continuous advance</dt><dd>Both mouse buttons</dd></div><div><dt>Observer distance</dt><dd>Mouse wheel</dd></div><div><dt>Ballistic step</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Collapse local solve</dt><dd>Escape</dd></div></dl>
+          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-run</dt><dd>Num Lock / R</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s².</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>

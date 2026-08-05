@@ -23,7 +23,8 @@
 | Steer character and camera | Hold right mouse and drag | Turns the camera and makes the astronaut face it. |
 | Free-look orbit | Hold left mouse and drag | Orbits the camera without changing the astronaut's facing direction. |
 | Mouse-run | Hold both mouse buttons | Moves forward while the camera remains under mouse control. |
-| Zoom camera | Mouse wheel | Changes third-person follow distance. |
+| Auto-run | `Num Lock` or `R` | Toggles continuous forward movement. Pressing forward or backward cancels it. |
+| Zoom camera | Mouse wheel | Changes follow distance out to 39 m. Zooming all the way in enters first person; one outward step restores close third person. |
 | Mars jump | `Space` | Launches at 4.8 m/s and falls at Mars surface gravity, 3.721 m/s². |
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |
 | Return to survey | `Escape` | Leaves the astronaut and returns to planetary survey above the same location. |
