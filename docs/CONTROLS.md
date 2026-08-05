@@ -6,7 +6,7 @@
 | Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point with no yaw, pitch, pole, or roll limit. Rotations can wrap repeatedly; only a near-ground endpoint inside terrain is rejected. The first middle drag takes full manual control from the automatic approach composition. |
 | Pan across Mars | Hold right mouse and drag | Clears any locked zoom point, then translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
 | Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. With no selection, the surface point under the cursor anchors inward zoom. With a reticle selection, both inward and outward zoom remain locked to that point. An untouched descent eases from orbital nadir into a 48-degree RTS-style approach below 350 km AGL. |
-| Lock zoom point | Left click | Places the scale-aware geographic acquisition reticle, locks wheel zoom, and opens an **Instantiate observer** action beside that surface point. |
+| Lock zoom point | Left click | Places the scale-aware geographic acquisition reticle, locks wheel zoom, and opens an **Instantiate observer** action beside that surface point. The card also offers direct surface instantiation at Olympus Mons, Ius Chasma, Noctis Labyrinthus, and Korolev crater. |
 | Clear zoom point | Right click | Removes the reticle and returns wheel input to free cursor zoom. Holding the button and dragging continues to pan normally. |
 | Toggle diagnostics | `F3` | FPS, timing, tiles, LOD, triangles, calls, tile memory, worker queue, depth range and floating origin. |
 | Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |

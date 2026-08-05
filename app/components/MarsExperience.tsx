@@ -54,6 +54,13 @@ const DESCENT_TARGETS = [
   { label: "Korolev ice crater", lat: 72.77, lon: 164.58, altitudeM: 70_000 },
 ] as const;
 
+const VISTA_TARGETS = [
+  { label: "Olympus Mons", lat: 18.65, lon: -133.8 },
+  { label: "Ius Chasma", lat: -7.29, lon: -84.39 },
+  { label: "Noctis Labyrinthus", lat: -6.36, lon: -101.19 },
+  { label: "Korolev ice crater", lat: 72.77, lon: 164.58 },
+] as const;
+
 const QA_ALTITUDES = [
   { label: "30,000 km", metres: 30_000_000 },
   { label: "10,000 km", metres: 10_000_000 },
@@ -68,9 +75,9 @@ const QA_ALTITUDES = [
 type ObserverActionPosition = { x: number; y: number };
 
 function positionObserverAction(x: number, y: number): ObserverActionPosition {
-  const cardWidth = 196;
-  const cardHeight = 58;
   const edgeGap = 12;
+  const cardWidth = Math.min(360, window.innerWidth - edgeGap * 2);
+  const cardHeight = 152;
   const targetGap = 20;
   const fitsToRight = x + targetGap + cardWidth <= window.innerWidth - edgeGap;
   return {
@@ -165,7 +172,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <div><span>SOLVED LATITUDE</span><strong>{formatCoordinate(telemetry.latitudeDeg, "N", "S")}</strong></div>
           <div><span>SOLVED LONGITUDE</span><strong>{formatCoordinate(telemetry.longitudeDeg, "E", "W")}</strong></div>
           <div><span>FOCAL HEIGHT / AGL</span><strong>{formatDistance(telemetry.altitudeM)}</strong></div>
-          <div><span>MOLA AREOID OFFSET</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
+          <div><span>SOLVED DATUM OFFSET</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
         </div>
         <div className="ground-span"><span>RECONSTRUCTED FIELD</span><b>{formatDistance(telemetry.groundWidthM)}</b></div>
       </section>
@@ -181,7 +188,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         aria-label="Selected surface observer action"
       >
         <span>COORDINATE PHASE LOCKED</span>
-        <button type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate observer</button>
+        <button className="observer-action-primary" type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate observer</button>
+        <div className="observer-vistas">
+          <span>HIGH-CONTRAST RELIEF FIELDS</span>
+          <div>{VISTA_TARGETS.map((target) => <button
+            key={target.label}
+            type="button"
+            onClick={() => window.__BARSOOM__?.instantiateObserverAt(target.lat, target.lon)}
+          >{target.label}</button>)}</div>
+        </div>
       </aside>}
       {helpVisible && <aside className="help-panel">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
@@ -189,7 +204,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <p className="eyebrow">{surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
         {!surfaceMode && <div className="instrument-principle">
           <strong>YOU ARE NOT MOVING FASTER THAN LIGHT.</strong>
-          <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with MOLA priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
+          <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
         {surfaceMode ? <>
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-run</dt><dd>Num Lock / R</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
@@ -197,19 +212,19 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
           <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Press <kbd>~</kbd> to instantiate the observer at that exact coordinate. Right-click once to release the lock and return the solution to cursor-guided focus.</p>
-          <div className="descent-targets"><p className="eyebrow">CALIBRATED MOLA FIELDS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
+          <div className="descent-targets"><p className="eyebrow">CALIBRATED FOCAL FIELDS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
         </>}
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
         <div className="debug-heading"><span>INVERSE SOLVER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
         <div className="debug-metrics"><span>Focal target</span><b>{formatDistance(telemetry.desiredAltitudeM)}</b></div>
-        <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>Nodes</span><b>{telemetry.terrainNodes} retained</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Horizon</span><b>{telemetry.horizonCulled} culled</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>MOLA cache</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Geometry</span><b>{telemetry.geometryMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth mode</span><b>{telemetry.depthStrategy}</b><span>Surface shadows</span><b>{telemetry.surfaceShadows ? `on / ${formatDistance(telemetry.shadowExtentM)}` : "off"}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
-        <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly", "horizonCulling"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag === "horizonCulling" ? "horizon audit" : flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
+        <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>Nodes</span><b>{telemetry.terrainNodes} retained</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Horizon</span><b>{telemetry.horizonCulled} culled</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>Relief cache</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Geometry</span><b>{telemetry.geometryMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth mode</span><b>{telemetry.depthStrategy}</b><span>Surface shadows</span><b>{telemetry.surfaceShadows ? `on / ${formatDistance(telemetry.shadowExtentM)}` : "off"}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
+        <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly", "horizonCulling"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag === "horizonCulling" ? "horizon audit" : flag === "molaOnly" ? "base relief" : flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
         <div className="qa-altitudes" aria-label="Visual QA altitudes">{QA_ALTITUDES.map((level) => <button key={level.metres} type="button" onClick={() => window.__BARSOOM__?.setAltitude(level.metres, true)}>{level.label}</button>)}</div>
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
-      <footer className="mission-footer"><span>VIKING ALBEDO · MOLA 16 PPD / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>NO FTL TRANSFER · RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>NO FTL TRANSFER · RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

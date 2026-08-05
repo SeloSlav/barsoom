@@ -504,10 +504,13 @@ export class SurfaceTraverseController {
 
     if (weights.squat > 0) {
       const body = this.poseBones.get("Body");
-      if (body) body.position.y -= 0.00215 * weights.squat;
+      if (body) body.position.y -= 0.0028 * weights.squat;
       this.rotatePoseBone("Chest", 7, 0, 0, weights.squat);
-      this.rotatePoseBone("UpperLegL", 30, 0, 0, weights.squat);
-      this.rotatePoseBone("LowerLegL", 0, 0, -34, weights.squat);
+      // The left leg has different local bone roll from the right. These
+      // compound rotations mirror the right leg's world-space bend without
+      // twisting the left knee sideways.
+      this.rotatePoseBone("UpperLegL", 48.3, 7.5, 16.7, weights.squat);
+      this.rotatePoseBone("LowerLegL", 12.7, -4.9, -42.4, weights.squat);
       this.rotatePoseBone("UpperLegR", 0, 0, -30, weights.squat);
       this.rotatePoseBone("LowerLegR", 34, 0, 0, weights.squat);
       this.rotatePoseBone("UpperArmL", 0, 0, 16, weights.squat);
@@ -522,8 +525,8 @@ export class SurfaceTraverseController {
       this.rotatePoseBone("LowerArmL", 0, 0, -16, weights.descent);
       this.rotatePoseBone("UpperArmR", 24, 0, 28, weights.descent);
       this.rotatePoseBone("LowerArmR", 0, 0, 16, weights.descent);
-      this.rotatePoseBone("UpperLegL", 8, 0, 0, weights.descent);
-      this.rotatePoseBone("LowerLegL", 0, 0, -9, weights.descent);
+      this.rotatePoseBone("UpperLegL", 6.8, -0.9, 4.4, weights.descent);
+      this.rotatePoseBone("LowerLegL", 4, -2.7, -7.3, weights.descent);
       this.rotatePoseBone("UpperLegR", 0, 0, -8, weights.descent);
       this.rotatePoseBone("LowerLegR", 9, 0, 0, weights.descent);
     }

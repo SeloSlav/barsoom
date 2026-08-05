@@ -22,6 +22,7 @@ export type PlanetEngineApi = {
   setTerminator: (altitudeM?: number) => void;
   setSimulationUtc: (utcIso: string, rate?: number) => void;
   instantiateObserver: () => void;
+  instantiateObserverAt: (latitudeDeg: number, longitudeDeg: number) => void;
   teleportRandomSurface: () => void;
   exitSurfaceTraverse: () => void;
   getAudioMuted: () => boolean;
@@ -270,6 +271,11 @@ export class PlanetEngine {
       },
       instantiateObserver: () => {
         if (!this.surfaceTraverse.active && this.selectionDirection) this.enterSurfaceTraverse(this.selectionDirection);
+      },
+      instantiateObserverAt: (latitudeDeg, longitudeDeg) => {
+        if (this.surfaceTraverse.active) return;
+        const target = latLonElevationToCartesian(latitudeDeg, longitudeDeg, 0, 1);
+        this.enterSurfaceTraverse(new THREE.Vector3(target.x, target.y, target.z));
       },
       teleportRandomSurface: () => this.enterSurfaceTraverse(null),
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
