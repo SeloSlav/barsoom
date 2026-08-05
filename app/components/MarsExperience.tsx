@@ -15,7 +15,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
-    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true,
+    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true, localProxyCoherent: true,
   };
 }
 
@@ -125,6 +125,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
   const surfaceMode = telemetry.controlMode === "surface";
   const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
+  const localProxyCoherenceLost = surfaceMode && !telemetry.localProxyCoherent;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   const toggleDebug = (flag: keyof DebugFlags) => {
@@ -134,15 +135,20 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   };
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}`}>
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}`}>
       <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : "Interactive three-dimensional rendering of Mars"} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
+      {localProxyCoherenceLost && <div className="coherence-loss-field" aria-hidden="true" />}
       {surfaceSettling && <div className="surface-entry-screen" role="status" aria-live="polite">
         <i aria-hidden="true" />
         <span>RESOLVING LOCAL FIELD</span>
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
+      {localProxyCoherenceLost && <aside className="coherence-warning" role="status" aria-live="polite">
+        <strong>LOCAL PROXY COHERENCE LOST</strong>
+        <span>75 m reconstructed-field boundary exceeded · orbital solution continues</span>
+      </aside>}
       <header className="mission-header">
         <div className="mission-identity">
           <div className="brand-lockup">
@@ -161,7 +167,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <small>CAUSAL DELAY EMBEDDED · MODEL RATE 60×</small>
         </div>
         <div className="header-actions">
-          <span className="array-state"><i /> ARRAY 07 / COHERENT</span>
+          <span className={`array-state${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY / COHERENCE LOST" : "ARRAY 07 / COHERENT"}</span>
           <div className="header-buttons">
             <button
               className={`audio-button${audioMuted ? " muted" : ""}`}
@@ -221,7 +227,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </div>}
         {surfaceMode ? <>
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-run</dt><dd>Num Lock / R</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
-          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s².</p>
+          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom continues to the planetary maximum; beyond the 75 m local-field boundary, the HUD marks the proxy as incoherent.</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
           <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Press <kbd>~</kbd> to instantiate the observer at that exact coordinate. Right-click once to release the lock and return the solution to cursor-guided focus.</p>
@@ -238,7 +244,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
       <SovaTutorial />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY COHERENCE LOST / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

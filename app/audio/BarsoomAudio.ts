@@ -1,6 +1,7 @@
 export type TraverseAudioEvent =
   | { type: "step"; running: boolean }
-  | { type: "jump" | "land" }
+  | { type: "jump" }
+  | { type: "land" }
   | { type: "coherence"; lost: boolean };
 
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
