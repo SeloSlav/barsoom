@@ -83,3 +83,16 @@ Planet and Sun vectors use Astronomy Engine by Don Cross, MIT licensed. It imple
 
 - Project: https://github.com/cosinekitty/astronomy
 - Installed package: `astronomy-engine` 2.1.19
+
+## Phobos and Deimos
+
+The Mars moon renderer uses physical dimensions, albedo and NASA/JPL Horizons
+MAR099 osculating elements. The reference state is 2026-08-06 00:00 TDB, with
+local nodal, apsidal and mean-anomaly rates fitted across the following 32 days.
+Both irregular meshes remain at physical scale and rotate synchronously toward
+Mars; their detailed albedo maps are deterministic procedural interpretations,
+not spacecraft image mosaics.
+
+- Orbit source: https://ssd.jpl.nasa.gov/horizons/
+- Ephemeris: MAR099 (Phobos 401, Deimos 402, Mars-centred ICRF elements)
+- Physical overview: https://science.nasa.gov/mars/moons/facts/

@@ -8,6 +8,7 @@ import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { LocalLightingPhaseLock } from "./render/LocalLightingPhaseLock";
+import { MoonRenderer } from "./render/MoonRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
@@ -57,6 +58,7 @@ export class PlanetEngine {
   private readonly controls: PlanetControls;
   private readonly atmosphere: AtmosphereRenderer;
   private readonly celestial: CelestialRenderer;
+  private readonly moons: MoonRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
   private readonly localLightingPhaseLock = new LocalLightingPhaseLock();
   private readonly surfaceTraverse: SurfaceTraverseController;
@@ -85,7 +87,6 @@ export class PlanetEngine {
   private localProxyCoherenceLossSeconds = 0;
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
-    overlay: false,
     tileBoundaries: false,
     cubeFaces: false,
     lodColours: false,
@@ -191,6 +192,7 @@ export class PlanetEngine {
     this.controls.setLocation(initialPoint.latitudeDeg, initialPoint.longitudeDeg, 10_000_000);
     this.atmosphere = new AtmosphereRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
+    this.moons = new MoonRenderer(this.scene, this.camera, this.skyState.moons);
     // Submit both cameras under one outer render call. Besides avoiding an
     // unnecessary renderer-state teardown, this keeps the path ready for a
     // single output stage on future renderers without changing scene order.
@@ -377,6 +379,7 @@ export class PlanetEngine {
       this.controlState.altitudeM,
     );
     this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
+    this.moons.update(this.skyState, this.controlState.cameraAbsolute);
     this.updateSelection();
     this.skyCamera.quaternion.copy(this.camera.quaternion);
     this.skyCamera.updateMatrixWorld(true);
@@ -564,9 +567,6 @@ export class PlanetEngine {
     } else if (event.code === "Escape" && this.surfaceTraverse.active) {
       event.preventDefault();
       this.exitSurfaceTraverse();
-    } else if (event.code === "F3") {
-      event.preventDefault();
-      this.debug.overlay = !this.debug.overlay;
     } else if (event.code === "F4") {
       event.preventDefault();
       this.debug.tileBoundaries = !this.debug.tileBoundaries;
@@ -631,6 +631,7 @@ export class PlanetEngine {
     this.terrain.dispose();
     this.atmosphere.dispose();
     this.celestial.dispose();
+    this.moons.dispose();
     this.scene.onBeforeRender = () => {};
     this.audio.dispose();
     this.selection.removeFromParent();

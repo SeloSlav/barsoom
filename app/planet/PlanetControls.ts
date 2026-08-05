@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import {
   CAMERA_SURFACE_EPSILON_M,
+  MARS_MOON_MAX_ORBIT_RADIUS_M,
   MAX_CAMERA_ALTITUDE_M,
   MARS_ATMOSPHERE_TOP_M,
   MARS_REFERENCE_RADIUS_M,
@@ -381,9 +382,13 @@ export class PlanetControls {
     this.camera.up.copy(this.viewUp);
     this.camera.lookAt(targetRelative);
     const near = clamp(actualAltitude * 0.000006, RENDER_CONFIG.surfaceNearM, 180);
-    const far = actualAltitude > 150_000
+    const terrainFar = actualAltitude > 150_000
       ? actualAltitude + MARS_REFERENCE_RADIUS_M * 2.15 + MARS_ATMOSPHERE_TOP_M
       : Math.max(350_000, Math.sqrt(2 * MARS_REFERENCE_RADIUS_M * (actualAltitude + MARS_ATMOSPHERE_TOP_M)) * 3.2);
+    const far = Math.max(
+      terrainFar,
+      this.cameraAbsolute.length() + MARS_MOON_MAX_ORBIT_RADIUS_M + 50_000,
+    );
     if (Math.abs(this.camera.near - near) / near > 0.02 || Math.abs(this.camera.far - far) / far > 0.02) {
       this.camera.near = near;
       this.camera.far = far;

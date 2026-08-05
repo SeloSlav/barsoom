@@ -3,6 +3,10 @@ export const MARS_ATMOSPHERE_TOP_M = 120_000;
 export const MARS_SURFACE_GRAVITY_M_S2 = 3.721;
 export const MARS_TRAVERSE_JUMP_SPEED_M_S = 4.8;
 export const MAX_CAMERA_ALTITUDE_M = 30_000_000;
+// Deimos reaches just under this Mars-centred distance. The survey camera's
+// far plane includes it even from the opposite side of the planet so the
+// physical moon meshes can be occulted by Mars instead of being sky sprites.
+export const MARS_MOON_MAX_ORBIT_RADIUS_M = 23_466_500;
 // A surface camera needs a physical eye height. Letting the orbit distance
 // reach zero collapses the camera and its ground target onto the same point,
 // which can only render as an unrecognisable flat card.

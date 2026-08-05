@@ -64,7 +64,6 @@ export type PlanetTelemetry = {
 };
 
 export type DebugFlags = {
-  overlay: boolean;
   tileBoundaries: boolean;
   cubeFaces: boolean;
   lodColours: boolean;

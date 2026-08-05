@@ -9,6 +9,7 @@ function skyAt(second: number): MarsSkyState {
     sunAngularRadiusRad: 0.003,
     inertialToMarsFixed: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     bodies: [],
+    moons: [],
   };
 }
 

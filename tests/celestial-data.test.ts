@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { calculateMarsSky, chooseOrbitalSurveyComposition, inertialToMarsFixedVector, marsOrientationMatrix } from "../app/planet/ephemeris";
+import { calculateMarsMoons, calculateMarsSky, chooseOrbitalSurveyComposition, inertialToMarsFixedVector, marsOrientationMatrix } from "../app/planet/ephemeris";
 import { dot3, length3 } from "../app/planet/math";
 
 describe("embedded astronomical data", () => {
@@ -63,6 +63,7 @@ describe("embedded astronomical data", () => {
     expect(sky.bodies.map((body) => body.name)).toEqual([
       "Mercury", "Venus", "Earth", "Jupiter", "Saturn", "Uranus", "Neptune",
     ]);
+    expect(sky.moons.map((moon) => moon.name)).toEqual(["Phobos", "Deimos"]);
     for (const body of sky.bodies) {
       expect(length3(body.direction)).toBeCloseTo(1, 10);
       expect(body.distanceAu).toBeGreaterThan(0);
@@ -80,5 +81,30 @@ describe("embedded astronomical data", () => {
       const offsetDegrees = Math.acos(dot3(body.direction, viewCenter)) * 180 / Math.PI;
       expect(offsetDegrees).toBeCloseTo(18, 8);
     }
+  });
+
+  it("advances physical, inclined Mars moon orbits on the simulation clock", () => {
+    const epoch = new Date("2026-08-05T23:58:50.816Z");
+    const initial = calculateMarsMoons(epoch);
+    const oneHour = calculateMarsMoons(new Date(epoch.getTime() + 3_600_000));
+    expect(initial[0].semiAxesM).toEqual([13_400, 11_200, 9_200]);
+    expect(initial[1].semiAxesM).toEqual([7_500, 6_100, 5_200]);
+    expect(length3(initial[0].positionM)).toBeGreaterThan(9_230_000);
+    expect(length3(initial[0].positionM)).toBeLessThan(9_525_000);
+    expect(length3(initial[1].positionM)).toBeGreaterThan(23_450_000);
+    expect(length3(initial[1].positionM)).toBeLessThan(23_467_000);
+    for (const moon of initial) {
+      expect(length3(moon.orbitNormal)).toBeCloseTo(1, 12);
+      expect(dot3(moon.positionM, moon.orbitNormal)).toBeCloseTo(0, -3);
+    }
+    const phobosMotion = dot3(initial[0].positionM, oneHour[0].positionM)
+      / (length3(initial[0].positionM) * length3(oneHour[0].positionM));
+    const deimosMotion = dot3(initial[1].positionM, oneHour[1].positionM)
+      / (length3(initial[1].positionM) * length3(oneHour[1].positionM));
+    expect(phobosMotion).toBeLessThan(deimosMotion);
+    // In the Mars-fixed renderer this is roughly 32 degrees eastward for
+    // Phobos and 2.7 degrees westward for Deimos in one hour.
+    expect(phobosMotion).toBeLessThan(0.9);
+    expect(deimosMotion).toBeGreaterThan(0.995);
   });
 });
