@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_CAMERA_ALTITUDE_M,
   MARS_SURFACE_GRAVITY_M_S2,
   MARS_TRAVERSE_JUMP_SPEED_M_S,
 } from "../app/planet/constants";
 import {
+  LOCAL_PROXY_COHERENCE_DISTANCE_M,
   MARS_JUMP_ANTICIPATION_DURATION_S,
   applyWowCameraDrag,
   applyWowCameraZoom,
+  isLocalProxyCoherenceLost,
   isWowAutoRunKey,
   marsJumpApexHeight,
   marsJumpPoseWeights,
@@ -123,11 +126,14 @@ describe("surface traverse physics", () => {
     expect(lookingUp.verticalM).toBeCloseTo(-5, 12);
   });
 
-  it("zooms through first person and back to a close third-person view", () => {
+  it("zooms through first person, crosses the local coherence boundary, and reaches planetary scale", () => {
     expect(applyWowCameraZoom(2.3, -120)).toBeGreaterThan(0.85);
     expect(applyWowCameraZoom(0.9, -120)).toBe(0);
     expect(applyWowCameraZoom(0, 120)).toBe(2.2);
-    expect(applyWowCameraZoom(39, 120)).toBe(39);
+    expect(applyWowCameraZoom(LOCAL_PROXY_COHERENCE_DISTANCE_M, 120)).toBeGreaterThan(LOCAL_PROXY_COHERENCE_DISTANCE_M);
+    expect(applyWowCameraZoom(MAX_CAMERA_ALTITUDE_M, 120)).toBe(MAX_CAMERA_ALTITUDE_M);
+    expect(isLocalProxyCoherenceLost(LOCAL_PROXY_COHERENCE_DISTANCE_M)).toBe(false);
+    expect(isLocalProxyCoherenceLost(LOCAL_PROXY_COHERENCE_DISTANCE_M + 0.001)).toBe(true);
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {

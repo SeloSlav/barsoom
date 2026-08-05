@@ -24,7 +24,7 @@
 | Free-look orbit | Hold left mouse and drag | Orbits the camera without changing the astronaut's facing direction. |
 | Mouse-run | Hold both mouse buttons | Moves forward while the camera remains under mouse control. |
 | Auto-run | `Num Lock` or `R` | Toggles continuous forward movement. Pressing forward or backward cancels it. |
-| Zoom camera | Mouse wheel | Changes follow distance out to 39 m. Zooming all the way in enters first person; one outward step restores close third person. |
+| Zoom camera | Mouse wheel | Changes follow distance continuously from first person to the 30,000 km planetary maximum. Crossing the former 39 m camera limit (about a 75 m reconstructed field on the reference viewport) triggers local-proxy coherence feedback but does not stop zoom; crossing inward restores coherence. Zooming all the way in enters first person, and one outward step restores close third person. |
 | Mars jump | `Space` | Launches at 4.8 m/s and falls at Mars surface gravity, 3.721 m/s². |
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |
 | Return to survey | `Escape` | Leaves the astronaut and returns to the maximum-altitude planetary view, centred above the same location. |

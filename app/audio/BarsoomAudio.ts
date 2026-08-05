@@ -1,9 +1,10 @@
 export type TraverseAudioEvent =
   | { type: "step"; running: boolean }
-  | { type: "jump" | "land" };
+  | { type: "jump" | "land" }
+  | { type: "coherence"; lost: boolean };
 
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
-type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition";
+type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition" | "coherenceBoundary";
 
 const STEP_EFFECT_IDS: StepEffectId[] = ["stepA", "stepB", "stepC", "stepD", "stepE", "stepF"];
 
@@ -20,6 +21,7 @@ const AUDIO_PATHS = {
   land: "/audio/suit-land.mp3",
   phaseLock: "/audio/phase-lock.mp3",
   observerTransition: "/audio/observer-transition.mp3",
+  coherenceBoundary: "/audio/observer-transition.mp3",
 } as const;
 
 const MUTE_STORAGE_KEY = "barsoom.audio-muted";
@@ -50,6 +52,7 @@ export class BarsoomAudio {
     land: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.land)),
     phaseLock: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.phaseLock)),
     observerTransition: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.observerTransition)),
+    coherenceBoundary: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.coherenceBoundary)),
   };
   private readonly effectIndices: Record<EffectId, number> = {
     stepA: 0,
@@ -62,6 +65,7 @@ export class BarsoomAudio {
     land: 0,
     phaseLock: 0,
     observerTransition: 0,
+    coherenceBoundary: 0,
   };
   private unlocked = false;
   private muted = false;
@@ -126,7 +130,10 @@ export class BarsoomAudio {
   }
 
   handleTraverseEvent(event: TraverseAudioEvent) {
-    if (this.narrationActive) return;
+    // Boundary feedback remains audible under narration because it confirms a
+    // camera-scale transition initiated by the user. Locomotion foley stays
+    // ducked so it cannot compete with SOVA.
+    if (this.narrationActive && event.type !== "coherence") return;
 
     if (event.type === "step") {
       const volume = (event.running ? 0.25 : 0.2) * (0.95 + Math.random() * 0.08);
@@ -134,8 +141,10 @@ export class BarsoomAudio {
       this.playEffect(this.nextStepEffect(), volume, playbackRate);
     } else if (event.type === "jump") {
       this.playEffect("jump", 0.42, 1);
-    } else {
+    } else if (event.type === "land") {
       this.playEffect("land", 0.55, 1);
+    } else {
+      this.playEffect("coherenceBoundary", event.lost ? 0.5 : 0.3, event.lost ? 0.68 : 1.22);
     }
   }
 

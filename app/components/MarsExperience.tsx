@@ -145,12 +145,14 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       </div>}
       <header className="mission-header">
         <div className="mission-identity">
-          <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
-          <h1 className="wordmark-row">
-            <span className="wordmark-barsoom">BARSOOM</span>
-            <span className="wordmark-divider" aria-hidden="true">|</span>
-            <span className="wordmark-mars">MARS</span>
-          </h1>
+          <div className="brand-lockup">
+            <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
+            <h1 className="wordmark-row">
+              <span className="wordmark-barsoom">BARSOOM</span>
+              <span className="wordmark-divider" aria-hidden="true">|</span>
+              <span className="wordmark-mars">MARS</span>
+            </h1>
+          </div>
           <span className="mission-mode"><i /> {surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED</span>
         </div>
         <div className="simulation-clock">

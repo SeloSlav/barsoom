@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import {
+  MAX_CAMERA_ALTITUDE_M,
   MARS_ATMOSPHERE_TOP_M,
   MARS_REFERENCE_RADIUS_M,
   MARS_SURFACE_GRAVITY_M_S2,
@@ -18,7 +19,12 @@ const CAMERA_DEFAULT_DISTANCE_M = 7;
 const CAMERA_FIRST_PERSON_DISTANCE_M = 0;
 const CAMERA_FIRST_PERSON_ENTER_DISTANCE_M = 0.85;
 const CAMERA_FIRST_PERSON_EXIT_DISTANCE_M = 2.2;
-const CAMERA_MAX_DISTANCE_M = 39;
+// The former follow-camera maximum produced the roughly 75 m reconstructed
+// field shown by the HUD on a typical viewport. It now marks the point where
+// the human-scale proxy stops claiming local coherence; it must not stop the
+// planetary zoom path.
+export const LOCAL_PROXY_COHERENCE_DISTANCE_M = 39;
+const CAMERA_MAX_DISTANCE_M = MAX_CAMERA_ALTITUDE_M;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
 const CAMERA_FIRST_PERSON_HEIGHT_M = 1.68;
 const CAMERA_COLLISION_CLEARANCE_M = 0.35;
@@ -171,6 +177,10 @@ export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: nu
     return CAMERA_FIRST_PERSON_DISTANCE_M;
   }
   return nextDistanceM;
+}
+
+export function isLocalProxyCoherenceLost(cameraDistanceM: number) {
+  return Number.isFinite(cameraDistanceM) && cameraDistanceM > LOCAL_PROXY_COHERENCE_DISTANCE_M;
 }
 
 export function rebaseCameraAnchorForTerrainChange(
@@ -453,6 +463,10 @@ export class SurfaceTraverseController {
 
   get surfaceReady() {
     return !this.active || this.entryReady;
+  }
+
+  get localProxyCoherent() {
+    return !this.active || !isLocalProxyCoherenceLost(this.cameraDistanceM);
   }
 
   private setLocalBasis() {
@@ -971,7 +985,12 @@ export class SurfaceTraverseController {
     event.preventDefault();
     if (this.entryWheelLockSeconds > 0) return;
     const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
+    const coherenceWasLost = isLocalProxyCoherenceLost(this.cameraDistanceM);
     this.cameraDistanceM = applyWowCameraZoom(this.cameraDistanceM, event.deltaY * modeScale);
+    const coherenceIsLost = isLocalProxyCoherenceLost(this.cameraDistanceM);
+    if (coherenceIsLost !== coherenceWasLost) {
+      this.onAudioEvent({ type: "coherence", lost: coherenceIsLost });
+    }
   };
 
   dispose() {

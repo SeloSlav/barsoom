@@ -418,6 +418,7 @@ export class PlanetEngine {
       simulationUtc: simulationUtc.toISOString(),
       controlMode: this.surfaceTraverse.active ? "surface" : "survey",
       surfaceReady: this.surfaceTraverse.surfaceReady,
+      localProxyCoherent: this.surfaceTraverse.localProxyCoherent,
     };
     this.onTelemetry(this.telemetry);
   }
