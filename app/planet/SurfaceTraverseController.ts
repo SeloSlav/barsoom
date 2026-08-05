@@ -40,7 +40,7 @@ export const MARS_JUMP_ANTICIPATION_DURATION_S = 0.22;
 const JUMP_LAUNCH_POSE_RELEASE_S = 0.3;
 const JUMP_LANDING_POSE_DURATION_S = 0.28;
 
-type AnimationName = "idle" | "idle_neutral" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
+type AnimationName = "idle" | "idle_neutral" | "jump_base" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
 
 type JumpPoseWeights = {
   squat: number;
@@ -365,10 +365,26 @@ export class SurfaceTraverseController {
       this.root.add(this.model);
 
       this.mixer = new THREE.AnimationMixer(this.model);
+      let idleClip: THREE.AnimationClip | null = null;
+      let neutralIdleClip: THREE.AnimationClip | null = null;
       for (const clip of gltf.animations) {
         const suffix = clip.name.split("|").at(-1)?.toLowerCase();
         if (!suffix || !["idle", "idle_neutral", "walk", "run", "jump", "jump_idle", "jump_land"].includes(suffix)) continue;
+        if (suffix === "idle") idleClip = clip;
+        if (suffix === "idle_neutral") neutralIdleClip = clip;
         this.actions.set(suffix as AnimationName, this.mixer.clipAction(clip));
+      }
+      if (idleClip && neutralIdleClip) {
+        const lowerBodyTrack = /^(UpperLeg|LowerLeg|Foot)[LR]\./;
+        const jumpBaseClip = new THREE.AnimationClip(
+          "jump_base",
+          Math.max(idleClip.duration, neutralIdleClip.duration),
+          [
+            ...idleClip.tracks.filter((track) => !lowerBodyTrack.test(track.name)),
+            ...neutralIdleClip.tracks.filter((track) => lowerBodyTrack.test(track.name)),
+          ].map((track) => track.clone()),
+        );
+        this.actions.set("jump_base", this.mixer.clipAction(jumpBaseClip));
       }
       this.playAnimation("idle", 0);
     } catch (error) {
@@ -525,13 +541,12 @@ export class SurfaceTraverseController {
 
   private updateAnimation(speedMps: number, airborne: boolean, deltaSeconds: number) {
     if (this.jumpAnticipationSeconds > 0 || airborne) {
-      // The locomotion idle uses an asymmetric stance with the left boot
-      // turned sharply outward. The asset's neutral idle gives the procedural
-      // jump rig parallel feet and a symmetric ankle-aligned base pose.
-      this.playAnimation("idle_neutral", 0.1);
+      // The jump base combines the regular idle's stable head/arms with only
+      // the neutral idle's symmetric leg and parallel-foot tracks.
+      this.playAnimation("jump_base", 0.1);
     } else if (this.landingSeconds > 0) {
       this.landingSeconds = Math.max(0, this.landingSeconds - deltaSeconds);
-      this.playAnimation("idle_neutral", 0.1);
+      this.playAnimation("jump_base", 0.1);
     } else if (speedMps >= RUN_SPEED_M_S - 0.1) {
       this.playAnimation("run");
     } else if (speedMps > 0) {

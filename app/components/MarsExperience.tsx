@@ -236,7 +236,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
       <SovaTutorial />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>NO FTL TRANSFER · RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );
