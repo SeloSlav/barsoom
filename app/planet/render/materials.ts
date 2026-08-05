@@ -517,6 +517,17 @@ const terrainFragment = /* glsl */ `
     vec3 hazeColour = mix(vec3(0.15, 0.055, 0.035), vec3(0.72, 0.20, 0.075), pow(max(dot(viewDirection, sun), 0.0), 6.0));
     colour = mix(colour, hazeColour, haze * (0.42 + 0.58 * daylight));
 
+    // A tiny linear-space finish opens the low mid-tones without lifting
+    // true night-side black. It reuses the LOD dither already computed for
+    // this fragment, so the grade adds no texture read or full-screen pass.
+    float finishingLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+    float visibleFinish = smoothstep(0.0025, 0.028, finishingLuma);
+    float shadowFinish = (1.0 - smoothstep(0.045, 0.26, finishingLuma)) * visibleFinish;
+    colour += vec3(0.0060, 0.0026, 0.0013) * shadowFinish;
+    finishingLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+    float finishingSaturation = mix(1.035, 1.01, smoothstep(0.45, 2.5, finishingLuma));
+    colour = max(mix(vec3(finishingLuma), colour, finishingSaturation), vec3(0.0));
+
     if (uDebugCubeFaces > 0.5) colour = mix(colour, palette(uFaceIndex), 0.54);
     if (uDebugLod > 0.5) colour = mix(colour, palette(mod(uTileLod, 6.0)), 0.58);
     if (uDebugNormals > 0.5) colour = normal * 0.5 + 0.5;
@@ -529,6 +540,10 @@ const terrainFragment = /* glsl */ `
       float line = 1.0 - smoothstep(0.0, max(fwidth(edge) * 1.8, 0.0025), edge);
       colour = mix(colour, vec3(0.05, 0.95, 0.82), line * vSurfaceMask);
     }
+
+    float finishingDitherMask = smoothstep(0.002, 0.018, finishingLuma) *
+      (1.0 - smoothstep(0.42, 1.6, finishingLuma));
+    colour = max(colour + vec3((dither - 0.5) * (0.36 / 255.0) * finishingDitherMask), vec3(0.0));
 
     gl_FragColor = vec4(max(colour, vec3(0.0)), 1.0);
     #include <tonemapping_fragment>
@@ -782,6 +797,11 @@ const atmosphereFragment = /* glsl */ `
     colour += dustySky * nearGround * (0.14 + horizonGlow * 0.38) * (0.22 + localDaylight * 0.78);
     float surfaceAlpha = nearGround * (0.14 + horizonGlow * 0.46) * (0.30 + localDaylight * 0.70);
     float alpha = clamp(max(surfaceAlpha, opticalAlpha * 0.92 + dot(colour, vec3(0.22))), 0.0, 0.96);
+    float atmosphereLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
+    float atmosphereDitherMask = smoothstep(0.002, 0.018, atmosphereLuma) *
+      (1.0 - smoothstep(0.42, 1.6, atmosphereLuma));
+    float atmosphereDither = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) - 0.5;
+    colour = max(colour + vec3(atmosphereDither * (0.36 / 255.0) * atmosphereDitherMask), vec3(0.0));
     gl_FragColor = vec4(max(colour, vec3(0.0)), alpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
