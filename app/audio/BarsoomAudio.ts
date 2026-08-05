@@ -116,7 +116,7 @@ export class BarsoomAudio {
   update(deltaSeconds: number) {
     if (this.muted || !this.unlocked || document.hidden) return;
     const blend = 1 - Math.exp(-Math.max(0, deltaSeconds) * 1.8);
-    const narrationDuck = this.narrationActive ? 0.28 : 1;
+    const narrationDuck = this.narrationActive ? 0.08 : 1;
     const windTarget = (this.surfaceMode ? 0.26 : 0.075) * narrationDuck;
     const scoreTarget = (this.surfaceMode ? 0.085 : 0.135) * narrationDuck;
     this.windVolume += (windTarget - this.windVolume) * blend;
@@ -126,6 +126,8 @@ export class BarsoomAudio {
   }
 
   handleTraverseEvent(event: TraverseAudioEvent) {
+    if (this.narrationActive) return;
+
     if (event.type === "step") {
       const volume = (event.running ? 0.25 : 0.2) * (0.95 + Math.random() * 0.08);
       const playbackRate = (event.running ? 1.02 : 0.99) + (Math.random() - 0.5) * 0.025;

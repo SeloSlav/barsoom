@@ -9,6 +9,9 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uSurfaceDiffuse: { value: THREE.Texture };
     uSurfaceNormal: { value: THREE.Texture };
     uSurfaceRoughness: { value: THREE.Texture };
+    uIceSurfaceDiffuse: { value: THREE.Texture };
+    uIceSurfaceNormal: { value: THREE.Texture };
+    uIceSurfaceRoughness: { value: THREE.Texture };
     uTime: { value: number };
     uFade: { value: number };
     uFadeIn: { value: number };
@@ -142,6 +145,9 @@ const terrainFragment = /* glsl */ `
   uniform sampler2D uSurfaceDiffuse;
   uniform sampler2D uSurfaceNormal;
   uniform sampler2D uSurfaceRoughness;
+  uniform sampler2D uIceSurfaceDiffuse;
+  uniform sampler2D uIceSurfaceNormal;
+  uniform sampler2D uIceSurfaceRoughness;
   uniform float uTime;
   uniform float uFade;
   uniform float uFadeIn;
@@ -292,30 +298,30 @@ const terrainFragment = /* glsl */ `
     );
   }
 
-  vec3 sampleSurfaceDiffuseProjection(vec2 projectedMetres, float seed) {
-    return sampleStochasticSurfaceMap(uSurfaceDiffuse, projectedMetres, seed).rgb;
+  vec3 sampleSurfaceDiffuseProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
+    return sampleStochasticSurfaceMap(surfaceMap, projectedMetres, seed).rgb;
   }
 
-  float sampleSurfaceRoughnessProjection(vec2 projectedMetres, float seed) {
-    return sampleStochasticSurfaceMap(uSurfaceRoughness, projectedMetres, seed).r;
+  float sampleSurfaceRoughnessProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
+    return sampleStochasticSurfaceMap(surfaceMap, projectedMetres, seed).r;
   }
 
-  vec3 sampleSurfaceNormalVariant(vec2 projectedMetres, vec4 variant) {
+  vec3 sampleSurfaceNormalVariant(sampler2D surfaceMap, vec2 projectedMetres, vec4 variant) {
     float turn = floor(variant.z * 4.0);
-    vec3 mapped = texture2D(uSurfaceNormal, surfaceVariantUv(projectedMetres, variant)).xyz * 2.0 - 1.0;
+    vec3 mapped = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant)).xyz * 2.0 - 1.0;
     mapped.xy = inverseSurfaceQuarterTurn(mapped.xy, turn);
     return mapped;
   }
 
-  vec3 sampleSurfaceNormalProjection(vec2 projectedMetres, float seed) {
+  vec3 sampleSurfaceNormalProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
     vec2 patchUv = projectedMetres / 5.3 - 0.5;
     vec2 cell = floor(patchUv);
     vec2 blendWeight = fract(patchUv);
     blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight);
-    vec3 sample00 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell, seed));
-    vec3 sample10 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(1.0, 0.0), seed));
-    vec3 sample01 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(0.0, 1.0), seed));
-    vec3 sample11 = sampleSurfaceNormalVariant(projectedMetres, surfaceVariantHash(cell + vec2(1.0, 1.0), seed));
+    vec3 sample00 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell, seed));
+    vec3 sample10 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(1.0, 0.0), seed));
+    vec3 sample01 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(0.0, 1.0), seed));
+    vec3 sample11 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(1.0, 1.0), seed));
     return normalize(mix(
       mix(sample00, sample10, blendWeight.x),
       mix(sample01, sample11, blendWeight.x),
@@ -323,24 +329,24 @@ const terrainFragment = /* glsl */ `
     ));
   }
 
-  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights) {
-    vec3 x = sampleSurfaceDiffuseProjection(metres.yz, 0.17);
-    vec3 y = sampleSurfaceDiffuseProjection(metres.xz, 1.73);
-    vec3 z = sampleSurfaceDiffuseProjection(metres.xy, 3.41);
+  vec3 sampleSurfaceDiffuse(sampler2D surfaceMap, vec3 metres, vec3 weights) {
+    vec3 x = sampleSurfaceDiffuseProjection(surfaceMap, metres.yz, 0.17);
+    vec3 y = sampleSurfaceDiffuseProjection(surfaceMap, metres.xz, 1.73);
+    vec3 z = sampleSurfaceDiffuseProjection(surfaceMap, metres.xy, 3.41);
     return x * weights.x + y * weights.y + z * weights.z;
   }
 
-  float sampleSurfaceRoughness(vec3 metres, vec3 weights) {
-    float x = sampleSurfaceRoughnessProjection(metres.yz, 0.17);
-    float y = sampleSurfaceRoughnessProjection(metres.xz, 1.73);
-    float z = sampleSurfaceRoughnessProjection(metres.xy, 3.41);
+  float sampleSurfaceRoughness(sampler2D surfaceMap, vec3 metres, vec3 weights) {
+    float x = sampleSurfaceRoughnessProjection(surfaceMap, metres.yz, 0.17);
+    float y = sampleSurfaceRoughnessProjection(surfaceMap, metres.xz, 1.73);
+    float z = sampleSurfaceRoughnessProjection(surfaceMap, metres.xy, 3.41);
     return x * weights.x + y * weights.y + z * weights.z;
   }
 
-  vec3 sampleSurfaceNormal(vec3 metres, vec3 baseNormal, vec3 weights) {
-    vec3 mapX = sampleSurfaceNormalProjection(metres.yz, 0.17);
-    vec3 mapY = sampleSurfaceNormalProjection(metres.xz, 1.73);
-    vec3 mapZ = sampleSurfaceNormalProjection(metres.xy, 3.41);
+  vec3 sampleSurfaceNormal(sampler2D surfaceMap, vec3 metres, vec3 baseNormal, vec3 weights) {
+    vec3 mapX = sampleSurfaceNormalProjection(surfaceMap, metres.yz, 0.17);
+    vec3 mapY = sampleSurfaceNormalProjection(surfaceMap, metres.xz, 1.73);
+    vec3 mapZ = sampleSurfaceNormalProjection(surfaceMap, metres.xy, 3.41);
     vec3 signs = mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), baseNormal));
     vec3 worldX = normalize(vec3(mapX.z * signs.x, mapX.x, mapX.y));
     vec3 worldY = normalize(vec3(mapY.x, mapY.z * signs.y, mapY.y));
@@ -418,13 +424,21 @@ const terrainFragment = /* glsl */ `
         (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
       surfaceMaterialResponse = surfacePbrBlend * (1.0 - smoothstep(9.0, 34.0, uCameraAltitude));
       vec3 textureWeights = triplanarWeights(normal);
-      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights);
+      vec3 photographedRock = sampleSurfaceDiffuse(uSurfaceDiffuse, vStableMetres, textureWeights);
       vec3 martianRock = photographedRock * vec3(1.10, 0.67, 0.46);
       martianRock *= 0.88 + macro * 0.22;
-      albedo = mix(albedo, martianRock, surfacePbrBlend * (1.0 - frostWeight));
+      vec3 photographedIce = sampleSurfaceDiffuse(uIceSurfaceDiffuse, vStableMetres, textureWeights);
+      float iceLuminance = dot(photographedIce, vec3(0.2126, 0.7152, 0.0722));
+      vec3 martianIce = mix(photographedIce, vec3(iceLuminance), 0.34) * vec3(1.04, 1.02, 0.98);
+      martianIce = mix(martianIce, frost, 0.22);
+      albedo = mix(albedo, mix(martianRock, martianIce, frostWeight), surfacePbrBlend);
       if (surfaceMaterialResponse > 0.001) {
-        mappedRoughness = sampleSurfaceRoughness(vStableMetres, textureWeights);
-        mappedNormal = sampleSurfaceNormal(vStableMetres, normal, textureWeights);
+        float rockRoughness = sampleSurfaceRoughness(uSurfaceRoughness, vStableMetres, textureWeights);
+        float iceRoughness = sampleSurfaceRoughness(uIceSurfaceRoughness, vStableMetres, textureWeights);
+        mappedRoughness = mix(rockRoughness, iceRoughness, frostWeight);
+        vec3 rockNormal = sampleSurfaceNormal(uSurfaceNormal, vStableMetres, normal, textureWeights);
+        vec3 iceNormal = sampleSurfaceNormal(uIceSurfaceNormal, vStableMetres, normal, textureWeights);
+        mappedNormal = normalize(mix(rockNormal, iceNormal, frostWeight));
       }
     }
 
@@ -443,7 +457,7 @@ const terrainFragment = /* glsl */ `
     float roughness = mix(${MATERIAL_CONFIG.regolith.roughness.toFixed(3)}, ${MATERIAL_CONFIG.basalt.roughness.toFixed(3)}, basaltWeight);
     roughness = mix(roughness, ${MATERIAL_CONFIG.frost.roughness.toFixed(3)}, frostWeight);
     roughness = clamp(roughness + (fineGrain - 0.5) * 0.12 * grainVisibility - pebbles * 0.08, 0.48, 0.99);
-    roughness = mix(roughness, clamp(mappedRoughness, 0.58, 0.99), surfaceMaterialResponse * (1.0 - frostWeight));
+    roughness = mix(roughness, clamp(mappedRoughness, 0.24, 0.99), surfaceMaterialResponse);
     vec3 orbitalMicro = vec3(
       valueNoise(radial * 6200.0 + vec3(0.13,0,0)),
       valueNoise(radial * 6200.0 + vec3(0,0.19,0)),
@@ -459,7 +473,7 @@ const terrainFragment = /* glsl */ `
     }
     metreMicro -= radial * dot(metreMicro, radial);
     normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
-    normal = normalize(mix(normal, mappedNormal, surfaceMaterialResponse * 0.50 * (1.0 - frostWeight)));
+    normal = normalize(mix(normal, mappedNormal, surfaceMaterialResponse * 0.50));
 
     vec3 sun = normalize(uSunDirection);
     float ndl = max(dot(normal, sun), 0.0);
@@ -538,6 +552,22 @@ export function createTerrainMaterial(): TerrainMaterial {
     "Poly Haven rocks ground 02 roughness",
     [235, 235, 235, 255],
   );
+  const iceSurfaceDiffuse = createMarsSurfaceTexture(
+    "/textures/mars-ice-diffuse.jpg?revision=ambientcg-ice001-1k",
+    "ambientCG Ice 001 diffuse, Mars polar colour grade",
+    [184, 176, 168, 255],
+    true,
+  );
+  const iceSurfaceNormal = createMarsSurfaceTexture(
+    "/textures/mars-ice-normal-gl.jpg?revision=ambientcg-ice001-1k",
+    "ambientCG Ice 001 OpenGL normal",
+    [128, 128, 255, 255],
+  );
+  const iceSurfaceRoughness = createMarsSurfaceTexture(
+    "/textures/mars-ice-roughness.jpg?revision=ambientcg-ice001-1k",
+    "ambientCG Ice 001 roughness",
+    [140, 140, 140, 255],
+  );
   return new THREE.ShaderMaterial({
     name: "Mars procedural PBR terrain",
     vertexShader: terrainVertex,
@@ -549,6 +579,9 @@ export function createTerrainMaterial(): TerrainMaterial {
       uSurfaceDiffuse: { value: surfaceDiffuse },
       uSurfaceNormal: { value: surfaceNormal },
       uSurfaceRoughness: { value: surfaceRoughness },
+      uIceSurfaceDiffuse: { value: iceSurfaceDiffuse },
+      uIceSurfaceNormal: { value: iceSurfaceNormal },
+      uIceSurfaceRoughness: { value: iceSurfaceRoughness },
       uTime: { value: 0 },
       uFade: { value: 1 },
       uFadeIn: { value: 1 },

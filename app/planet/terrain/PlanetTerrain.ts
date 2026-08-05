@@ -745,6 +745,9 @@ export class PlanetTerrain {
     this.material.uniforms.uSurfaceDiffuse.value.dispose();
     this.material.uniforms.uSurfaceNormal.value.dispose();
     this.material.uniforms.uSurfaceRoughness.value.dispose();
+    this.material.uniforms.uIceSurfaceDiffuse.value.dispose();
+    this.material.uniforms.uIceSurfaceNormal.value.dispose();
+    this.material.uniforms.uIceSurfaceRoughness.value.dispose();
     this.material.dispose();
     this.shadowMaterial.dispose();
     this.workers.dispose();

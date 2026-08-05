@@ -567,19 +567,19 @@ export class SurfaceTraverseController {
     bone.updateWorldMatrix(true, true);
   }
 
-  private plantLeftFoot() {
-    const upperLeft = this.poseBones.get("UpperLegL");
-    const lowerLeft = this.poseBones.get("LowerLegL");
-    const footLeft = this.poseBones.get("FootL");
-    const lowerLeftEnd = lowerLeft?.children[0];
-    if (!upperLeft || !lowerLeft || !lowerLeftEnd || !footLeft || !this.model) return;
+  private plantFoot(side: "L" | "R") {
+    const upperLeg = this.poseBones.get(`UpperLeg${side}`);
+    const lowerLeg = this.poseBones.get(`LowerLeg${side}`);
+    const foot = this.poseBones.get(`Foot${side}`);
+    const lowerLegEnd = lowerLeg?.children[0];
+    if (!upperLeg || !lowerLeg || !lowerLegEnd || !foot || !this.model) return;
 
-    upperLeft.updateWorldMatrix(true, true);
-    footLeft.updateWorldMatrix(true, false);
-    upperLeft.getWorldPosition(this.poseHip);
-    lowerLeft.getWorldPosition(this.poseKnee);
-    lowerLeftEnd.getWorldPosition(this.poseEnd);
-    footLeft.getWorldPosition(this.poseFoot);
+    upperLeg.updateWorldMatrix(true, true);
+    foot.updateWorldMatrix(true, false);
+    upperLeg.getWorldPosition(this.poseHip);
+    lowerLeg.getWorldPosition(this.poseKnee);
+    lowerLegEnd.getWorldPosition(this.poseEnd);
+    foot.getWorldPosition(this.poseFoot);
     const upperLength = this.poseHip.distanceTo(this.poseKnee);
     const lowerLength = this.poseKnee.distanceTo(this.poseEnd);
 
@@ -616,8 +616,8 @@ export class SurfaceTraverseController {
       .addScaledVector(this.poseAxis, kneeAlongAxis)
       .addScaledVector(this.poseBend, kneeAwayFromAxis);
 
-    this.aimPoseBoneAtWorldPoint(upperLeft, lowerLeft, this.poseDesiredKnee);
-    this.aimPoseBoneAtWorldPoint(lowerLeft, lowerLeftEnd, this.poseFoot);
+    this.aimPoseBoneAtWorldPoint(upperLeg, lowerLeg, this.poseDesiredKnee);
+    this.aimPoseBoneAtWorldPoint(lowerLeg, lowerLegEnd, this.poseFoot);
   }
 
   private applyJumpPose(airborne: boolean) {
@@ -633,8 +633,6 @@ export class SurfaceTraverseController {
       const body = this.poseBones.get("Body");
       if (body) body.position.y -= 0.0028 * weights.squat;
       this.rotatePoseBone("Chest", 7, 0, 0, weights.squat);
-      this.rotatePoseBone("UpperLegR", 0, 0, -30, weights.squat);
-      this.rotatePoseBone("LowerLegR", 34, 0, 0, weights.squat);
       this.rotatePoseBone("UpperArmL", 0, 0, 16, weights.squat);
       this.rotatePoseBone("UpperArmR", 0, 0, -16, weights.squat);
     }
@@ -647,11 +645,12 @@ export class SurfaceTraverseController {
       this.rotatePoseBone("LowerArmL", 0, 0, -16, weights.descent);
       this.rotatePoseBone("UpperArmR", 24, 0, 28, weights.descent);
       this.rotatePoseBone("LowerArmR", 0, 0, 16, weights.descent);
-      this.rotatePoseBone("UpperLegR", 0, 0, -8, weights.descent);
-      this.rotatePoseBone("LowerLegR", 9, 0, 0, weights.descent);
     }
 
-    if (weights.squat > 0 || weights.descent > 0) this.plantLeftFoot();
+    if (weights.squat > 0 || weights.descent > 0) {
+      this.plantFoot("L");
+      this.plantFoot("R");
+    }
   }
 
   private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {

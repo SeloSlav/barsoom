@@ -11,6 +11,28 @@ import {
 
 const VOCALIZER_BARS = Array.from({ length: 14 }, (_, index) => index);
 
+let activeNarration: HTMLAudioElement | null = null;
+
+function stopNarration(audio: HTMLAudioElement) {
+  audio.pause();
+  if (activeNarration === audio) activeNarration = null;
+}
+
+async function playNarrationExclusive(audio: HTMLAudioElement) {
+  if (activeNarration && activeNarration !== audio) {
+    activeNarration.pause();
+    activeNarration.currentTime = 0;
+  }
+
+  activeNarration = audio;
+  try {
+    await audio.play();
+  } catch (error) {
+    if (activeNarration === audio) activeNarration = null;
+    throw error;
+  }
+}
+
 export function SovaTutorial() {
   const [currentId, setCurrentId] = useState<SovaTutorialId | null>("telescope");
   const [skipFuture, setSkipFuture] = useState(false);
@@ -44,7 +66,9 @@ export function SovaTutorial() {
 
   useEffect(() => {
     if (!currentId) return;
-    const audio = new Audio(SOVA_TUTORIALS[currentId].audioSrc);
+    const tutorial = SOVA_TUTORIALS[currentId];
+    const audio = new Audio(tutorial.audioSrc);
+    let cancelled = false;
     audio.preload = "auto";
     audio.volume = 0.82;
     audioRef.current = audio;
@@ -59,14 +83,26 @@ export function SovaTutorial() {
       setPlaying(false);
       window.__BARSOOM__?.setNarrationActive(false);
     };
+    const attemptPlayback = async () => {
+      try {
+        await playNarrationExclusive(audio);
+        if (cancelled || audioRef.current !== audio) stopNarration(audio);
+      } catch {
+        if (!cancelled) setPlaybackBlocked(true);
+      }
+    };
     audio.addEventListener("timeupdate", updateProgress);
     audio.addEventListener("play", markPlaying);
     audio.addEventListener("pause", markPaused);
     audio.addEventListener("ended", markPaused);
-    void audio.play().catch(() => setPlaybackBlocked(true));
+    const autoPlayTimer = window.setTimeout(() => {
+      void attemptPlayback();
+    }, tutorial.autoPlayDelayMs);
 
     return () => {
-      audio.pause();
+      cancelled = true;
+      window.clearTimeout(autoPlayTimer);
+      stopNarration(audio);
       audio.removeEventListener("timeupdate", updateProgress);
       audio.removeEventListener("play", markPlaying);
       audio.removeEventListener("pause", markPaused);
@@ -94,11 +130,11 @@ export function SovaTutorial() {
     const audio = audioRef.current;
     if (!audio) return;
     if (!audio.paused) {
-      audio.pause();
+      stopNarration(audio);
       return;
     }
     if (audio.ended) audio.currentTime = 0;
-    void audio.play().catch(() => setPlaybackBlocked(true));
+    void playNarrationExclusive(audio).catch(() => setPlaybackBlocked(true));
   };
 
   const setSkipAll = (skip: boolean) => {
