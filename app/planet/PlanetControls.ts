@@ -71,6 +71,7 @@ export class PlanetControls {
   private altitudeM = 10_000_000;
   private automaticApproachEnabled = true;
   private automaticApproachPitchRad = 0;
+  private planarPanActive = false;
   private drag: PointerDrag | null = null;
   private enabled = true;
   private disposed = false;
@@ -145,6 +146,7 @@ export class PlanetControls {
     // Once the player takes the orbit control, their orientation is
     // authoritative. Automatic approach pitch never fights a middle drag.
     this.automaticApproachEnabled = false;
+    this.planarPanActive = false;
     // Rotate one fixed camera offset around an unchanged focus point.
     const oldOrbit = this.scratchA.copy(this.orbitDirection);
     const oldUp = this.scratchB.copy(this.viewUp);
@@ -172,29 +174,66 @@ export class PlanetControls {
   }
 
   private pan(dx: number, dy: number) {
-    // Translate camera and focus together in the current view plane. The offset
-    // and view-up vectors do not change, so panning cannot become an orbit or roll.
-    const oldFocus = this.scratchA.copy(this.focusDirection);
+    // Move the camera itself in its current screen plane, then reacquire the
+    // terrain under the unchanged centre ray. Merely nudging the surface
+    // direction and normalising it (the old implementation) follows Mars'
+    // curvature: at orbital scale that adds a large, visible depth component
+    // and makes a right drag feel as if it is rotating the planet.
+    //
+    // Keeping the requested camera displacement perpendicular to the view ray
+    // makes this a genuine truck/pedestal pan. Retargeting the centre ray gives
+    // the rest of the controller an ordinary surface focus without changing
+    // the camera's viewing direction or roll.
+    // A manual pan also owns the composition from this point on; otherwise the
+    // automatic approach can add a pitch on the next frame after the lateral
+    // move changes AGL slightly.
+    this.automaticApproachEnabled = false;
+    const cameraBefore = this.scratchA
+      .copy(this.focusAbsolute)
+      .addScaledVector(this.orbitDirection, this.cameraDistanceM);
+    const forward = this.scratchD.copy(this.orbitDirection).multiplyScalar(-1);
     const screenRight = this.scratchB
-      .crossVectors(this.scratchD.copy(this.orbitDirection).multiplyScalar(-1), this.viewUp)
+      .crossVectors(forward, this.viewUp)
       .normalize();
     const screenUp = this.scratchC.copy(this.viewUp);
-    screenRight.addScaledVector(oldFocus, -screenRight.dot(oldFocus));
-    screenUp.addScaledVector(oldFocus, -screenUp.dot(oldFocus));
-    if (screenRight.lengthSq() < 1e-10) screenRight.crossVectors(screenUp, oldFocus);
-    if (screenUp.lengthSq() < 1e-10) screenUp.crossVectors(oldFocus, screenRight);
-    screenRight.normalize();
-    screenUp.normalize();
     const viewportHeight = Math.max(1, this.canvas.clientHeight || this.canvas.getBoundingClientRect().height || 1);
     const metresPerPixel = 2 * this.cameraDistanceM
       * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5)
       / viewportHeight;
-    const nextFocus = this.scratchD.copy(oldFocus)
-      .addScaledVector(screenRight, (-dx * metresPerPixel) / MARS_REFERENCE_RADIUS_M)
-      .addScaledVector(screenUp, (dy * metresPerPixel) / MARS_REFERENCE_RADIUS_M)
-      .normalize();
-    this.focusDirection.copy(nextFocus);
-    this.updateFocusAbsolute();
+    const rightM = -dx * metresPerPixel;
+    const upM = dy * metresPerPixel;
+    const hitAtScale = (scale: number) => rayTerrainIntersection(
+      {
+        x: cameraBefore.x + screenRight.x * rightM * scale + screenUp.x * upM * scale,
+        y: cameraBefore.y + screenRight.y * rightM * scale + screenUp.y * upM * scale,
+        z: cameraBefore.z + screenRight.z * rightM * scale + screenUp.z * upM * scale,
+      },
+      forward,
+      this.terrainHeight,
+    );
+
+    let acceptedScale = 1;
+    let hit = hitAtScale(acceptedScale);
+    if (!hit) {
+      // A centre ray can leave the limb in a single coarse pointer event. Stop
+      // at the last valid point instead of snapping back or turning the pan
+      // into an orbit. Subsequent motion back toward Mars resumes normally.
+      let lower = 0;
+      let upper = 1;
+      for (let iteration = 0; iteration < 18; iteration += 1) {
+        const midpoint = (lower + upper) * 0.5;
+        if (hitAtScale(midpoint)) lower = midpoint;
+        else upper = midpoint;
+      }
+      acceptedScale = lower;
+      hit = hitAtScale(acceptedScale);
+    }
+    if (!hit || acceptedScale < 1e-6) return;
+
+    this.focusDirection.set(hit.direction.x, hit.direction.y, hit.direction.z);
+    this.focusAbsolute.set(hit.point.x, hit.point.y, hit.point.z);
+    this.cameraDistanceM = hit.distance;
+    this.planarPanActive = true;
     this.finishGesture();
     this.prefetch(this.focusDirection);
   }
@@ -256,9 +295,10 @@ export class PlanetControls {
 
   private finishGesture() {
     this.desiredCameraDistanceM = this.cameraDistanceM;
-    this.altitudeM = Math.max(
-      MIN_CAMERA_ALTITUDE_M,
+    this.altitudeM = clamp(
       this.cameraAltitudeAtDistance(this.cameraDistanceM) - CAMERA_SURFACE_EPSILON_M,
+      MIN_CAMERA_ALTITUDE_M,
+      MAX_CAMERA_ALTITUDE_M,
     );
     this.desiredAltitudeM = this.altitudeM;
     this.transientZoomAnchor = null;
@@ -267,6 +307,7 @@ export class PlanetControls {
   private onWheel = (event: WheelEvent) => {
     if (!this.enabled) return;
     event.preventDefault();
+    this.planarPanActive = false;
     this.updateCursor(event);
     // WheelEvent constants are 1 (line) and 2 (page). Using the values keeps
     // this input path deterministic in browser integration/SSR test harnesses.
@@ -334,7 +375,9 @@ export class PlanetControls {
     // cannot silently move the camera above the public maximum or below ground.
     this.updateAutomaticApproach(deltaSeconds);
     this.updateFocusAbsolute();
-    this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
+    if (!this.planarPanActive) {
+      this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
+    }
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 10.5);
     const previousDistanceM = this.cameraDistanceM;
     const distanceDifference = this.desiredCameraDistanceM - this.cameraDistanceM;
@@ -368,7 +411,7 @@ export class PlanetControls {
       this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
       this.cameraDirection.copy(this.cameraAbsolute).normalize();
       actualAltitude = MIN_CAMERA_ALTITUDE_M;
-    } else if (actualAltitude > MAX_CAMERA_ALTITUDE_M) {
+    } else if (actualAltitude > MAX_CAMERA_ALTITUDE_M && !this.planarPanActive) {
       this.cameraDistanceM = this.distanceForAltitude(MAX_CAMERA_ALTITUDE_M);
       this.desiredCameraDistanceM = Math.min(this.desiredCameraDistanceM, this.cameraDistanceM);
       this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
@@ -418,6 +461,7 @@ export class PlanetControls {
     this.viewUp.normalize();
     this.automaticApproachEnabled = true;
     this.automaticApproachPitchRad = 0;
+    this.planarPanActive = false;
     this.updateFocusAbsolute();
     this.altitudeM = this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
     this.cameraDistanceM = this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
@@ -444,6 +488,7 @@ export class PlanetControls {
   }
 
   setAltitude(altitudeM: number, immediate = false) {
+    this.planarPanActive = false;
     this.desiredAltitudeM = clamp(altitudeM, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
     this.updateFocusAbsolute();
     this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);

@@ -96,6 +96,7 @@ describe("PlanetControls integration", () => {
 
     controls.update(1 / 60);
     const forwardBeforePan = camera.getWorldDirection(new THREE.Vector3());
+    const frameBeforePan = controls.update(1 / 60);
     const orbitBeforePan = { ...orbited.orbitDirection };
     expect(pointer(canvas, "pointerdown", 2, 400, 300)).toBe(true);
     pointer(canvas, "pointermove", 2, 470, 260);
@@ -106,9 +107,39 @@ describe("PlanetControls integration", () => {
     expect(panned.orbitDirection.x).toBeCloseTo(orbitBeforePan.x, 12);
     expect(panned.orbitDirection.y).toBeCloseTo(orbitBeforePan.y, 12);
     expect(panned.orbitDirection.z).toBeCloseTo(orbitBeforePan.z, 12);
-    expect(panned.cameraDistanceM).toBeCloseTo(orbited.cameraDistanceM, 8);
-    controls.update(1 / 60);
+    const frameAfterPan = controls.update(1 / 60);
     expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-10);
+    const cameraDisplacement = new THREE.Vector3(
+      frameAfterPan.cameraAbsolute.x - frameBeforePan.cameraAbsolute.x,
+      frameAfterPan.cameraAbsolute.y - frameBeforePan.cameraAbsolute.y,
+      frameAfterPan.cameraAbsolute.z - frameBeforePan.cameraAbsolute.z,
+    );
+    expect(Math.abs(cameraDisplacement.dot(forwardBeforePan))).toBeLessThan(0.01);
+  });
+
+  it("keeps zoomed-out right-pan motion flat in the existing camera plane", () => {
+    const { canvas, camera, controls } = trackedHarness();
+    controls.setAltitude(MAX_CAMERA_ALTITUDE_M, true);
+    const before = controls.update(1 / 60);
+    const forward = camera.getWorldDirection(new THREE.Vector3());
+    const up = camera.up.clone().normalize();
+    const right = new THREE.Vector3().crossVectors(forward, up).normalize();
+
+    pointer(canvas, "pointerdown", 2, 400, 300);
+    pointer(canvas, "pointermove", 2, 470, 260);
+    pointer(canvas, "pointerup", 2, 470, 260);
+    const after = controls.update(1 / 60);
+    const displacement = new THREE.Vector3(
+      after.cameraAbsolute.x - before.cameraAbsolute.x,
+      after.cameraAbsolute.y - before.cameraAbsolute.y,
+      after.cameraAbsolute.z - before.cameraAbsolute.z,
+    );
+
+    expect(Math.abs(displacement.dot(forward))).toBeLessThan(0.01);
+    expect(displacement.dot(right)).toBeLessThan(0);
+    expect(displacement.dot(up)).toBeLessThan(0);
+    expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forward)).toBeLessThan(1e-10);
+    expect(after.altitudeM).toBe(MAX_CAMERA_ALTITUDE_M);
   });
 
   it("keeps the orbit focus and radius fixed through unrestricted repeated rotations", () => {
@@ -151,7 +182,7 @@ describe("PlanetControls integration", () => {
     frame = controls.update(1 / 60);
     expect(dot3(focusBeforePan, frame.focusDirection)).toBeLessThan(0.99999999);
     expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-4);
-    expect(controls.getState().automaticApproachEnabled).toBe(true);
+    expect(controls.getState().automaticApproachEnabled).toBe(false);
 
     pointer(canvas, "pointerdown", 1, 400, 300);
     pointer(canvas, "pointermove", 1, 520, 245);
