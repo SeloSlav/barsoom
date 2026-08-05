@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { BarsoomAudio } from "../audio/BarsoomAudio";
+import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
 import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
@@ -27,6 +28,7 @@ export type PlanetEngineApi = {
   exitSurfaceTraverse: () => void;
   getAudioMuted: () => boolean;
   setAudioMuted: (muted: boolean) => void;
+  setNarrationActive: (active: boolean) => void;
 };
 
 declare global {
@@ -282,6 +284,7 @@ export class PlanetEngine {
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
       getAudioMuted: () => this.getAudioMuted(),
       setAudioMuted: (muted) => this.setAudioMuted(muted),
+      setNarrationActive: (active) => this.audio.setNarrationActive(active),
     };
     this.renderer.setAnimationLoop(this.animate);
   }
@@ -494,6 +497,7 @@ export class PlanetEngine {
     this.controls.setZoomAnchor(this.selectionDirection);
     this.onSelectionChange({ x: event.clientX, y: event.clientY });
     this.audio.playPhaseLock();
+    emitSovaTutorial("surface");
     void this.terrain.prefetch(this.selectionDirection);
   };
 
@@ -555,6 +559,7 @@ export class PlanetEngine {
     this.surfaceTraverse.teleportTo(destination);
     this.audio.setSurfaceMode(true);
     this.audio.playObserverTransition(true);
+    emitSovaTutorial("spaceman");
     this.lastTelemetryTime = -Infinity;
   }
 

@@ -66,6 +66,7 @@ export class BarsoomAudio {
   private unlocked = false;
   private muted = false;
   private surfaceMode = false;
+  private narrationActive = false;
   private stepBag: StepEffectId[] = [];
   private lastStep: StepEffectId | null = null;
   private windVolume = 0;
@@ -108,11 +109,16 @@ export class BarsoomAudio {
     this.surfaceMode = active;
   }
 
+  setNarrationActive(active: boolean) {
+    this.narrationActive = active;
+  }
+
   update(deltaSeconds: number) {
     if (this.muted || !this.unlocked || document.hidden) return;
     const blend = 1 - Math.exp(-Math.max(0, deltaSeconds) * 1.8);
-    const windTarget = this.surfaceMode ? 0.26 : 0.075;
-    const scoreTarget = this.surfaceMode ? 0.085 : 0.135;
+    const narrationDuck = this.narrationActive ? 0.28 : 1;
+    const windTarget = (this.surfaceMode ? 0.26 : 0.075) * narrationDuck;
+    const scoreTarget = (this.surfaceMode ? 0.085 : 0.135) * narrationDuck;
     this.windVolume += (windTarget - this.windVolume) * blend;
     this.scoreVolume += (scoreTarget - this.scoreVolume) * blend;
     this.wind.volume = this.windVolume;

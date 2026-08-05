@@ -12,6 +12,16 @@ The ambient wind, astronaut foley and instrument cues in `public/audio/` were ge
 
 No API key or other ElevenLabs account data is stored in this repository.
 
+## SOVA mission intelligence
+
+SOVA's original holographic portrait (`public/images/sova-profile.png`) was generated for Barsoom with OpenAI image generation. Her original custom voice was created with the ElevenLabs Voice Design API, then rendered through ElevenLabs Text to Speech for three tutorial briefings:
+
+- `sova-quantum-telescope.mp3`: delayed-photon and quantum-metrology briefing
+- `sova-surface-selection.mp3`: landing-site survey briefing
+- `sova-spaceman.mp3`: local proxy and robotic-colonization briefing
+
+The character, scripts, voice description and visual prompt were authored specifically for this project. The scientific copy treats the Cauchy Array as speculative fiction while explicitly preserving the no-faster-than-light and real-photon constraints of actual interferometry.
+
 ## Astronaut
 
 The surface-traverse character is the rigged and animated **Astronaut** by Quaternius.
