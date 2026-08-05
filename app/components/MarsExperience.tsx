@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
 import { PlanetEngine } from "../planet/PlanetEngine";
+import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
 
@@ -67,6 +68,28 @@ function positionObserverAction(x: number, y: number): ObserverActionPosition {
   };
 }
 
+async function copyTextToClipboard(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    try {
+      document.body.appendChild(textarea);
+      textarea.select();
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      textarea.remove();
+    }
+  }
+}
+
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
@@ -75,7 +98,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [audioMuted, setAudioMuted] = useState(false);
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [recoherenceVisible, setRecoherenceVisible] = useState(false);
+  const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const coherenceWasLostRef = useRef(false);
+  const shareStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -89,6 +114,14 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         (position) => setObserverAction(position ? positionObserverAction(position.x, position.y) : null),
       );
       setAudioMuted(engine.getAudioMuted());
+      const sharedLocation = parseSpacemanShareLocation(window.location.search);
+      if (sharedLocation) {
+        window.__BARSOOM__?.instantiateObserverAt(
+          sharedLocation.latitudeDeg,
+          sharedLocation.longitudeDeg,
+          sharedLocation.headingRad,
+        );
+      }
     } catch (caught) {
       engine?.dispose();
       const message = caught instanceof Error ? caught.message : "WebGL could not start on this device.";
@@ -99,8 +132,22 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       if (event.code === "KeyH" && !event.ctrlKey && !event.metaKey) setHelpVisible((visible) => !visible);
     };
     window.addEventListener("keydown", keyHandler);
-    return () => { window.removeEventListener("keydown", keyHandler); engine?.dispose(); };
+    return () => {
+      window.removeEventListener("keydown", keyHandler);
+      if (shareStatusTimeoutRef.current !== null) window.clearTimeout(shareStatusTimeoutRef.current);
+      engine?.dispose();
+    };
   }, [initialSimulationUtc]);
+
+  const shareSpacemanLocation = async () => {
+    const location = window.__BARSOOM__?.getSpacemanLocation();
+    if (!location) return;
+    const shareUrl = createSpacemanShareUrl(window.location.href, location);
+    const copied = await copyTextToClipboard(shareUrl);
+    setShareStatus(copied ? "copied" : "error");
+    if (shareStatusTimeoutRef.current !== null) window.clearTimeout(shareStatusTimeoutRef.current);
+    shareStatusTimeoutRef.current = window.setTimeout(() => setShareStatus("idle"), 2_400);
+  };
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
   const surfaceMode = telemetry.controlMode === "surface";
@@ -184,6 +231,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <div><span>SOLVED DATUM OFFSET</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
         </div>
         <div className="ground-span"><span>RECONSTRUCTED FIELD</span><b>{formatDistance(telemetry.groundWidthM)}</b></div>
+        {surfaceMode && <div className="coordinate-share">
+          <button type="button" onClick={shareSpacemanLocation}>
+            <i aria-hidden="true" />
+            {shareStatus === "copied" ? "LOCATION LINK COPIED" : shareStatus === "error" ? "COPY FAILED — TRY AGAIN" : "SHARE EXACT LOCATION"}
+          </button>
+          <span className="sr-only" role="status" aria-live="polite">
+            {shareStatus === "copied" ? "Exact Spaceman location link copied to clipboard." : shareStatus === "error" ? "Could not copy the location link." : ""}
+          </span>
+        </div>}
       </section>
       <section className="altitude-gauge" aria-label="Reconstruction focal height">
         <span className="gauge-label">FOCAL<br />STANDOFF</span>

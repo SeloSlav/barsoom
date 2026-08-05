@@ -16,6 +16,7 @@ import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
 export type PlanetEngineApi = {
   getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface" };
+  getSpacemanLocation: () => { latitudeDeg: number; longitudeDeg: number; headingRad: number } | null;
   setLocation: (latitudeDeg: number, longitudeDeg: number, altitudeM?: number) => void;
   setAltitude: (altitudeM: number, immediate?: boolean) => void;
   setDebug: (flag: keyof DebugFlags, value: boolean) => void;
@@ -238,6 +239,15 @@ export class PlanetEngine {
         telemetry: this.telemetry,
         controlMode: this.surfaceTraverse.active ? "surface" : "survey",
       }),
+      getSpacemanLocation: () => {
+        if (!this.surfaceTraverse.active) return null;
+        const coordinates = cartesianToLatLonElevation(this.surfaceTraverse.getSurfaceDirection(), 1);
+        return {
+          latitudeDeg: coordinates.latitudeDeg,
+          longitudeDeg: coordinates.longitudeDeg,
+          headingRad: this.surfaceTraverse.getHeadingRad(),
+        };
+      },
       setLocation: (latitudeDeg, longitudeDeg, altitudeM) => {
         if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
         this.clearSelection();

@@ -469,6 +469,10 @@ export class SurfaceTraverseController {
     return { x: this.direction.x, y: this.direction.y, z: this.direction.z };
   }
 
+  getHeadingRad() {
+    return this.headingRad;
+  }
+
   get surfaceReady() {
     return !this.active || this.entryReady;
   }
