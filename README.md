@@ -1,6 +1,6 @@
 # Barsoom
 
-Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, ray-marched single-scattering atmosphere, a real bright-star catalogue, and Mars-centred ephemerides.
+Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. Its interface presents that continuity as the Cauchy Array: a causally limited, entanglement-enhanced interferometer that reconstructs the outgoing Martian light field at a chosen virtual focal volume. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, ray-marched single-scattering atmosphere, a real bright-star catalogue, and Mars-centred ephemerides.
 
 ## Run
 

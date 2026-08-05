@@ -58,6 +58,10 @@ export class SurfaceTraverseController {
   private readonly scratch = new THREE.Vector3();
   private readonly relativeTarget = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
+  private readonly modelForwardCorrection = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(0, 1, 0),
+    Math.PI,
+  );
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
@@ -109,7 +113,7 @@ export class SurfaceTraverseController {
 
   private async loadModel() {
     try {
-      const gltf = await new GLTFLoader().loadAsync("/models/astronaut.glb");
+      const gltf = await new GLTFLoader().loadAsync("/models/astronaut.glb?v=human-spacesuit-v1");
       if (this.disposed) return;
       this.model = gltf.scene;
       this.model.name = "Quaternius CC0 astronaut";
@@ -300,7 +304,7 @@ export class SurfaceTraverseController {
     this.headingVector(this.headingRad, this.forward);
     this.right.crossVectors(this.up, this.forward).normalize();
     this.orientation.makeBasis(this.right, this.up, this.forward);
-    this.root.quaternion.setFromRotationMatrix(this.orientation);
+    this.root.quaternion.setFromRotationMatrix(this.orientation).multiply(this.modelForwardCorrection);
 
     this.headingVector(this.cameraYawRad, this.forward);
     this.targetAbsolute.copy(this.playerAbsolute).addScaledVector(this.up, CAMERA_TARGET_HEIGHT_M);

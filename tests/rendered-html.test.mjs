@@ -10,14 +10,15 @@ async function render() {
   }, { waitUntil() {}, passThroughOnException() {} });
 }
 
-test("server-renders the Barsoom planetary survey shell", async () => {
+test("server-renders the Barsoom Cauchy Array shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
   const html = await response.text();
-  assert.match(html, /<title>Barsoom — Seamless Mars Planetary Survey<\/title>/i);
+  assert.match(html, /<title>Barsoom — Cauchy Array Mars Reconstruction<\/title>/i);
   assert.match(html, /BARSOOM/);
-  assert.match(html, /NASA VIKING ALBEDO · MOLA 16 PPD RELIEF/);
-  assert.match(html, /PLANETARY SURVEY/);
+  assert.match(html, /CAUCHY ARRAY/);
+  assert.match(html, /VIKING ALBEDO · MOLA 16 PPD \/ OBSERVATION PRIORS/);
+  assert.match(html, /PLANETARY APERTURE/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });

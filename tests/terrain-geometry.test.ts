@@ -7,8 +7,12 @@ import {
   TERRAIN_WORKER_REVISION as WORKER_REVISION,
 } from "../public/workers/terrain-worker.js";
 import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrain/TerrainWorkerPool";
-import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
-import { neighbourTile, parentTile } from "../app/planet/math";
+import {
+  coarserNeighbourEdgeMorphs,
+  lodTransitionVisible,
+  neighbourBalanceAncestors,
+} from "../app/planet/terrain/PlanetTerrain";
+import { neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
 import { proceduralTerrainHeightForLod } from "../app/planet/noise";
 import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
@@ -135,6 +139,20 @@ describe("terrain worker geometry", () => {
     expect(neighbourBalanceAncestors(splitTile, "east").neighbour.face).not.toBe(splitTile.face);
   });
 
+  it("morphs only edges that actually border a visible coarser tile", () => {
+    const tile = { face: "px" as const, lod: 6, x: 31, y: 24 };
+    const west = neighbourBalanceAncestors(tile, "west").neighbour;
+    const east = neighbourBalanceAncestors(tile, "east");
+    const north = neighbourBalanceAncestors(tile, "north").neighbour;
+    const visible = new Set([
+      tileKeyToString(west),
+      tileKeyToString(north),
+      tileKeyToString(east.ancestors.at(-1)!),
+    ]);
+    expect(coarserNeighbourEdgeMorphs(tile, visible)).toEqual([0, 1, 0, 0]);
+    expect(coarserNeighbourEdgeMorphs(tile, new Set())).toEqual([0, 0, 0, 0]);
+  });
+
   it("configures morph-aware directional cast shadows without skirt occluders", () => {
     const material = createTerrainMaterial();
     const depth = createTerrainShadowMaterial();
@@ -155,6 +173,9 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
     expect(depth.vertexShader).toContain("morphDelta");
+    expect(material.vertexShader).toContain("uEdgeMorph");
+    expect(depth.vertexShader).toContain("uEdgeMorph");
+    expect(material.vertexShader).not.toContain("boundaryMorph");
     expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
     material.uniforms.uOrbitalTexture.value.dispose();
     material.uniforms.uSurfaceDiffuse.value.dispose();

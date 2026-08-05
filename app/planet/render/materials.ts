@@ -13,6 +13,7 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uFade: { value: number };
     uFadeIn: { value: number };
     uMorph: { value: number };
+    uEdgeMorph: { value: THREE.Vector4 };
     uTileLod: { value: number };
     uFaceIndex: { value: number };
     uTileOriginModulo: { value: THREE.Vector3 };
@@ -79,6 +80,7 @@ const terrainVertex = /* glsl */ `
   attribute float surfaceMask;
 
   uniform float uMorph;
+  uniform vec4 uEdgeMorph;
   uniform vec3 uTileOriginModulo;
 
   varying vec3 vNormal;
@@ -91,13 +93,18 @@ const terrainVertex = /* glsl */ `
   varying vec3 vStableMetres;
 
   void main() {
-    float edgeDistance = min(min(tileUv.x, 1.0 - tileUv.x), min(tileUv.y, 1.0 - tileUv.y));
-    float boundaryMorph = 1.0 - step(0.00001, edgeDistance);
-    // Every surface edge resolves to its parent height. With the view-centre
-    // transition rings kept 2:1 balanced, a fine edge therefore lands exactly
-    // on the adjacent coarse mesh instead of exposing the safety skirt as a
-    // rectangular cliff in the playable view.
-    float morphWeight = max(1.0 - uMorph, boundaryMorph);
+    float westEdge = 1.0 - step(0.00001, tileUv.x);
+    float eastEdge = 1.0 - step(0.00001, 1.0 - tileUv.x);
+    float northEdge = 1.0 - step(0.00001, tileUv.y);
+    float southEdge = 1.0 - step(0.00001, 1.0 - tileUv.y);
+    float stitchedEdgeMorph = max(
+      max(westEdge * uEdgeMorph.x, eastEdge * uEdgeMorph.y),
+      max(northEdge * uEdgeMorph.z, southEdge * uEdgeMorph.w)
+    );
+    // Only edges touching a visible coarser neighbour resolve to the parent
+    // mesh. Pulling every edge down permanently makes the quadtree itself
+    // visible as a grid of shadowed trenches at playable altitudes.
+    float morphWeight = max(1.0 - uMorph, stitchedEdgeMorph);
     vec3 morphed = position - morphDelta * morphWeight;
     vec4 world = modelMatrix * vec4(morphed, 1.0);
     vWorldPosition = world.xyz;
@@ -487,6 +494,7 @@ export function createTerrainMaterial(): TerrainMaterial {
       uFade: { value: 1 },
       uFadeIn: { value: 1 },
       uMorph: { value: 1 },
+      uEdgeMorph: { value: new THREE.Vector4() },
       uTileLod: { value: 0 },
       uFaceIndex: { value: 0 },
       uTileOriginModulo: { value: new THREE.Vector3() },
@@ -511,11 +519,18 @@ const terrainShadowVertex = /* glsl */ `
   attribute vec2 tileUv;
   attribute float surfaceMask;
   uniform float uMorph;
+  uniform vec4 uEdgeMorph;
   varying float vSurfaceMask;
   void main() {
-    float edgeDistance = min(min(tileUv.x, 1.0 - tileUv.x), min(tileUv.y, 1.0 - tileUv.y));
-    float boundaryMorph = 1.0 - step(0.00001, edgeDistance);
-    vec3 morphed = position - morphDelta * max(1.0 - uMorph, boundaryMorph);
+    float westEdge = 1.0 - step(0.00001, tileUv.x);
+    float eastEdge = 1.0 - step(0.00001, 1.0 - tileUv.x);
+    float northEdge = 1.0 - step(0.00001, tileUv.y);
+    float southEdge = 1.0 - step(0.00001, 1.0 - tileUv.y);
+    float stitchedEdgeMorph = max(
+      max(westEdge * uEdgeMorph.x, eastEdge * uEdgeMorph.y),
+      max(northEdge * uEdgeMorph.z, southEdge * uEdgeMorph.w)
+    );
+    vec3 morphed = position - morphDelta * max(1.0 - uMorph, stitchedEdgeMorph);
     vSurfaceMask = surfaceMask;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(morphed, 1.0);
   }
@@ -531,7 +546,10 @@ const terrainShadowFragment = /* glsl */ `
 `;
 
 export type TerrainShadowMaterial = THREE.ShaderMaterial & {
-  uniforms: { uMorph: { value: number } };
+  uniforms: {
+    uMorph: { value: number };
+    uEdgeMorph: { value: THREE.Vector4 };
+  };
 };
 
 export function createTerrainShadowMaterial(): TerrainShadowMaterial {
@@ -539,7 +557,10 @@ export function createTerrainShadowMaterial(): TerrainShadowMaterial {
     name: "Mars morph-aware terrain shadow depth",
     vertexShader: terrainShadowVertex,
     fragmentShader: terrainShadowFragment,
-    uniforms: { uMorph: { value: 1 } },
+    uniforms: {
+      uMorph: { value: 1 },
+      uEdgeMorph: { value: new THREE.Vector4() },
+    },
     depthTest: true,
     depthWrite: true,
     side: THREE.FrontSide,

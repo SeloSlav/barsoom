@@ -26,6 +26,7 @@ type TileRenderState = {
   fade: number;
   morph: number;
   fadeIn: boolean;
+  edgeMorph?: readonly [west: number, east: number, north: number, south: number];
 };
 
 export function lodTransitionVisible(dither: number, fade: number, fadeIn: boolean) {
@@ -46,6 +47,22 @@ export function neighbourBalanceAncestors(tile: TileKey, edge: TileEdge) {
     });
   }
   return { neighbour, ancestors };
+}
+
+const TILE_EDGES = ["west", "east", "north", "south"] as const;
+
+export function coarserNeighbourEdgeMorphs(
+  tile: TileKey,
+  visibleTileIds: ReadonlySet<string>,
+): [west: number, east: number, north: number, south: number] {
+  return TILE_EDGES.map((edge) => {
+    const { neighbour, ancestors } = neighbourBalanceAncestors(tile, edge);
+    if (visibleTileIds.has(tileKeyToString(neighbour))) return 0;
+    for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+      if (visibleTileIds.has(tileKeyToString(ancestors[index]))) return 1;
+    }
+    return 0;
+  }) as [number, number, number, number];
 }
 
 class PlanetTileNode {
@@ -181,6 +198,7 @@ export class PlanetTerrain {
       (a, b) => this.visibility(b).priority - this.visibility(a).priority,
     );
     for (const root of rootsByPriority) this.visit(root, 10_000);
+    this.updateVisibleEdgeMorphs();
     this.cancelStaleRequests();
     if (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize + 12) this.evictGeometry();
     if (this.frame % 120 === 0) this.pruneStaleNodes();
@@ -381,6 +399,7 @@ export class PlanetTerrain {
       this.material.uniforms.uFade.value = renderState.fade;
       this.material.uniforms.uFadeIn.value = renderState.fadeIn ? 1 : 0;
       this.material.uniforms.uMorph.value = renderState.morph;
+      this.material.uniforms.uEdgeMorph.value.fromArray(renderState.edgeMorph ?? [0, 0, 0, 0]);
       this.material.uniforms.uTileLod.value = node.key.lod;
       this.material.uniforms.uFaceIndex.value = FACE_INDEX[node.key.face];
       this.material.uniforms.uTileOriginModulo.value.set(
@@ -398,6 +417,7 @@ export class PlanetTerrain {
     mesh.onBeforeShadow = () => {
       const renderState = mesh.userData.renderState as TileRenderState;
       this.shadowMaterial.uniforms.uMorph.value = renderState.morph;
+      this.shadowMaterial.uniforms.uEdgeMorph.value.fromArray(renderState.edgeMorph ?? [0, 0, 0, 0]);
       this.shadowMaterial.uniformsNeedUpdate = true;
     };
     this.scene.add(mesh);
@@ -439,6 +459,15 @@ export class PlanetTerrain {
     this.stats.triangles += node.triangleCount;
     this.stats.minLod = Math.min(this.stats.minLod, node.key.lod);
     this.stats.maxLod = Math.max(this.stats.maxLod, node.key.lod);
+  }
+
+  private updateVisibleEdgeMorphs() {
+    const visibleTileIds = new Set([...this.visibleNodes].map((node) => node.id));
+    for (const node of this.visibleNodes) {
+      if (!node.mesh) continue;
+      const renderState = node.mesh.userData.renderState as TileRenderState;
+      renderState.edgeMorph = coarserNeighbourEdgeMorphs(node.key, visibleTileIds);
+    }
   }
 
   private cancelStaleRequests() {
