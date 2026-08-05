@@ -567,20 +567,15 @@ export class SurfaceTraverseController {
     bone.updateWorldMatrix(true, true);
   }
 
-  private plantLeftFootFromRightLeg() {
+  private plantLeftFoot() {
     const upperLeft = this.poseBones.get("UpperLegL");
     const lowerLeft = this.poseBones.get("LowerLegL");
     const footLeft = this.poseBones.get("FootL");
-    const upperRight = this.poseBones.get("UpperLegR");
-    const lowerRight = this.poseBones.get("LowerLegR");
-    const footRight = this.poseBones.get("FootR");
     const lowerLeftEnd = lowerLeft?.children[0];
-    if (!upperLeft || !lowerLeft || !lowerLeftEnd || !footLeft || !upperRight || !lowerRight || !footRight) return;
+    if (!upperLeft || !lowerLeft || !lowerLeftEnd || !footLeft || !this.model) return;
 
     upperLeft.updateWorldMatrix(true, true);
-    upperRight.updateWorldMatrix(true, true);
     footLeft.updateWorldMatrix(true, false);
-    footRight.updateWorldMatrix(true, false);
     upperLeft.getWorldPosition(this.poseHip);
     lowerLeft.getWorldPosition(this.poseKnee);
     lowerLeftEnd.getWorldPosition(this.poseEnd);
@@ -588,28 +583,21 @@ export class SurfaceTraverseController {
     const upperLength = this.poseHip.distanceTo(this.poseKnee);
     const lowerLength = this.poseKnee.distanceTo(this.poseEnd);
 
-    // Use the visually correct right knee as the pole direction, mirrored in
-    // model space. The feet are authored with different bone roll, so copying
-    // local Euler angles across sides twists the left boot.
-    upperRight.getWorldPosition(this.poseDirection);
-    lowerRight.getWorldPosition(this.poseBend);
-    this.poseBend.sub(this.poseDirection);
-    footRight.getWorldPosition(this.poseAxis);
-    this.poseAxis.sub(this.poseDirection).normalize();
-    this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis)).normalize();
-    this.model?.getWorldQuaternion(this.poseWorldQuaternion).invert();
-    this.poseBend.applyQuaternion(this.poseWorldQuaternion);
-    this.poseBend.x *= -1;
-    this.poseBend.applyQuaternion(this.poseWorldQuaternion.invert());
-
     this.poseAxis.subVectors(this.poseFoot, this.poseHip);
     const targetDistance = this.poseAxis.length();
     if (targetDistance <= 1e-6 || upperLength <= 1e-6 || lowerLength <= 1e-6) return;
     this.poseAxis.multiplyScalar(1 / targetDistance);
+
+    // The asset is authored facing local +Z. Use that exact forward axis as
+    // the IK pole so the knee travels over the toes, never inward toward the
+    // other leg. Mirroring the right pole introduced a small sideways bias.
+    this.poseBend.set(0, 0, 1);
+    this.model.getWorldQuaternion(this.poseWorldQuaternion);
+    this.poseBend.applyQuaternion(this.poseWorldQuaternion);
     this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis));
     if (this.poseBend.lengthSq() <= 1e-8) {
-      this.poseBend.set(0, 0, 1);
-      this.model?.getWorldQuaternion(this.poseWorldQuaternion);
+      this.poseBend.set(1, 0, 0);
+      this.model.getWorldQuaternion(this.poseWorldQuaternion);
       this.poseBend.applyQuaternion(this.poseWorldQuaternion);
       this.poseBend.addScaledVector(this.poseAxis, -this.poseBend.dot(this.poseAxis));
     }
@@ -663,7 +651,7 @@ export class SurfaceTraverseController {
       this.rotatePoseBone("LowerLegR", 9, 0, 0, weights.descent);
     }
 
-    if (weights.squat > 0 || weights.descent > 0) this.plantLeftFootFromRightLeg();
+    if (weights.squat > 0 || weights.descent > 0) this.plantLeftFoot();
   }
 
   private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {
