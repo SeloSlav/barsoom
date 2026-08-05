@@ -23,11 +23,26 @@ export type PlanetControlState = {
   focusAbsolute: Vec3;
   altitudeM: number;
   desiredAltitudeM: number;
+  cameraDistanceM: number;
   nearM: number;
   farM: number;
 };
 
 type PointerDrag = { id: number; button: number; lastX: number; lastY: number };
+
+function smoothstep(minimum: number, maximum: number, value: number) {
+  const t = clamp((value - minimum) / (maximum - minimum), 0, 1);
+  return t * t * (3 - 2 * t);
+}
+
+export function automaticApproachPitchDegrees(altitudeM: number) {
+  const orbitalApproach = 1 - smoothstep(25_000, 350_000, altitudeM);
+  const surfaceApproach = 1 - smoothstep(1_200, 12_000, altitudeM);
+  // At eye height an 80-degree offset from the surface normal looks only ten
+  // degrees down. The horizon therefore remains inside the 42-degree frame,
+  // while the ground focus stays roughly twelve metres in front of the player.
+  return 52 * orbitalApproach + 28 * surfaceApproach;
+}
 
 /**
  * Quaternion trackball controls for a curved, camera-relative planet.
@@ -205,7 +220,10 @@ export class PlanetControls {
 
   private finishGesture() {
     this.desiredCameraDistanceM = this.cameraDistanceM;
-    this.altitudeM = Math.max(0, this.cameraAltitudeAtDistance(this.cameraDistanceM) - CAMERA_SURFACE_EPSILON_M);
+    this.altitudeM = Math.max(
+      MIN_CAMERA_ALTITUDE_M,
+      this.cameraAltitudeAtDistance(this.cameraDistanceM) - CAMERA_SURFACE_EPSILON_M,
+    );
     this.desiredAltitudeM = this.altitudeM;
     this.zoomAnchor = null;
   }
@@ -239,13 +257,11 @@ export class PlanetControls {
   private updateAutomaticApproach(deltaSeconds: number) {
     if (!this.automaticApproachEnabled) return;
 
-    // Preserve a nadir view at planetary scale, then ease into an oblique
-    // RTS-style view for the final descent. At low altitude the camera sits
-    // laterally from its ground focus instead of collapsing directly onto it,
-    // which keeps nearby relief visible and gives panning somewhere to go.
-    const transition = clamp((this.altitudeM - 25_000) / (350_000 - 25_000), 0, 1);
-    const smoothTransition = transition * transition * (3 - 2 * transition);
-    const targetPitchRad = THREE.MathUtils.degToRad(48) * (1 - smoothTransition);
+    // Preserve a nadir view at planetary scale, ease into an oblique survey
+    // composition, then lower the sightline again for a genuine surface view.
+    // This second stage is essential: a 48-degree orbit offset points 42
+    // degrees down and places the horizon completely outside a 42-degree FOV.
+    const targetPitchRad = THREE.MathUtils.degToRad(automaticApproachPitchDegrees(this.altitudeM));
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 7.5);
     const nextPitchRad = THREE.MathUtils.lerp(
       this.automaticApproachPitchRad,
@@ -305,12 +321,12 @@ export class PlanetControls {
       - MARS_REFERENCE_RADIUS_M
       - this.terrainHeight(this.cameraDirection)
       - CAMERA_SURFACE_EPSILON_M;
-    if (actualAltitude < 0) {
-      this.cameraDistanceM = this.distanceForAltitude(0);
+    if (actualAltitude < MIN_CAMERA_ALTITUDE_M) {
+      this.cameraDistanceM = this.distanceForAltitude(MIN_CAMERA_ALTITUDE_M);
       this.desiredCameraDistanceM = Math.max(this.desiredCameraDistanceM, this.cameraDistanceM);
       this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
       this.cameraDirection.copy(this.cameraAbsolute).normalize();
-      actualAltitude = 0;
+      actualAltitude = MIN_CAMERA_ALTITUDE_M;
     } else if (actualAltitude > MAX_CAMERA_ALTITUDE_M) {
       this.cameraDistanceM = this.distanceForAltitude(MAX_CAMERA_ALTITUDE_M);
       this.desiredCameraDistanceM = Math.min(this.desiredCameraDistanceM, this.cameraDistanceM);
@@ -340,8 +356,9 @@ export class PlanetControls {
       cameraDirection: { x: this.cameraDirection.x, y: this.cameraDirection.y, z: this.cameraDirection.z },
       focusDirection: { x: this.focusDirection.x, y: this.focusDirection.y, z: this.focusDirection.z },
       focusAbsolute: { x: this.focusAbsolute.x, y: this.focusAbsolute.y, z: this.focusAbsolute.z },
-      altitudeM: actualAltitude < 0.02 ? 0 : actualAltitude,
+      altitudeM: this.altitudeM,
       desiredAltitudeM: this.desiredAltitudeM,
+      cameraDistanceM: this.cameraDistanceM,
       nearM: near,
       farM: far,
     };

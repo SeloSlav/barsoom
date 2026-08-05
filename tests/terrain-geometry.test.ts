@@ -4,10 +4,33 @@ import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrai
 import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
 import { neighbourTile, parentTile } from "../app/planet/math";
 import { createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
+import { generateSurfaceScatter } from "../app/planet/render/SurfaceDetailRenderer";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
 describe("terrain worker geometry", () => {
+  it("generates a deterministic planet-anchored surface rock field", () => {
+    const config = {
+      radiusM: 420,
+      spacingM: 35,
+      density: 0.7,
+      minimumSizeM: 0.2,
+      maximumSizeM: 2.4,
+      maximumInstances: 300,
+      seedSalt: 0x74657374,
+    };
+    const center = { x: 0.61, y: 0.22, z: -0.76 };
+    const first = generateSurfaceScatter(center, config);
+    const restored = generateSurfaceScatter(center, config);
+    expect(first.length).toBeGreaterThan(25);
+    expect(first.length).toBeLessThanOrEqual(config.maximumInstances);
+    expect(restored).toEqual(first);
+    for (const point of first) {
+      expect(Math.hypot(point.direction.x, point.direction.y, point.direction.z)).toBeCloseTo(1, 10);
+      expect(point.sizeM).toBeGreaterThanOrEqual(config.minimumSizeM);
+      expect(point.sizeM).toBeLessThanOrEqual(config.maximumSizeM);
+    }
+  });
   it("uses the same cache-busting revision in the client and worker", () => {
     expect(WORKER_REVISION).toBe(CLIENT_REVISION);
     const generated = generateTerrainTile({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MARS_REFERENCE_RADIUS_M, MAX_CAMERA_ALTITUDE_M } from "../app/planet/constants";
+import { MARS_REFERENCE_RADIUS_M, MAX_CAMERA_ALTITUDE_M, SURFACE_EYE_HEIGHT_M } from "../app/planet/constants";
 import {
   cameraAltitudeAboveGround,
   cartesianToLatLonElevation,
@@ -167,8 +167,8 @@ describe("continuous detail, zoom, and floating origin", () => {
 
   it("clamps nonlinear zoom at exact planetary limits and remains precise near ground", () => {
     expect(nonlinearZoomAltitude(MAX_CAMERA_ALTITUDE_M, 1000)).toBe(MAX_CAMERA_ALTITUDE_M);
-    expect(nonlinearZoomAltitude(0, -1000)).toBe(0);
-    expect(nonlinearZoomAltitude(1, 10)).toBeLessThan(2);
+    expect(nonlinearZoomAltitude(0, -1000)).toBe(SURFACE_EYE_HEIGHT_M);
+    expect(nonlinearZoomAltitude(SURFACE_EYE_HEIGHT_M, 10)).toBeLessThan(3);
     expect(nonlinearZoomAltitude(20_000_000, -100)).toBeLessThan(20_000_000);
   });
 

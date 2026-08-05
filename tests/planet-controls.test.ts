@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
+import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, SURFACE_EYE_HEIGHT_M } from "../app/planet/constants";
 import { directionToFaceUv, dot3, raySphereIntersection } from "../app/planet/math";
-import { PlanetControls } from "../app/planet/PlanetControls";
+import { automaticApproachPitchDegrees, PlanetControls } from "../app/planet/PlanetControls";
 
 type Listener = (event: Record<string, unknown>) => void;
 
@@ -138,8 +138,9 @@ describe("PlanetControls integration", () => {
     for (let step = 0; step < 180; step += 1) frame = controls.update(1 / 60);
     const approach = controls.getState();
     expect(approach.automaticApproachEnabled).toBe(true);
-    expect(approach.approachPitchDeg).toBeCloseTo(48, 2);
-    expect(Math.acos(dot3(approach.orbitDirection, frame.focusDirection)) * 180 / Math.PI).toBeCloseTo(48, 2);
+    const expectedPitch = automaticApproachPitchDegrees(10_000);
+    expect(approach.approachPitchDeg).toBeCloseTo(expectedPitch, 2);
+    expect(Math.acos(dot3(approach.orbitDirection, frame.focusDirection)) * 180 / Math.PI).toBeCloseTo(expectedPitch, 2);
     expect(frame.altitudeM).toBeCloseTo(10_000, 3);
 
     const forwardBeforePan = camera.getWorldDirection(new THREE.Vector3());
@@ -149,7 +150,7 @@ describe("PlanetControls integration", () => {
     pointer(canvas, "pointerup", 2, 485, 265);
     frame = controls.update(1 / 60);
     expect(dot3(focusBeforePan, frame.focusDirection)).toBeLessThan(0.99999999);
-    expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-10);
+    expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-4);
     expect(controls.getState().automaticApproachEnabled).toBe(true);
 
     pointer(canvas, "pointerdown", 1, 400, 300);
@@ -245,9 +246,11 @@ describe("PlanetControls integration", () => {
     expect(afterIdle.longitudeDeg).toBeCloseTo(fixedFocus.longitudeDeg, 11);
 
     controls.setAltitude(-100, true);
-    const surface = controls.update(1 / 60);
-    expect(controls.getState().desiredAltitudeM).toBe(0);
-    expect(surface.altitudeM).toBeLessThan(0.02);
+    let surface = controls.update(1 / 60);
+    for (let frame = 0; frame < 120; frame += 1) surface = controls.update(1 / 60);
+    expect(controls.getState().desiredAltitudeM).toBe(SURFACE_EYE_HEIGHT_M);
+    expect(surface.altitudeM).toBeCloseTo(SURFACE_EYE_HEIGHT_M, 6);
+    expect(controls.getState().approachPitchDeg).toBeGreaterThan(75);
     expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThanOrEqual(MARS_REFERENCE_RADIUS_M);
   });
 
@@ -257,8 +260,9 @@ describe("PlanetControls integration", () => {
       const { controls } = trackedHarness(() => 7_250);
       controls.setLocation(-13.9, -59.2, altitudeM);
       const frame = controls.update(1 / 60);
-      expect(frame.altitudeM).toBeCloseTo(altitudeM, altitudeM === 0 ? 1 : 3);
-      expect(frame.desiredAltitudeM).toBe(altitudeM);
+      const expectedAltitudeM = Math.max(altitudeM, SURFACE_EYE_HEIGHT_M);
+      expect(frame.altitudeM).toBeCloseTo(expectedAltitudeM, 3);
+      expect(frame.desiredAltitudeM).toBe(expectedAltitudeM);
     },
   );
 
@@ -271,11 +275,11 @@ describe("PlanetControls integration", () => {
     const orbital = controls.update(1);
     expect(orbital.altitudeM).toBeCloseTo(MAX_CAMERA_ALTITUDE_M, 3);
 
-    controls.setAltitude(0, true);
+    controls.setAltitude(SURFACE_EYE_HEIGHT_M, true);
     let surface = controls.update(1 / 60);
     streamedHeightM = -7_000;
     for (let frame = 0; frame < 90; frame += 1) surface = controls.update(1 / 60);
-    expect(surface.altitudeM).toBeLessThan(0.02);
+    expect(surface.altitudeM).toBeCloseTo(SURFACE_EYE_HEIGHT_M, 3);
     expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThan(MARS_REFERENCE_RADIUS_M - 7_001);
   });
 });

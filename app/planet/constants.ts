@@ -1,7 +1,11 @@
 export const MARS_REFERENCE_RADIUS_M = 3_389_500;
 export const MARS_ATMOSPHERE_TOP_M = 120_000;
 export const MAX_CAMERA_ALTITUDE_M = 30_000_000;
-export const MIN_CAMERA_ALTITUDE_M = 0;
+// A surface camera needs a physical eye height. Letting the orbit distance
+// reach zero collapses the camera and its ground target onto the same point,
+// which can only render as an unrecognisable flat card.
+export const SURFACE_EYE_HEIGHT_M = 2.2;
+export const MIN_CAMERA_ALTITUDE_M = SURFACE_EYE_HEIGHT_M;
 export const CAMERA_SURFACE_EPSILON_M = 0.12;
 
 export const PLANET_SEED = 0x4d415253;

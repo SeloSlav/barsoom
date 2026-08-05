@@ -5,6 +5,7 @@ import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerra
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
+import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
@@ -43,6 +44,7 @@ export class PlanetEngine {
   private readonly controls: PlanetControls;
   private readonly atmosphere: AtmosphereRenderer;
   private readonly celestial: CelestialRenderer;
+  private readonly surfaceDetails: SurfaceDetailRenderer;
   private readonly resizeObserver: ResizeObserver;
   private readonly selection: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   private readonly viewportSize = new THREE.Vector2();
@@ -141,6 +143,10 @@ export class PlanetEngine {
 
     this.skyState = calculateMarsSky(this.simulationStartUtc);
     this.terrain = new PlanetTerrain(this.scene);
+    this.surfaceDetails = new SurfaceDetailRenderer(
+      this.scene,
+      (direction) => this.terrain.sampleHeight(direction),
+    );
     this.controls = new PlanetControls(
       canvas,
       this.camera,
@@ -262,6 +268,11 @@ export class PlanetEngine {
       this.skyState.sunDirection,
       this.debug,
     );
+    this.surfaceDetails.update(
+      this.controlState.cameraAbsolute,
+      this.controlState.cameraDirection,
+      this.controlState.altitudeM,
+    );
     this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, this.skyState.sunDirection);
     this.updateSelection();
     this.skyCamera.quaternion.copy(this.camera.quaternion);
@@ -293,7 +304,8 @@ export class PlanetEngine {
     const surface = this.terrain.sampleSurface(this.controlState.focusDirection);
     const groundWidth = Math.max(
       0.01,
-      2 * Math.max(this.controlState.altitudeM, 0.1) * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5) * this.camera.aspect,
+      2 * Math.max(this.controlState.cameraDistanceM, 0.1) *
+        Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5) * this.camera.aspect,
     );
     this.telemetry = {
       latitudeDeg: focusCoordinates.latitudeDeg,
@@ -442,6 +454,7 @@ export class PlanetEngine {
     this.renderer.setAnimationLoop(null);
     this.resizeObserver.disconnect();
     this.controls.dispose();
+    this.surfaceDetails.dispose();
     this.terrain.dispose();
     this.atmosphere.dispose();
     this.celestial.dispose();

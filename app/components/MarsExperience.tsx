@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
+import { MAX_CAMERA_ALTITUDE_M, SURFACE_EYE_HEIGHT_M } from "../planet/constants";
 import { PlanetEngine } from "../planet/PlanetEngine";
 import type { DebugFlags, PlanetTelemetry } from "../planet/types";
 
@@ -53,7 +53,7 @@ const QA_ALTITUDES = [
   { label: "10 km", metres: 10_000 },
   { label: "1 km", metres: 1_000 },
   { label: "100 m", metres: 100 },
-  { label: "0 m", metres: 0 },
+  { label: "Surface", metres: SURFACE_EYE_HEIGHT_M },
 ] as const;
 
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
@@ -82,6 +82,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [initialSimulationUtc]);
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
+  const surfaceMode = telemetry.altitudeM <= 8_000;
 
   const toggleDebug = (flag: keyof DebugFlags) => {
     const next = !debug[flag];
@@ -94,7 +95,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       <canvas ref={canvasRef} className="mars-canvas" aria-label="Interactive three-dimensional rendering of Mars" />
       <div className="hud-vignette" aria-hidden="true" />
       <header className="mission-header">
-        <div className="mission-identity"><span className="mission-kicker">ARES CARTOGRAPHY NETWORK</span><h1>BARSOOM</h1><span className="mission-mode"><i /> PLANETARY SURVEY / LIVE</span></div>
+        <div className="mission-identity"><span className="mission-kicker">ARES CARTOGRAPHY NETWORK</span><h1>BARSOOM</h1><span className="mission-mode"><i /> {surfaceMode ? "SURFACE TRAVERSE" : "PLANETARY SURVEY"} / LIVE</span></div>
         <div className="simulation-clock"><span>SIMULATION UTC</span><strong>{simulationLabel}</strong><small>60× CELESTIAL TIME</small></div>
         <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>CONTROLS <kbd>H</kbd></button>
       </header>
@@ -116,7 +117,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {helpVisible && <aside className="help-panel">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close controls">×</button><p className="eyebrow">PLANET CONTROLS</p>
         <dl><div><dt>Orbit focus</dt><dd>Middle-mouse drag</dd></div><div><dt>Move across Mars</dt><dd>Right-mouse drag</dd></div><div><dt>Zoom at cursor</dt><dd>Mouse wheel</dd></div><div><dt>Select ground</dt><dd>Left click</dd></div><div><dt>Diagnostics</dt><dd>F3</dd></div><div><dt>Tile boundaries</dt><dd>F4</dd></div></dl>
-        <p>Wheel movement scales continuously from orbit to the regolith. Below 350 km, an untouched descent eases into a 48-degree RTS approach; middle-drag takes full manual control.</p>
+        <p>Wheel movement scales continuously from orbit to a 2.2 m eye-height surface view. The final descent lowers the sightline to keep the horizon and local terrain in frame; middle-drag takes full manual control.</p>
       </aside>}
       {debug.overlay && <aside className="debug-panel" aria-label="Planet renderer diagnostics">
         <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
@@ -126,7 +127,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
         <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
-      <footer className="mission-footer"><span>MOLA MEGDR 16 PPD · IAU 2000</span><span className="footer-center"><i /> GLOBAL TERRAIN STREAM NOMINAL</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
+      <footer className="mission-footer"><span>MOLA MEGDR 16 PPD · SEEDED LOCAL RELIEF</span><span className="footer-center"><i /> {surfaceMode ? "LOCAL SURFACE FIELD ACTIVE" : "GLOBAL TERRAIN STREAM NOMINAL"}</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );
