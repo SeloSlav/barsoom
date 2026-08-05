@@ -339,12 +339,12 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <p className="eyebrow">{moonMode ? "SATELLITE TRACK" : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
         {moonMode ? <div className="instrument-principle">
           <strong>{observedBody.toUpperCase()} TRACK LOCKED.</strong>
-          <p>The aperture is fixed to a close physical-scale view of {observedBody}. Choose Mars or the other moon from the identity menu to retarget the reconstruction.</p>
+          <p>The aperture follows {observedBody} in real time while retaining direct camera control.</p>
         </div> : !surfaceMode && <div className="instrument-principle">
           <strong>YOU ARE NOT MOVING FASTER THAN LIGHT.</strong>
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
-        {!moonMode && (surfaceMode ? <>
+        {moonMode ? <dl><div><dt>Rotate around moon</dt><dd>Middle-mouse drag</dd></div><div><dt>Pan across moon</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget body</dt><dd>Identity menu</dd></div></dl> : (surfaceMode ? <>
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom can exceed the human-scale coherence envelope briefly; if the local proxy cannot recover, the instrument releases it and resumes planetary observation.</p>
         </> : <>

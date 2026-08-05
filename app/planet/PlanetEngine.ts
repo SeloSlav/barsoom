@@ -74,6 +74,11 @@ export class PlanetEngine {
   private readonly selectionReferenceNormal = new THREE.Vector3(0, 0, 1);
   private readonly moonCameraAbsolute = new THREE.Vector3();
   private readonly moonFocusDirection = new THREE.Vector3();
+  private readonly moonFocusAbsolute = new THREE.Vector3();
+  private readonly moonOrbitDirection = new THREE.Vector3();
+  private readonly moonFrameRight = new THREE.Vector3();
+  private readonly moonFrameUp = new THREE.Vector3();
+  private readonly moonTangent = new THREE.Vector3();
   private readonly moonTargetRelative = new THREE.Vector3();
   private readonly moonViewUp = new THREE.Vector3();
   private selectionDirection: THREE.Vector3 | null = null;
@@ -95,6 +100,12 @@ export class PlanetEngine {
   private surfaceEntryRevision = 0;
   private localProxyCoherenceLossSeconds = 0;
   private observedBody: ObservedBody = "Mars";
+  private moonOrbitYawRad = 0;
+  private moonOrbitPitchRad = 0;
+  private moonPanX = 0;
+  private moonPanY = 0;
+  private moonStandoffRadii = MOON_CAMERA_STANDOFF_RADII;
+  private moonDrag: { id: number; button: number; lastX: number; lastY: number } | null = null;
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
     tileBoundaries: false,
@@ -239,6 +250,11 @@ export class PlanetEngine {
     this.resize();
     canvas.addEventListener("pointerdown", this.onSelectionPointerDown);
     canvas.addEventListener("pointerup", this.onSelectionPointerUp);
+    canvas.addEventListener("pointerdown", this.onMoonPointerDown);
+    canvas.addEventListener("pointermove", this.onMoonPointerMove);
+    canvas.addEventListener("pointerup", this.onMoonPointerUp);
+    canvas.addEventListener("pointercancel", this.onMoonPointerUp);
+    canvas.addEventListener("wheel", this.onMoonWheel, { passive: false });
     canvas.addEventListener("webglcontextlost", this.onContextLost, false);
     canvas.addEventListener("webglcontextrestored", this.onContextRestored, false);
     window.addEventListener("keydown", this.onKeyDown);
@@ -335,12 +351,18 @@ export class PlanetEngine {
   private focusBody(body: ObservedBody) {
     this.observedBody = body;
     if (body === "Mars") {
+      this.releaseMoonDrag();
       this.controls.setEnabled(true);
       return;
     }
     if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
     this.controls.setEnabled(false);
     this.clearSelection();
+    this.moonOrbitYawRad = 0;
+    this.moonOrbitPitchRad = 0;
+    this.moonPanX = 0;
+    this.moonPanY = 0;
+    this.moonStandoffRadii = MOON_CAMERA_STANDOFF_RADII;
   }
 
   private updateMoonObservation(body: MarsMoonState["name"]): PlanetControlState {
@@ -350,15 +372,29 @@ export class PlanetEngine {
       return this.controls.update(0);
     }
     const radiusM = Math.max(...moon.semiAxesM);
-    const standoffM = radiusM * MOON_CAMERA_STANDOFF_RADII;
+    const standoffM = radiusM * this.moonStandoffRadii;
     this.moonFocusDirection.set(moon.positionM.x, moon.positionM.y, moon.positionM.z).normalize();
-    this.moonCameraAbsolute
-      .set(moon.positionM.x, moon.positionM.y, moon.positionM.z)
-      .addScaledVector(this.moonFocusDirection, standoffM);
-    this.moonTargetRelative.copy(this.moonFocusDirection).multiplyScalar(-standoffM);
     this.moonViewUp.set(moon.orbitNormal.x, moon.orbitNormal.y, moon.orbitNormal.z).normalize();
+    this.moonTangent.crossVectors(this.moonViewUp, this.moonFocusDirection).normalize();
+    const cosPitch = Math.cos(this.moonOrbitPitchRad);
+    this.moonOrbitDirection
+      .copy(this.moonFocusDirection)
+      .multiplyScalar(cosPitch * Math.cos(this.moonOrbitYawRad))
+      .addScaledVector(this.moonTangent, cosPitch * Math.sin(this.moonOrbitYawRad))
+      .addScaledVector(this.moonViewUp, Math.sin(this.moonOrbitPitchRad))
+      .normalize();
+    this.moonFrameRight.crossVectors(this.moonViewUp, this.moonOrbitDirection).normalize();
+    this.moonFrameUp.crossVectors(this.moonOrbitDirection, this.moonFrameRight).normalize();
+    this.moonFocusAbsolute
+      .set(moon.positionM.x, moon.positionM.y, moon.positionM.z)
+      .addScaledVector(this.moonFrameRight, this.moonPanX * radiusM)
+      .addScaledVector(this.moonFrameUp, this.moonPanY * radiusM);
+    this.moonCameraAbsolute
+      .copy(this.moonFocusAbsolute)
+      .addScaledVector(this.moonOrbitDirection, standoffM);
+    this.moonTargetRelative.copy(this.moonOrbitDirection).multiplyScalar(-standoffM);
     this.camera.position.set(0, 0, 0);
-    this.camera.up.copy(this.moonViewUp);
+    this.camera.up.copy(this.moonFrameUp);
     this.camera.lookAt(this.moonTargetRelative);
     this.camera.near = Math.max(1, radiusM * 0.002);
     this.camera.far = Math.max(50_000_000, this.moonCameraAbsolute.length() + 30_000_000);
@@ -369,7 +405,7 @@ export class PlanetEngine {
       cameraAbsolute: { x: this.moonCameraAbsolute.x, y: this.moonCameraAbsolute.y, z: this.moonCameraAbsolute.z },
       cameraDirection: { x: this.moonFocusDirection.x, y: this.moonFocusDirection.y, z: this.moonFocusDirection.z },
       focusDirection: { x: this.moonFocusDirection.x, y: this.moonFocusDirection.y, z: this.moonFocusDirection.z },
-      focusAbsolute: { x: moon.positionM.x, y: moon.positionM.y, z: moon.positionM.z },
+      focusAbsolute: { x: this.moonFocusAbsolute.x, y: this.moonFocusAbsolute.y, z: this.moonFocusAbsolute.z },
       altitudeM,
       desiredAltitudeM: altitudeM,
       cameraDistanceM: standoffM,
@@ -476,6 +512,58 @@ export class PlanetEngine {
     renderer.clear(true, true, true);
     renderer.render(this.celestial.scene, this.skyCamera);
     renderer.clearDepth();
+  };
+
+  private onMoonPointerDown = (event: PointerEvent) => {
+    if (this.observedBody === "Mars" || (event.button !== 1 && event.button !== 2)) return;
+    event.preventDefault();
+    this.moonDrag = { id: event.pointerId, button: event.button, lastX: event.clientX, lastY: event.clientY };
+    this.canvas.setPointerCapture(event.pointerId);
+  };
+
+  private onMoonPointerMove = (event: PointerEvent) => {
+    if (this.observedBody === "Mars" || !this.moonDrag || event.pointerId !== this.moonDrag.id) return;
+    const deltaX = event.clientX - this.moonDrag.lastX;
+    const deltaY = event.clientY - this.moonDrag.lastY;
+    this.moonDrag.lastX = event.clientX;
+    this.moonDrag.lastY = event.clientY;
+    if (this.moonDrag.button === 1) {
+      this.moonOrbitYawRad -= deltaX * 0.0042;
+      this.moonOrbitPitchRad = clamp(this.moonOrbitPitchRad + deltaY * 0.0032, -1.2, 1.2);
+      return;
+    }
+    const height = Math.max(1, this.canvas.clientHeight);
+    const panUnitsPerPixel = 2 * this.moonStandoffRadii
+      * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5) / height;
+    this.moonPanX -= deltaX * panUnitsPerPixel;
+    this.moonPanY += deltaY * panUnitsPerPixel;
+    const panLength = Math.hypot(this.moonPanX, this.moonPanY);
+    if (panLength > 0.78) {
+      this.moonPanX *= 0.78 / panLength;
+      this.moonPanY *= 0.78 / panLength;
+    }
+  };
+
+  private onMoonPointerUp = (event: PointerEvent) => {
+    if (!this.moonDrag || event.pointerId !== this.moonDrag.id) return;
+    this.releaseMoonDrag();
+  };
+
+  private releaseMoonDrag() {
+    if (!this.moonDrag) return;
+    if (this.canvas.hasPointerCapture(this.moonDrag.id)) this.canvas.releasePointerCapture(this.moonDrag.id);
+    this.moonDrag = null;
+  }
+
+  private onMoonWheel = (event: WheelEvent) => {
+    if (this.observedBody === "Mars") return;
+    event.preventDefault();
+    const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, this.canvas.clientHeight) : 1;
+    this.moonStandoffRadii = clamp(
+      this.moonStandoffRadii * Math.exp(event.deltaY * modeScale * 0.0012),
+      1.8,
+      12,
+    );
   };
 
   private emitTelemetry(simulationUtc: Date, terrainStats: TerrainFrameStats) {
@@ -634,7 +722,7 @@ export class PlanetEngine {
   }
 
   private onKeyDown = (event: KeyboardEvent) => {
-    if (event.code === "Backquote" && !event.repeat) {
+    if (event.code === "Backquote" && !event.repeat && this.observedBody === "Mars") {
       event.preventDefault();
       void this.enterSurfaceTraverse();
     } else if (event.code === "Escape" && this.surfaceTraverse.active) {
@@ -725,6 +813,11 @@ export class PlanetEngine {
     this.renderer.dispose();
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
     this.canvas.removeEventListener("pointerup", this.onSelectionPointerUp);
+    this.canvas.removeEventListener("pointerdown", this.onMoonPointerDown);
+    this.canvas.removeEventListener("pointermove", this.onMoonPointerMove);
+    this.canvas.removeEventListener("pointerup", this.onMoonPointerUp);
+    this.canvas.removeEventListener("pointercancel", this.onMoonPointerUp);
+    this.canvas.removeEventListener("wheel", this.onMoonWheel);
     this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
     this.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
     window.removeEventListener("keydown", this.onKeyDown);
