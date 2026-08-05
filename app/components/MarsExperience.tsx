@@ -235,7 +235,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           >{target.label}</button>)}</div>
         </div>
       </aside>}
-      {helpVisible && <aside className="help-panel">
+      {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>
         <p className="eyebrow">{surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
