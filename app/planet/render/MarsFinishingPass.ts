@@ -26,7 +26,7 @@ const finishingShader = {
     uniform float uSharpen;
     varying vec2 vUv;
 
-    float luminance(vec3 colour) {
+    float barsoomLuma(vec3 colour) {
       return dot(colour, vec3(0.2126, 0.7152, 0.0722));
     }
 
@@ -39,7 +39,7 @@ const finishingShader = {
 
     void main() {
       vec3 colour = texture2D(tDiffuse, vUv).rgb;
-      float centreLuminance = luminance(colour);
+      float centreLuminance = barsoomLuma(colour);
 
       // Four extra reads are guarded by a frame-wide uniform branch. The
       // engine enables them only while measured frame-time headroom exists.
@@ -50,11 +50,11 @@ const finishingShader = {
           texture2D(tDiffuse, vUv + vec2(0.0, uTexelSize.y)).rgb +
           texture2D(tDiffuse, vUv - vec2(0.0, uTexelSize.y)).rgb;
         vec3 localAverage = neighbours * 0.25;
-        float localDelta = abs(centreLuminance - luminance(localAverage));
+        float localDelta = abs(centreLuminance - barsoomLuma(localAverage));
         float haloGuard = 1.0 - smoothstep(0.09, 0.34, localDelta);
         float visibleScene = smoothstep(0.002, 0.025, centreLuminance);
         colour = max(colour + (colour - localAverage) * uSharpen * haloGuard * visibleScene, vec3(0.0));
-        centreLuminance = luminance(colour);
+        centreLuminance = barsoomLuma(colour);
       }
 
       // Preserve deep space while opening the planet's low mid-tones. The
@@ -64,7 +64,7 @@ const finishingShader = {
       float shadowLift = (1.0 - smoothstep(0.045, 0.26, centreLuminance)) * visibleScene;
       colour += vec3(0.0070, 0.0030, 0.0015) * shadowLift;
 
-      float gradedLuminance = luminance(colour);
+      float gradedLuminance = barsoomLuma(colour);
       float saturation = mix(1.045, 1.015, smoothstep(0.45, 2.5, gradedLuminance));
       colour = max(mix(vec3(gradedLuminance), colour, saturation), vec3(0.0));
 
