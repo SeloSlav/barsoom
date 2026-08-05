@@ -55,7 +55,10 @@ export function applyWowCameraDrag(
   deltaY: number,
   steeringCharacter: boolean,
 ) {
-  const nextCameraYawRad = cameraYawRad - deltaX * 0.0042;
+  // In this ENU/cube-sphere basis, increasing yaw renders as a screen-left
+  // turn. Match pointer motion directly: left drag decreases yaw and right
+  // drag increases it.
+  const nextCameraYawRad = cameraYawRad + deltaX * 0.0042;
   return {
     cameraYawRad: nextCameraYawRad,
     cameraPitchRad: clamp(

@@ -37,12 +37,13 @@ describe("surface traverse physics", () => {
   });
 
   it("orbits freely with left drag and steers the astronaut with right drag", () => {
-    const leftDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, false);
+    const leftDrag = applyWowCameraDrag(0.4, 0.3, 1.2, -40, -20, false);
     expect(leftDrag.cameraYawRad).toBeLessThan(0.4);
     expect(leftDrag.cameraPitchRad).toBeGreaterThan(0.3);
     expect(leftDrag.headingRad).toBe(1.2);
 
     const rightDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, true);
+    expect(rightDrag.cameraYawRad).toBeGreaterThan(0.4);
     expect(rightDrag.headingRad).toBe(rightDrag.cameraYawRad);
   });
 
