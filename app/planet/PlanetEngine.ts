@@ -674,7 +674,12 @@ export class PlanetEngine {
     if (event.button !== 0 || !this.pointerDown) return;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
     this.pointerDown = null;
-    if (moved > 5 || !this.controlState) return;
+    if (moved > 5) return;
+    if (this.selectionDirection) {
+      this.clearSelection();
+      return;
+    }
+    if (!this.controlState) return;
     const bounds = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((event.clientX - bounds.left) / Math.max(1, bounds.width)) * 2 - 1,
