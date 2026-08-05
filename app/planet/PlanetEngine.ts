@@ -128,7 +128,9 @@ export class PlanetEngine {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.18;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // r185 maps the removed PCFSoft mode to PCF and logs every surface entry.
+    // Select the effective mode directly so the render path stays warning-free.
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.debug.checkShaderErrors = true;
     this.renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
       const details = [
