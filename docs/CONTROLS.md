@@ -1,0 +1,23 @@
+# Controls
+
+| Action | Input | Behaviour |
+|---|---|---|
+| Orbit around geographic focus | Hold middle mouse and drag | Horizontal drag changes heading; vertical drag changes grazing angle without pole locks or Euler gimbal flips. |
+| Pan across Mars | Hold right mouse and drag | Moves the focus along its local tangent basis and renormalizes onto Mars. Speed follows a nonlinear altitude curve from sub-metre adjustments to continental movement. |
+| Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. The surface point under the cursor becomes the zoom anchor when the cursor ray hits Mars. |
+| Select surface point | Left click | Leaves left mouse free for gameplay and places a scale-aware geographic marker. |
+| Toggle diagnostics | `F3` | FPS, timing, tiles, LOD, triangles, calls, tile memory, worker queue, depth range and floating origin. |
+| Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |
+| Toggle help | `H` | Opens or closes the control reference. |
+
+The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
+
+Developer landmarks and individual visual layers are available only inside the `F3` diagnostics panel. Automated checks can use:
+
+```js
+window.__BARSOOM__.setLocation(latitudeDeg, longitudeDeg, altitudeM)
+window.__BARSOOM__.setAltitude(altitudeM, true)
+window.__BARSOOM__.setDebug("tileBoundaries", true)
+window.__BARSOOM__.getState()
+```
+

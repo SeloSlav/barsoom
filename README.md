@@ -1,0 +1,40 @@
+# Barsoom
+
+Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, analytic atmospheric scattering, a real bright-star catalogue, and Mars-centred ephemerides.
+
+## Run
+
+Requires Node.js 22.13 or newer.
+
+```bash
+npm ci
+npm run dev -- --port 5190
+```
+
+Then open `http://localhost:5190`. Build and test with:
+
+```bash
+npm test
+npm run build
+node --test tests/rendered-html.test.mjs
+```
+
+The runtime has no terrain API, database, or application backend. Hosting only serves the compiled browser application and ordinary static assets.
+
+## What is included
+
+- Metre-authoritative Mars maths and latitude/longitude, Cartesian, ENU, cube-face, tile, high/low, and camera-relative conversions.
+- Six-face quadtree terrain with screen-space-error selection, frustum and horizon culling, skirts, parent fallback, dithered parent/child morphing, pooled mesh containers, bounded LRU caches, and stale-job cancellation.
+- 126 static cube-sphere tiles derived from the official 4-pixel/degree MOLA planetary-radius and areoid MEGDRs. These give complete global coverage and are streamed by tile.
+- Worker-generated fixed-resolution terrain geometry with continuous planet-space procedural ridges, erosion, rock and regolith detail.
+- A data-driven procedural Mars PBR shader with dust, regolith, basalt, light rock, and polar frost blends.
+- Analytic Rayleigh, dust/Mie, transmittance-inspired limb, terminator, horizon haze, and terrain aerial perspective.
+- 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric vectors transformed into the IAU Mars body frame.
+- Dedicated middle-orbit, right-pan, left-select, cursor-wheel zoom controls and a live orbital HUD/debug overlay.
+
+See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pipelines](docs/DATA_PIPELINES.md), [attribution](docs/ATTRIBUTION.md), and [performance notes](docs/PERFORMANCE.md).
+
+## Debugging
+
+Press `F3` for diagnostics and `F4` for tile boundaries. The development API at `window.__BARSOOM__` exposes deterministic location/altitude setters for integration and screenshot automation.
+

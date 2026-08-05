@@ -1,0 +1,14 @@
+{
+  "format": "barsoom-bright-star-catalogue",
+  "version": 1,
+  "count": 6682,
+  "limitingMagnitude": 6.25,
+  "recordBytes": 16,
+  "sha256": "d1fd288d2c59b3898d64d805202f929398c2be1250cd6bb93f171d6356710f02",
+  "source": {
+    "catalogue": "HYG Database 4.1 (Hipparcos, Yale Bright Star, Gliese)",
+    "sourceUrl": "https://github.com/astronexus/HYG-Database/tree/main/hyg/CURRENT",
+    "license": "CC BY-SA 4.0",
+    "coordinates": "equatorial J2000"
+  }
+}

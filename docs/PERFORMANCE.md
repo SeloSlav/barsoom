@@ -1,0 +1,37 @@
+# Performance and verification
+
+## Baseline
+
+The repository and upstream were empty before this implementation, so there was no previous renderer, frame profile, bundle or asset baseline to compare. The relevant “before” measurements are therefore zero application code/assets and no runnable frame loop.
+
+## Current static profile
+
+Measured on the production build in this repository:
+
+| Item | Result |
+|---|---:|
+| MOLA runtime files | 127 files / 577,741 bytes total |
+| Star runtime files | 3 files / 109,276 bytes total |
+| Embedded rendered stars | 6,682 |
+| MOLA files requested for a typical orbital view | small visible-face subset, not all 126 |
+| Terrain mesh topology | 24×24 cells plus four skirts |
+| Triangle count per tile | 1,344 |
+| Ready geometry cache cap | 280 tiles |
+| MOLA decoded cache cap | 96 tiles |
+| Terrain workers | 2 |
+| Maximum active tile budget | 220 |
+| Device pixel ratio cap | 1.75 |
+| Adaptive render scale floor | 0.72 |
+
+`npm run build` completes without compilation errors. `npm test` currently covers 26 maths/data cases. The server-render check verifies production metadata and removal of the starter.
+
+## Frame-time instrumentation
+
+The `F3` overlay reports exponentially smoothed frame time/FPS, active/loading tiles, selected LOD range, triangles, draw calls, decoded tile memory, worker queue, near/far planes and camera-relative origin. Resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs.
+
+No geometry, material, texture or network request is constructed in the steady-state render loop. Tile-node arrays grow only on first subdivision. Mesh and geometry containers are reused. The asynchronous request queue rejects stale jobs after rapid movement, and every MOLA request uses browser HTTP caching.
+
+## Visual verification matrix
+
+The development API can place the camera deterministically at 30,000 km, 10,000 km, 1,000 km, 100 km, 10 km, 1 km, 100 m and 0 m AGL over Olympus Mons, Valles Marineris, Hellas Planitia, a polar region and a cube edge. Visual checks should keep the same canvas and camera active while moving between levels; the landmark buttons are debug-only shortcuts for repeatable inspection, not the normal navigation transition.
+

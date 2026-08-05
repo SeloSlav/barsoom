@@ -1,0 +1,783 @@
+{
+  "format": "barsoom-mola-cubesphere",
+  "version": 1,
+  "generatedUtc": "1970-01-01T00:00:00.000Z",
+  "referenceRadiusM": 3389500,
+  "gridSize": 33,
+  "maxLod": 2,
+  "source": {
+    "dataSetId": "MGS-M-MOLA-5-MEGDR-L3-V1.0",
+    "radiusProductId": "MEGR90N000CB.IMG",
+    "areoidProductId": "MEGA90N000CB.IMG",
+    "productVersion": "2.0",
+    "coordinateSystem": "PLANETOCENTRIC",
+    "sourceResolutionPixelsPerDegree": 4,
+    "radiusUrl": "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/megr90n000cb.img",
+    "areoidUrl": "https://pds-geosciences.wustl.edu/mgs/mgs-m-mola-5-megdr-l3-v1/mgsl_300x/meg004/mega90n000cb.img"
+  },
+  "settings": {
+    "projection": "normalized cube sphere",
+    "interpolation": "bilinear in source simple-cylindrical grid",
+    "heightEncoding": "little-endian signed int16 metres from 3389500 m reference radius",
+    "areoidEncoding": "little-endian signed int16 metres from 3389500 m reference radius",
+    "borders": "inclusive shared samples"
+  },
+  "tiles": {
+    "px/0/0/0": {
+      "path": "/data/mola/px/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "8d66d3ef",
+      "sha256": "234c51d481f46d650d2aaab42d12206a68ba5349db0abfb43e30a00b2f6a46f7"
+    },
+    "nx/0/0/0": {
+      "path": "/data/mola/nx/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "5bc24e88",
+      "sha256": "c2e6de89c5dc9a9ddf36f9e3d3d3cdce4bda2918ba4c562eb609ea21b38349dd"
+    },
+    "py/0/0/0": {
+      "path": "/data/mola/py/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "53469752",
+      "sha256": "d0d32929bb77de18d5c3a37b5841606f67e991340d60e09afba137a5f6c5141e"
+    },
+    "ny/0/0/0": {
+      "path": "/data/mola/ny/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "5f8b01dd",
+      "sha256": "6f73f5b5b9ced6b15f28c96019a844c2cb63705e54e5ef6da09b6a3824c7ae47"
+    },
+    "pz/0/0/0": {
+      "path": "/data/mola/pz/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "07f975ea",
+      "sha256": "4a3485fada5dd68273da082c7ce51a8e55fdf28b46d2a754dc73268e3f531803"
+    },
+    "nz/0/0/0": {
+      "path": "/data/mola/nz/0/0/0.bin",
+      "bytes": 4380,
+      "crc32": "3edd622a",
+      "sha256": "4434f877c8a48817366767cb66583a958aa81d8335beed88b8fbfb0486fdb893"
+    },
+    "px/1/0/0": {
+      "path": "/data/mola/px/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "27c91f58",
+      "sha256": "58a9f7edf972b7ea9c9221d7a780f49da650fce411e893ed3994d40b66596793"
+    },
+    "px/1/1/0": {
+      "path": "/data/mola/px/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "6c444269",
+      "sha256": "6dc767bc66c58c65d232f24ea0f48433f1be95645a36f4099fddd94dbfe76bf8"
+    },
+    "px/1/0/1": {
+      "path": "/data/mola/px/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "4dbe822c",
+      "sha256": "759ed7f7e296fdc4a01baf354082b9dfa34f229b489997d7b8ca2c72f23344c9"
+    },
+    "px/1/1/1": {
+      "path": "/data/mola/px/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "a0505d2f",
+      "sha256": "72b7c2f4da75b36ea8d7db7253d19e1f3e889e2158b4edbfd5198f825ba869a1"
+    },
+    "nx/1/0/0": {
+      "path": "/data/mola/nx/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "fbfea8e1",
+      "sha256": "0eb283e855bf27111fda3605ba28d9c571dd3cb775ae8971cf8d558df4e01208"
+    },
+    "nx/1/1/0": {
+      "path": "/data/mola/nx/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "37982d07",
+      "sha256": "51c097f0f32309aafb58360cf89279148385a28234c5bca0d7e9f0f6b71a60af"
+    },
+    "nx/1/0/1": {
+      "path": "/data/mola/nx/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "4f442426",
+      "sha256": "e0b88e4a1fb85cf9b82c535d7caa38015e5efa454fa73240cfafbde96c1cf6e1"
+    },
+    "nx/1/1/1": {
+      "path": "/data/mola/nx/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "10ce2e04",
+      "sha256": "82e1a530c4cfd51e6c5908c24d8028449beda49ff4c024ab7d22190d1e45fe02"
+    },
+    "py/1/0/0": {
+      "path": "/data/mola/py/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "112ebb02",
+      "sha256": "371454dd6d0472fd14f926864a5013914b82be9736d854aa27ba4a697b9d8799"
+    },
+    "py/1/1/0": {
+      "path": "/data/mola/py/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "090e861e",
+      "sha256": "8c37c302858a1a19acd332b9ed1151e61497ff4d1cc8910c6ec832a4f75a331d"
+    },
+    "py/1/0/1": {
+      "path": "/data/mola/py/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "cc148748",
+      "sha256": "9114740684eb4d372e31c12c358754a256225e10548c6c8f513d463bef9701c4"
+    },
+    "py/1/1/1": {
+      "path": "/data/mola/py/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "1a44a83d",
+      "sha256": "7428ba75ce12acad28e02b741120eb6c1c72f1bf62280978f56f940fab6385e0"
+    },
+    "ny/1/0/0": {
+      "path": "/data/mola/ny/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "b8cf8a80",
+      "sha256": "2c7801147093fe42841abed523a2dd36b73bb9a6afe0e6440a205dad764f5059"
+    },
+    "ny/1/1/0": {
+      "path": "/data/mola/ny/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "1b92d7f0",
+      "sha256": "f9b124907d25e69ea0838ed255e55b0e25ab364fda59728b36ce0569f95aa719"
+    },
+    "ny/1/0/1": {
+      "path": "/data/mola/ny/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "2e249013",
+      "sha256": "ff9c568b1e7ba57bbaf3b19932bc4c60f2244dd6fbb9bbcecab7fb9fbb05282e"
+    },
+    "ny/1/1/1": {
+      "path": "/data/mola/ny/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "1925fb77",
+      "sha256": "af84b06f70bcd78b769253072c8651f8c9e79db1f009ad3c1ac6cd375d9eec7d"
+    },
+    "pz/1/0/0": {
+      "path": "/data/mola/pz/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "1b957eb1",
+      "sha256": "e018bbb3f2dfdf590688c9bb228f6848d5bef378da3ffc52bf5623a5d88c28a1"
+    },
+    "pz/1/1/0": {
+      "path": "/data/mola/pz/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "7056ed7a",
+      "sha256": "3c6fed44835795be885db99467088b5e84487e2d5fce166eead565108eed967b"
+    },
+    "pz/1/0/1": {
+      "path": "/data/mola/pz/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "238a4f5a",
+      "sha256": "ca9471058fdfc0495be0cf88597a3373eaa77ca248b33610101841fdee37b05c"
+    },
+    "pz/1/1/1": {
+      "path": "/data/mola/pz/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "c418d24c",
+      "sha256": "de1a281851750467b1a545c66aecd6ccc14ee72dbb2ad95284a919a121a15390"
+    },
+    "nz/1/0/0": {
+      "path": "/data/mola/nz/1/0/0.bin",
+      "bytes": 4380,
+      "crc32": "ab6a956b",
+      "sha256": "6007b9b60a95d2133b02397b49ca5a86e9c6c0b70fe9b0d01f9190d268bd3d53"
+    },
+    "nz/1/1/0": {
+      "path": "/data/mola/nz/1/1/0.bin",
+      "bytes": 4380,
+      "crc32": "a73ffcdd",
+      "sha256": "b0536a1fb4fd5bcc41f85a4570c9d1d1392570ab6068e260ed0996dd4d2021f0"
+    },
+    "nz/1/0/1": {
+      "path": "/data/mola/nz/1/0/1.bin",
+      "bytes": 4380,
+      "crc32": "58a16dd3",
+      "sha256": "e74c304daefcf687c968f32718f641412d66c32b53f672d1386bfc4eece34924"
+    },
+    "nz/1/1/1": {
+      "path": "/data/mola/nz/1/1/1.bin",
+      "bytes": 4380,
+      "crc32": "68ed100f",
+      "sha256": "f963b1d1b4a14567f1b03551beb89f96cba3d613dca1cf47b3e173ed0483b216"
+    },
+    "px/2/0/0": {
+      "path": "/data/mola/px/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "53843776",
+      "sha256": "5c3b9f52ee9e413382cc14587627d1e8dbf8f3a9a76dfed93d87e8d18c590bd9"
+    },
+    "px/2/1/0": {
+      "path": "/data/mola/px/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "84d1f55e",
+      "sha256": "b0e7123eb7765c84780469f2e9cff912d9885d44e1219dd31686cc455d2847b6"
+    },
+    "px/2/2/0": {
+      "path": "/data/mola/px/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "b6084983",
+      "sha256": "95096fb166760a798c76edc5016ef8b10ecd2b7cd242293def5ca00d42aae028"
+    },
+    "px/2/3/0": {
+      "path": "/data/mola/px/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "caa2d600",
+      "sha256": "b1aeb2d672d446f9410f9c619097bf382617f4cb8afb9ee0d540fa058b2515f2"
+    },
+    "px/2/0/1": {
+      "path": "/data/mola/px/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "d0f5cf43",
+      "sha256": "75ea4e906a769dd2a95738bf2d2029d2fa71a551e47d2b07bb7802e1d591bc81"
+    },
+    "px/2/1/1": {
+      "path": "/data/mola/px/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "7593e8bf",
+      "sha256": "16b2684b1a776b638fd50b0f5973b714d2c27d37eae813d586323c749bdfa132"
+    },
+    "px/2/2/1": {
+      "path": "/data/mola/px/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "177d31b1",
+      "sha256": "3ec0c7dea658884fcbfd5439365f520e5a898138fcd95df31794cbf22dfe2251"
+    },
+    "px/2/3/1": {
+      "path": "/data/mola/px/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "70b99f95",
+      "sha256": "fd301b30bc84a8f56867557fd91fe39d64d243f6b183c9fbc09ef3f2d1361443"
+    },
+    "px/2/0/2": {
+      "path": "/data/mola/px/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "1a3eff5d",
+      "sha256": "5663bd0274877ad437fd5d95df37b35c0eb98c43c580b7b7c272c697aea54a60"
+    },
+    "px/2/1/2": {
+      "path": "/data/mola/px/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "85ae9325",
+      "sha256": "be060ef36860ca7d06ed760eadae804eadec4ec4afc09e05aef9724cd9098311"
+    },
+    "px/2/2/2": {
+      "path": "/data/mola/px/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "e015ac13",
+      "sha256": "c61f4a199d2854df85413e71e0c3b7a8ad0db90e953f1a732942f3e6fbc5d712"
+    },
+    "px/2/3/2": {
+      "path": "/data/mola/px/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "ce5eb2e6",
+      "sha256": "bd26a0a87422986c55927a240623b6990a56e8ffd9de48e38cf35534078d26f7"
+    },
+    "px/2/0/3": {
+      "path": "/data/mola/px/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "d4ae064f",
+      "sha256": "e5b096dc726ff03f7cc5f9018060c90a5f05deb6c960b9930c588cbdd195dcbc"
+    },
+    "px/2/1/3": {
+      "path": "/data/mola/px/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "23c70c87",
+      "sha256": "cab7bcdc55fb107ce1b673101b2cbb43fb444da16d0bf52c3101449b0190717a"
+    },
+    "px/2/2/3": {
+      "path": "/data/mola/px/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "f409d683",
+      "sha256": "96825ffa5c77d7a36746b2a6bd962147bba926997c425b4e9cd0508eb081675b"
+    },
+    "px/2/3/3": {
+      "path": "/data/mola/px/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "03c2210d",
+      "sha256": "e8b7091eb4e3e7d72d093320f3139da547a404f88810b112f1936c2e9c28cd6e"
+    },
+    "nx/2/0/0": {
+      "path": "/data/mola/nx/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "b5d22ded",
+      "sha256": "42f49b0299856b33fd3a08dac628ae9ce1b74752f75889efc06c96c7c7efc1a5"
+    },
+    "nx/2/1/0": {
+      "path": "/data/mola/nx/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "8432f533",
+      "sha256": "8e0895c8df59e87a20df0ec235400e76f22534a242aa780a22e5136cddb5bb86"
+    },
+    "nx/2/2/0": {
+      "path": "/data/mola/nx/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "df1f864e",
+      "sha256": "1ef2a942d92cd0989ac307a4906b4f13f05300349dd7bcd9229fc451179ec877"
+    },
+    "nx/2/3/0": {
+      "path": "/data/mola/nx/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "dc266b09",
+      "sha256": "794b3ea9ccab337ea4b8a9d140b4be72c3067f44cce56a5c51bb70042a6f28a0"
+    },
+    "nx/2/0/1": {
+      "path": "/data/mola/nx/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "3eb420d3",
+      "sha256": "8a3cbf4694c7b93a1796e223c02b82601344ecbc2de75b3365dcbc7ca7ecb62f"
+    },
+    "nx/2/1/1": {
+      "path": "/data/mola/nx/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "9b4a08c6",
+      "sha256": "5b17bac4f13a98ea1032b492a846720add07bc4aec840412df0f725054422e2a"
+    },
+    "nx/2/2/1": {
+      "path": "/data/mola/nx/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "0934980c",
+      "sha256": "6249973fed489107fbb6bc829bdec89c2ee151b1ac427fdc55cd98c075cd7e17"
+    },
+    "nx/2/3/1": {
+      "path": "/data/mola/nx/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "d4efc9b8",
+      "sha256": "292d1041a2dfd1e80f05a28deb2bed4381289064e831867fbbc5afa3b3cb5047"
+    },
+    "nx/2/0/2": {
+      "path": "/data/mola/nx/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "c3603b39",
+      "sha256": "e5c1ca083cc0f1a8a955fb00e8e4eaf8399138723124c439744acc402a200f2c"
+    },
+    "nx/2/1/2": {
+      "path": "/data/mola/nx/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "e9d810f6",
+      "sha256": "78725f0819e109a6aa5c9eb4776e4425653288b97f9575a5e03e9b0b6c5ed3bd"
+    },
+    "nx/2/2/2": {
+      "path": "/data/mola/nx/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "9e5e38ff",
+      "sha256": "2a1f54856878a55312bbc5cd78acdc86a6d679ac9ccf8555100871e55aa028cc"
+    },
+    "nx/2/3/2": {
+      "path": "/data/mola/nx/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "5089fa80",
+      "sha256": "db93ee5e2a9e8ce87fbfa87d5dedd94ca5467d9173dfcce5e2b511a5914ae2b7"
+    },
+    "nx/2/0/3": {
+      "path": "/data/mola/nx/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "3ea40103",
+      "sha256": "3d3e203f9a3074e317ef11e05933039c2f288124746ec57c201836b6e2c65f3e"
+    },
+    "nx/2/1/3": {
+      "path": "/data/mola/nx/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "5904e6e5",
+      "sha256": "1c3424ffe160b011b704da8428de03161e75fdff494156395fe77ab456b71203"
+    },
+    "nx/2/2/3": {
+      "path": "/data/mola/nx/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "ad7ddd95",
+      "sha256": "5fb65feb9f9414e011140fb2a9d4cb455950d9c6edee38d210c70b37aced43a1"
+    },
+    "nx/2/3/3": {
+      "path": "/data/mola/nx/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "37d1fc16",
+      "sha256": "0d5398ca7af23b15e3e85c12d18f8f1bc9bc0e45d9048b212e3291594bc64cc7"
+    },
+    "py/2/0/0": {
+      "path": "/data/mola/py/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "ffbdb920",
+      "sha256": "51ddd775057bc62a6460360043acdbe5fe9fe09099add1413029865d22dc2eb3"
+    },
+    "py/2/1/0": {
+      "path": "/data/mola/py/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "b9b7d32f",
+      "sha256": "85714c3365db91f71315231c89d8c3f424d1525cd38e606b66d62bbdbefcb4a9"
+    },
+    "py/2/2/0": {
+      "path": "/data/mola/py/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "05872729",
+      "sha256": "51d77c7f758159baa6b1f20c6786c25b7b1510f4e46616e1fb31a9c2e142c4a8"
+    },
+    "py/2/3/0": {
+      "path": "/data/mola/py/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "730e747a",
+      "sha256": "15cdc3e0c1b5f4200eecad8e8a70a0184a1965ac279ef00fce8dcf843e60852c"
+    },
+    "py/2/0/1": {
+      "path": "/data/mola/py/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "731d7b5f",
+      "sha256": "08c57c4080cb7e3bad89b0a527b7365165fbbfcf5ca6b302a0abc9212f3f1227"
+    },
+    "py/2/1/1": {
+      "path": "/data/mola/py/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "486c6cc9",
+      "sha256": "ac2e4333585d141c90499c37b32ae13fa108c02fe535f91955341e9af5eb94cb"
+    },
+    "py/2/2/1": {
+      "path": "/data/mola/py/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "4f60e443",
+      "sha256": "ad3681ff5021315adec6d0116f22d22e25ef7dc1d1d5ea4be8234c885975acbe"
+    },
+    "py/2/3/1": {
+      "path": "/data/mola/py/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "aa409640",
+      "sha256": "4ab7cbab35c5565e108529e3bdf94be74a1cfc2f64c260a57efd8eaceb3eb825"
+    },
+    "py/2/0/2": {
+      "path": "/data/mola/py/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "1e243c22",
+      "sha256": "31c0f6783c353e83b401793d54327dcef129fe5944acaa67596e4aabad592b3d"
+    },
+    "py/2/1/2": {
+      "path": "/data/mola/py/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "2aa3a80b",
+      "sha256": "bb23de31e4a97331b4b9d2bbbefa30c414370c57ab64b39e21e3cd4a05669915"
+    },
+    "py/2/2/2": {
+      "path": "/data/mola/py/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "9585bfa1",
+      "sha256": "8be10beb8390a37da08f7e1c8231e594f42b43c2633f5112dd17400e99548005"
+    },
+    "py/2/3/2": {
+      "path": "/data/mola/py/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "b271f4e4",
+      "sha256": "7aa995f71e73356e2aa27af4db41aee50c4315cc87d4da3ba6fa05973d41a07f"
+    },
+    "py/2/0/3": {
+      "path": "/data/mola/py/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "4577a181",
+      "sha256": "1ade527f5d8248d26ae2e9d8012e6330da7827c3f5f2a293f227401661f9e4b9"
+    },
+    "py/2/1/3": {
+      "path": "/data/mola/py/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "9272be0b",
+      "sha256": "a87740098ad59e214ba97cead613b7068384079b64c3e251a7f074b0289857c6"
+    },
+    "py/2/2/3": {
+      "path": "/data/mola/py/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "4347689f",
+      "sha256": "724d24a5e05e56f16d3bc7104d8210aa701f5d79218f5a7ab932776d153cb411"
+    },
+    "py/2/3/3": {
+      "path": "/data/mola/py/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "01712404",
+      "sha256": "8fa16d11b91b3b72745b6c9dc34638147fce8ffe8bf07cc71985a53a67847b2e"
+    },
+    "ny/2/0/0": {
+      "path": "/data/mola/ny/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "5d76ad7b",
+      "sha256": "e19c18f5b4863ce46d17fbc514abdaa26e4082c39928d71b8cf7daf58a697290"
+    },
+    "ny/2/1/0": {
+      "path": "/data/mola/ny/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "02109ff6",
+      "sha256": "1040d2bf7e9cff157b82d6b9211aa4b30e02d2eab0771455ae333429d8d701f5"
+    },
+    "ny/2/2/0": {
+      "path": "/data/mola/ny/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "713a86e8",
+      "sha256": "87d188744553a309b5d07dfd25bcb4dcdcd6b36f2ab97c60b8fe2b070b3efff1"
+    },
+    "ny/2/3/0": {
+      "path": "/data/mola/ny/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "7f402a5b",
+      "sha256": "9e91f7319c59cd595648782a330e18381835e9ad60bb95e68a337e14819ce655"
+    },
+    "ny/2/0/1": {
+      "path": "/data/mola/ny/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "3b905237",
+      "sha256": "35621fce58207ce1fef2da0d5b1bc227cd709c9fb04976af529ccf6b04e5f5a2"
+    },
+    "ny/2/1/1": {
+      "path": "/data/mola/ny/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "1ffcde20",
+      "sha256": "c538bb4ada72e5d971243e03792fef78cb3441cb657c17552279f60824cb8a14"
+    },
+    "ny/2/2/1": {
+      "path": "/data/mola/ny/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "d4b96147",
+      "sha256": "b979ea3958f539d1490e398929b09d3e2c2ed31a2f09b74f23e6a75fbb741dca"
+    },
+    "ny/2/3/1": {
+      "path": "/data/mola/ny/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "30029ce9",
+      "sha256": "d861d5f6f15b64063a66aa62a4bf89c1e8cbe6e8641e4e341d5f28e35e25393b"
+    },
+    "ny/2/0/2": {
+      "path": "/data/mola/ny/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "f13e1193",
+      "sha256": "05a27b3a8e8337507bf8563958fce8215b9ba80294352abf98a5c6afa4775f12"
+    },
+    "ny/2/1/2": {
+      "path": "/data/mola/ny/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "066d827b",
+      "sha256": "00b27a9258d1097743cb42cc6681d205950d31feab57b47d6dc48c9841e01f8c"
+    },
+    "ny/2/2/2": {
+      "path": "/data/mola/ny/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "269199d0",
+      "sha256": "ad903d7f380fb81ec97287019bf069f510118a93d778d5bb9a464fad366b7547"
+    },
+    "ny/2/3/2": {
+      "path": "/data/mola/ny/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "26ca9d8d",
+      "sha256": "3273e86fdd816b805681736cde4b62fbee9a77c6beb1909b3686cc81c2f78adf"
+    },
+    "ny/2/0/3": {
+      "path": "/data/mola/ny/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "24896b7f",
+      "sha256": "b92da70dad0f362b6e480793428b820040ce607640a2a1fcaf9acbf0a5707324"
+    },
+    "ny/2/1/3": {
+      "path": "/data/mola/ny/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "bb3f3e72",
+      "sha256": "cc922a8e72fbdc4b7acaf62e3c7196a8f4dc60184d84f9ecf260f10d9e2472b8"
+    },
+    "ny/2/2/3": {
+      "path": "/data/mola/ny/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "2babd0c8",
+      "sha256": "99b05359d297816b1449a73b889e2d7240ff5d5f25eaf9ed5285ebb9009f2725"
+    },
+    "ny/2/3/3": {
+      "path": "/data/mola/ny/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "f54dc07c",
+      "sha256": "dc922c12ec24766a1622bb86330435cb6db1ee2d6017f6f411bbdbf7cd57269a"
+    },
+    "pz/2/0/0": {
+      "path": "/data/mola/pz/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "4f66d6f9",
+      "sha256": "641e13c9cc4e427740801e9135e3fc02581b8109190b859e13b4a0157c8c0b45"
+    },
+    "pz/2/1/0": {
+      "path": "/data/mola/pz/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "81dd8705",
+      "sha256": "ca299c21e469187970ee5d182f2d75bac784a0fb13870affc36e93c63400fb9a"
+    },
+    "pz/2/2/0": {
+      "path": "/data/mola/pz/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "77648bf5",
+      "sha256": "579cfbfad69538ecdea1bdeb5ade620c6ac6774141817023bd896319506a1f6a"
+    },
+    "pz/2/3/0": {
+      "path": "/data/mola/pz/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "2cd12d3c",
+      "sha256": "c9beb8d572f654fd42cf06a8cc24afdbdbe0352eabc221956d48db68d0f51e24"
+    },
+    "pz/2/0/1": {
+      "path": "/data/mola/pz/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "f93deca1",
+      "sha256": "cdc22b035305e3a2391646515129851816d49e67ae721684678bb1ba86bd80d8"
+    },
+    "pz/2/1/1": {
+      "path": "/data/mola/pz/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "754c5096",
+      "sha256": "531d4d847f943d10156569c6e2c4095e61cfe0d37425c6c3328107d43fae8ded"
+    },
+    "pz/2/2/1": {
+      "path": "/data/mola/pz/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "d758b608",
+      "sha256": "462b71cd1f36261446166e407b5f32dff89b2d4356dd8044b5b46b94be8fbaf4"
+    },
+    "pz/2/3/1": {
+      "path": "/data/mola/pz/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "97b10c2f",
+      "sha256": "ba25ad390e59d1105bd311f200837d22b770abb74bea7ec40d066ceb075123ed"
+    },
+    "pz/2/0/2": {
+      "path": "/data/mola/pz/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "402a35d9",
+      "sha256": "dbf3fb3a406cf716c8958c60e35e15e51610279e43157ba95eb23b073c5d9035"
+    },
+    "pz/2/1/2": {
+      "path": "/data/mola/pz/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "7a757a4f",
+      "sha256": "b2bcb0ed2e278fa099f4615f7a5fe144d9e3500b93f175288c894d7cf2385cd4"
+    },
+    "pz/2/2/2": {
+      "path": "/data/mola/pz/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "e44f91b0",
+      "sha256": "a68a40f10b2c831fd6198e14ab2b5d7d82cd46fd14c3af2f7753ccebe5b000eb"
+    },
+    "pz/2/3/2": {
+      "path": "/data/mola/pz/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "55932fcf",
+      "sha256": "d6aed634f4eccbeb057d94548c0ce4f081f7d87fd851e7598fb8efa0b8f58176"
+    },
+    "pz/2/0/3": {
+      "path": "/data/mola/pz/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "c038dbed",
+      "sha256": "90bacbef3cb5c7c97e4079544e0b40d86b9a272766bed717ca15d589b16cfa38"
+    },
+    "pz/2/1/3": {
+      "path": "/data/mola/pz/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "2780945f",
+      "sha256": "ff1fafacd1d719a425154fd54eb4cd180cd3aeb6b0fd5cf37db5a5a85d6b6dac"
+    },
+    "pz/2/2/3": {
+      "path": "/data/mola/pz/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "833b7641",
+      "sha256": "19c6345212d3325261e3c595b417461845ff2b74e062006dc381d390bf938308"
+    },
+    "pz/2/3/3": {
+      "path": "/data/mola/pz/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "e973301a",
+      "sha256": "5a6ca02aa5009233184245c953b18536dff507a77d32478226e714372503b2b8"
+    },
+    "nz/2/0/0": {
+      "path": "/data/mola/nz/2/0/0.bin",
+      "bytes": 4380,
+      "crc32": "275dfc22",
+      "sha256": "ff7e8750af8c88f87b32721ab15768d3119cd1f6849464ccdc670a77ecb05d2b"
+    },
+    "nz/2/1/0": {
+      "path": "/data/mola/nz/2/1/0.bin",
+      "bytes": 4380,
+      "crc32": "58a6c439",
+      "sha256": "c7e1c6d0e1800fa46b8b89c9aa76b90fc44dce2e3be8d6671a4bb0d5f7db50e8"
+    },
+    "nz/2/2/0": {
+      "path": "/data/mola/nz/2/2/0.bin",
+      "bytes": 4380,
+      "crc32": "0fc01e42",
+      "sha256": "baf00238dc24280677ea5d08523198f3649eb46db2225c68bdf8b73a36bf2787"
+    },
+    "nz/2/3/0": {
+      "path": "/data/mola/nz/2/3/0.bin",
+      "bytes": 4380,
+      "crc32": "2b0ab021",
+      "sha256": "02178dd1240af71e2114cea27d5191d179df1a73a180a74f3da46fe9b935f48c"
+    },
+    "nz/2/0/1": {
+      "path": "/data/mola/nz/2/0/1.bin",
+      "bytes": 4380,
+      "crc32": "58e20b6a",
+      "sha256": "3535dad2c41e5bf66b7673af82b9c57031fe5a282f72a9ef0acf9a6073b8893e"
+    },
+    "nz/2/1/1": {
+      "path": "/data/mola/nz/2/1/1.bin",
+      "bytes": 4380,
+      "crc32": "18a112e5",
+      "sha256": "fced48501e2d41aa761ebc7f6db388473aa808b7c42d752be03d4d532f92636b"
+    },
+    "nz/2/2/1": {
+      "path": "/data/mola/nz/2/2/1.bin",
+      "bytes": 4380,
+      "crc32": "b713389a",
+      "sha256": "c6034a224bf14d76cd74235749c3cd69b99b89471deef2e8e235c8a65d4efa20"
+    },
+    "nz/2/3/1": {
+      "path": "/data/mola/nz/2/3/1.bin",
+      "bytes": 4380,
+      "crc32": "7f414595",
+      "sha256": "45c86fde8ac28c6fe4d42cb90951c08da19a77e02b098e37e94a539ae98ae798"
+    },
+    "nz/2/0/2": {
+      "path": "/data/mola/nz/2/0/2.bin",
+      "bytes": 4380,
+      "crc32": "db8174df",
+      "sha256": "2f2c1c6be01699e18a9837e9cb0b539e3aeb04d3c38de85dd51bb1b715dcd397"
+    },
+    "nz/2/1/2": {
+      "path": "/data/mola/nz/2/1/2.bin",
+      "bytes": 4380,
+      "crc32": "f324fdec",
+      "sha256": "00e00f8852e443656402d865055067af323e507c5a98f1f32b3f335d1cc3da01"
+    },
+    "nz/2/2/2": {
+      "path": "/data/mola/nz/2/2/2.bin",
+      "bytes": 4380,
+      "crc32": "7e200f13",
+      "sha256": "1a9633d00811babe85209b8433d400ee0a8211cfbb4b3e3091ebf9581ae7480a"
+    },
+    "nz/2/3/2": {
+      "path": "/data/mola/nz/2/3/2.bin",
+      "bytes": 4380,
+      "crc32": "241710dc",
+      "sha256": "9f47dc96b383e453d690f53a91383244e06322261ed0190a6e75b50546034388"
+    },
+    "nz/2/0/3": {
+      "path": "/data/mola/nz/2/0/3.bin",
+      "bytes": 4380,
+      "crc32": "ed3b3acc",
+      "sha256": "cf4c8655adc332d96ed299230e039dea5f2df3370047904d2ebe01ddff119989"
+    },
+    "nz/2/1/3": {
+      "path": "/data/mola/nz/2/1/3.bin",
+      "bytes": 4380,
+      "crc32": "a4e0dc4a",
+      "sha256": "73b0f9dea3a0073f8650448771335db9c439d557aeb57b7e66ff51a07e6d8ec4"
+    },
+    "nz/2/2/3": {
+      "path": "/data/mola/nz/2/2/3.bin",
+      "bytes": 4380,
+      "crc32": "156c8427",
+      "sha256": "82437402105885800230dd80291a4b595027ef13a24376b1113f2a0c2f2d2bce"
+    },
+    "nz/2/3/3": {
+      "path": "/data/mola/nz/2/3/3.bin",
+      "bytes": 4380,
+      "crc32": "df994894",
+      "sha256": "220bc2bb7d58f899a8fbc988e8effe291ef65b46924686ec1c2d4bf6793786f1"
+    }
+  }
+}
