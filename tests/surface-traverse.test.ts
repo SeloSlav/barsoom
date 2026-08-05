@@ -11,6 +11,7 @@ import {
   marsJumpApexHeight,
   marsJumpPoseWeights,
   normalizeMarsSurfaceDirection,
+  randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
   rebaseCameraAnchorForTerrainChange,
   smoothCameraHeight,
@@ -60,6 +61,16 @@ describe("surface traverse physics", () => {
     expect(Math.hypot(equator.x, equator.y, equator.z)).toBeCloseTo(1, 12);
     expect(northPole.y).toBe(1);
     expect(Math.hypot(northPole.x, northPole.z)).toBe(0);
+  });
+
+  it("chooses random landing sites on the visible daylight hemisphere", () => {
+    const values = [0.5, 0.5, 0.5, 0];
+    let index = 0;
+    const direction = randomMarsDaylightDirection({ x: 1, y: 0, z: 0 }, () => values[index++]);
+
+    expect(direction.x).toBe(1);
+    expect(direction.y).toBe(0);
+    expect(direction.z).toBe(0);
   });
 
   it("preserves an exact locked surface target for observer instantiation", () => {

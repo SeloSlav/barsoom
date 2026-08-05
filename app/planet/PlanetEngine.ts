@@ -7,7 +7,7 @@ import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
-import { SurfaceTraverseController } from "./SurfaceTraverseController";
+import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
@@ -546,7 +546,7 @@ export class PlanetEngine {
     this.controls.setEnabled(false);
     this.clearSelection();
     if (lockedTarget) this.surfaceTraverse.teleportTo(lockedTarget);
-    else this.surfaceTraverse.teleportRandom();
+    else this.surfaceTraverse.teleportTo(randomMarsDaylightDirection(this.skyState.sunDirection));
     this.audio.setSurfaceMode(true);
     this.audio.playObserverTransition(true);
     this.lastTelemetryTime = -Infinity;

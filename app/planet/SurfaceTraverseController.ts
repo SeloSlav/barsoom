@@ -22,6 +22,8 @@ const CAMERA_MAX_DISTANCE_M = 39;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
 const CAMERA_FIRST_PERSON_HEIGHT_M = 1.68;
 const CAMERA_COLLISION_CLEARANCE_M = 0.35;
+const CAMERA_COLLISION_SAMPLES = 12;
+const CAMERA_COLLISION_RECOVERY_RATE = 1.5;
 const CAMERA_INITIAL_LOOK_PITCH_RAD = THREE.MathUtils.degToRad(-14);
 const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-85);
 const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(85);
@@ -57,6 +59,20 @@ export function randomMarsSurfaceDirection(random: () => number = Math.random): 
     y,
     z: horizontal * Math.sin(longitude),
   };
+}
+
+export function randomMarsDaylightDirection(
+  sunDirection: Vec3,
+  random: () => number = Math.random,
+  minimumSunDot = 0.28,
+): Vec3 {
+  const sun = normalizeMarsSurfaceDirection(sunDirection);
+  const minimumDot = clamp(minimumSunDot, -1, 1);
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    const candidate = randomMarsSurfaceDirection(random);
+    if (candidate.x * sun.x + candidate.y * sun.y + candidate.z * sun.z >= minimumDot) return candidate;
+  }
+  return sun;
 }
 
 export function normalizeMarsSurfaceDirection(direction: Vec3): Vec3 {
@@ -226,6 +242,7 @@ export class SurfaceTraverseController {
   private readonly localFill = new THREE.HemisphereLight(0xdce8ff, 0x40180d, 0.72);
   private readonly direction = new THREE.Vector3(1, 0, 0);
   private readonly cameraAbsolute = new THREE.Vector3();
+  private readonly desiredCameraAbsolute = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
   private readonly footAbsolute = new THREE.Vector3();
   private readonly playerAbsolute = new THREE.Vector3();
@@ -263,6 +280,7 @@ export class SurfaceTraverseController {
   private cameraAnchorHeightM = 0;
   private cameraAnchorVelocityMps = 0;
   private cameraAnchorInitialized = false;
+  private cameraCollisionFraction = 1;
   private surfaceNormalInitialized = false;
   private verticalOffsetM = 0;
   private verticalVelocityMps = 0;
@@ -357,6 +375,7 @@ export class SurfaceTraverseController {
     this.cameraDistanceM = CAMERA_DEFAULT_DISTANCE_M;
     this.cameraAnchorVelocityMps = 0;
     this.cameraAnchorInitialized = false;
+    this.cameraCollisionFraction = 1;
     this.surfaceNormalInitialized = false;
     this.verticalOffsetM = 0;
     this.verticalVelocityMps = 0;
@@ -581,6 +600,20 @@ export class SurfaceTraverseController {
     this.currentAction = next;
   }
 
+  private safeCameraCollisionFraction(desiredCameraAbsolute: THREE.Vector3) {
+    let lastSafeFraction = 0;
+    for (let sampleIndex = 1; sampleIndex <= CAMERA_COLLISION_SAMPLES; sampleIndex += 1) {
+      const fraction = sampleIndex / CAMERA_COLLISION_SAMPLES;
+      this.scratch.lerpVectors(this.targetAbsolute, desiredCameraAbsolute, fraction);
+      this.cameraSurfaceDirection.copy(this.scratch).normalize();
+      const surfaceHeightM = this.terrainSurface(this.cameraSurfaceDirection).heightM;
+      const minimumRadiusM = MARS_REFERENCE_RADIUS_M + surfaceHeightM + CAMERA_COLLISION_CLEARANCE_M;
+      if (this.scratch.lengthSq() < minimumRadiusM * minimumRadiusM) return lastSafeFraction;
+      lastSafeFraction = fraction;
+    }
+    return 1;
+  }
+
   update(deltaSeconds: number): PlanetControlState {
     const delta = clamp(deltaSeconds, 0, 0.05);
     this.entryWheelLockSeconds = Math.max(0, this.entryWheelLockSeconds - delta);
@@ -663,18 +696,30 @@ export class SurfaceTraverseController {
     // This is the visual difference between a true MMO follow camera and an
     // FPS-style freelook mounted on a third-person boom.
     const orbit = wowCameraOrbitDistances(this.cameraPitchRad, this.cameraDistanceM);
-    this.cameraAbsolute.copy(this.targetAbsolute)
+    this.desiredCameraAbsolute.copy(this.targetAbsolute)
       .addScaledVector(this.forward, -orbit.horizontalM)
       .addScaledVector(this.up, orbit.verticalM);
 
-    // Emulate WoW's camera collision by shortening/lifting the orbit at the
-    // terrain rather than allowing an upward look to bury the camera in Mars.
+    // WoW-style collision shortens the camera boom toward the character. The
+    // previous radial clamp put the camera on the terrain clearance floor and
+    // jumped in/out whenever a streamed tile changed height behind the player.
+    const safeCollisionFraction = firstPerson ? 1 : this.safeCameraCollisionFraction(this.desiredCameraAbsolute);
+    if (safeCollisionFraction < this.cameraCollisionFraction) {
+      this.cameraCollisionFraction = safeCollisionFraction;
+    } else {
+      this.cameraCollisionFraction = Math.min(
+        safeCollisionFraction,
+        this.cameraCollisionFraction + CAMERA_COLLISION_RECOVERY_RATE * delta,
+      );
+    }
+    this.cameraAbsolute.lerpVectors(
+      this.targetAbsolute,
+      this.desiredCameraAbsolute,
+      this.cameraCollisionFraction,
+    );
+
     this.cameraSurfaceDirection.copy(this.cameraAbsolute).normalize();
     const cameraSurfaceHeightM = this.terrainSurface(this.cameraSurfaceDirection).heightM;
-    const minimumCameraRadiusM = MARS_REFERENCE_RADIUS_M + cameraSurfaceHeightM + CAMERA_COLLISION_CLEARANCE_M;
-    if (this.cameraAbsolute.lengthSq() < minimumCameraRadiusM * minimumCameraRadiusM) {
-      this.cameraAbsolute.setLength(minimumCameraRadiusM);
-    }
 
     this.cameraDirection.copy(this.cameraAbsolute).normalize();
     const cameraAltitudeM = Math.max(
@@ -707,7 +752,7 @@ export class SurfaceTraverseController {
       focusAbsolute: { x: this.footAbsolute.x, y: this.footAbsolute.y, z: this.footAbsolute.z },
       altitudeM: cameraAltitudeM,
       desiredAltitudeM: cameraAltitudeM,
-      cameraDistanceM: this.cameraDistanceM,
+      cameraDistanceM: this.cameraDistanceM * this.cameraCollisionFraction,
       nearM: this.camera.near,
       farM: this.camera.far,
     };
