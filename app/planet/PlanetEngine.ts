@@ -145,7 +145,8 @@ export class PlanetEngine {
     this.terrain = new PlanetTerrain(this.scene);
     this.surfaceDetails = new SurfaceDetailRenderer(
       this.scene,
-      (direction) => this.terrain.sampleHeight(direction),
+      (direction, lod) => this.terrain.sampleHeightAtLod(direction, lod),
+      (direction) => this.terrain.renderedLodAtDirection(direction),
     );
     this.controls = new PlanetControls(
       canvas,

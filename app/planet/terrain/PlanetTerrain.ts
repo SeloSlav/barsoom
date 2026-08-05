@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG, TERRAIN_CONFIG } from "../constants";
 import {
   childTiles,
+  directionToTile,
   dot3,
   faceUvToDirection,
   length3,
@@ -13,7 +14,7 @@ import {
   tileKeyToString,
 } from "../math";
 import { MolaTileLoader } from "../mola";
-import { proceduralDetailHeight } from "../noise";
+import { proceduralTerrainHeightForLod } from "../noise";
 import type { DebugFlags, TileEdge, TileKey, Vec3 } from "../types";
 import { createTerrainMaterial, createTerrainShadowMaterial, type TerrainMaterial } from "../render/materials";
 import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPool";
@@ -480,18 +481,32 @@ export class PlanetTerrain {
     this.readyNodes.delete(node);
   }
 
-  sampleHeight(directionInput: Vec3) {
+  sampleHeightAtLod(directionInput: Vec3, lod: number) {
     const direction = normalize3(directionInput);
     const mola = this.loader.sampleCached(direction);
     if (!mola) void this.loader.prefetchDirection(direction);
-    return (mola?.radiusHeightM ?? 0) + proceduralDetailHeight(direction);
+    return (mola?.radiusHeightM ?? 0) + proceduralTerrainHeightForLod(direction, lod);
+  }
+
+  sampleHeight(directionInput: Vec3) {
+    return this.sampleHeightAtLod(directionInput, TERRAIN_CONFIG.maxRenderLod);
+  }
+
+  renderedLodAtDirection(directionInput: Vec3) {
+    const direction = normalize3(directionInput);
+    for (let lod = TERRAIN_CONFIG.maxRenderLod; lod >= 0; lod -= 1) {
+      const node = this.allNodes.get(tileKeyToString(directionToTile(direction, lod)));
+      if (node?.mesh?.visible && this.visibleNodes.has(node)) return lod;
+    }
+    return 0;
   }
 
   sampleSurface(directionInput: Vec3) {
     const direction = normalize3(directionInput);
     const mola = this.loader.sampleCached(direction);
     if (!mola) void this.loader.prefetchDirection(direction);
-    const radiusHeightM = (mola?.radiusHeightM ?? 0) + proceduralDetailHeight(direction);
+    const radiusHeightM = (mola?.radiusHeightM ?? 0) +
+      proceduralTerrainHeightForLod(direction, TERRAIN_CONFIG.maxRenderLod);
     const areoidHeightM = mola?.areoidHeightM ?? 0;
     return {
       radiusHeightM,
@@ -525,6 +540,9 @@ export class PlanetTerrain {
     for (const mesh of this.meshPool) mesh.removeFromParent();
     this.meshPool.length = 0;
     this.material.uniforms.uOrbitalTexture.value.dispose();
+    this.material.uniforms.uSurfaceDiffuse.value.dispose();
+    this.material.uniforms.uSurfaceNormal.value.dispose();
+    this.material.uniforms.uSurfaceRoughness.value.dispose();
     this.material.dispose();
     this.shadowMaterial.dispose();
     this.workers.dispose();

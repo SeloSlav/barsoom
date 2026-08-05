@@ -1,6 +1,6 @@
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 const PLANET_SEED = 0x4d415253;
-const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v3";
+const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v4";
 const DETAIL_OCTAVES = [
   [38, 310],
   [91, 142],
@@ -17,6 +17,13 @@ const DETAIL_OCTAVES = [
   [1250000, 0.32],
   [2800000, 0.11],
 ];
+const CRATER_SCALES = [
+  [10, 60000, 0.30, 4000, 12000, 120, 650],
+  [13, 16000, 0.34, 900, 3200, 25, 180],
+  [16, 4000, 0.32, 180, 750, 4, 38],
+  [18, 1000, 0.24, 35, 160, 0.8, 7],
+];
+const TAU = Math.PI * 2;
 
 function normalize(x, y, z) {
   const length = Math.hypot(x, y, z);
@@ -93,6 +100,97 @@ function detailHeight(direction, resolvedOctaves) {
   return height;
 }
 
+function wrapCell(value, count) {
+  return ((value % count) + count) % count;
+}
+
+function random01(seed, lane) {
+  return spatialSeed(seed, lane) / 0xffffffff;
+}
+
+function resolvedCraterScalesForLod(lod) {
+  let count = 0;
+  for (const scale of CRATER_SCALES) {
+    if (lod >= scale[0]) count += 1;
+  }
+  return count;
+}
+
+function craterHeight(directionInput, resolvedScales) {
+  const directionLength = Math.hypot(directionInput[0], directionInput[1], directionInput[2]) || 1;
+  const direction = [
+    directionInput[0] / directionLength,
+    directionInput[1] / directionLength,
+    directionInput[2] / directionLength,
+  ];
+  const latitude = Math.asin(Math.max(-1, Math.min(1, direction[1])));
+  const longitude = Math.atan2(direction[2], direction[0]);
+  const normalizedLongitude = ((longitude + Math.PI) % TAU + TAU) % TAU;
+  let height = 0;
+  const limit = Math.max(0, Math.min(CRATER_SCALES.length, resolvedScales));
+
+  for (let scaleIndex = 0; scaleIndex < limit; scaleIndex += 1) {
+    const [minimumLod, spacingM, density, minimumRadiusM, maximumRadiusM, minimumDepthM, maximumDepthM] = CRATER_SCALES[scaleIndex];
+    void minimumLod;
+    const latitudeStep = spacingM / MARS_REFERENCE_RADIUS_M;
+    const latitudeCellCount = Math.ceil(Math.PI / latitudeStep);
+    const centerRow = Math.floor((latitude + Math.PI * 0.5) / latitudeStep);
+
+    for (let rowOffset = -2; rowOffset <= 2; rowOffset += 1) {
+      const row = centerRow + rowOffset;
+      if (row < 0 || row >= latitudeCellCount) continue;
+      const rowLatitude = -Math.PI * 0.5 + (row + 0.5) * latitudeStep;
+      const longitudeCellCount = Math.max(
+        4,
+        Math.round(TAU * MARS_REFERENCE_RADIUS_M * Math.max(0.001, Math.abs(Math.cos(rowLatitude))) / spacingM),
+      );
+      const centerColumn = Math.floor(normalizedLongitude / TAU * longitudeCellCount);
+
+      for (let columnOffset = -2; columnOffset <= 2; columnOffset += 1) {
+        const column = wrapCell(centerColumn + columnOffset, longitudeCellCount);
+        const seed = spatialSeed(0x63726174, scaleIndex, row, column);
+        if (random01(seed, 0) > density) continue;
+
+        const craterLatitude = rowLatitude + (random01(seed, 1) - 0.5) * latitudeStep * 0.66;
+        const longitudeStep = TAU / longitudeCellCount;
+        const craterLongitude = -Math.PI + (column + 0.5) * longitudeStep +
+          (random01(seed, 2) - 0.5) * longitudeStep * 0.66;
+        const cosLatitude = Math.cos(craterLatitude);
+        const craterDirection = [
+          cosLatitude * Math.cos(craterLongitude),
+          Math.sin(craterLatitude),
+          cosLatitude * Math.sin(craterLongitude),
+        ];
+        const radiusT = random01(seed, 3) ** 1.45;
+        const radiusM = minimumRadiusM * (maximumRadiusM / minimumRadiusM) ** radiusT;
+        const dot = Math.max(-1, Math.min(1,
+          direction[0] * craterDirection[0] + direction[1] * craterDirection[1] + direction[2] * craterDirection[2],
+        ));
+        const maximumDistanceM = radiusM * 1.6;
+        if (dot < Math.cos(maximumDistanceM / MARS_REFERENCE_RADIUS_M)) continue;
+        const distanceM = Math.acos(dot) * MARS_REFERENCE_RADIUS_M;
+        if (distanceM >= maximumDistanceM) continue;
+
+        const depthT = 0.35 + radiusT * 0.65;
+        const depthM = minimumDepthM * (maximumDepthM / minimumDepthM) ** depthT;
+        const radiusRatio = distanceM / radiusM;
+        const bowl = radiusRatio < 1 ? -depthM * (1 - radiusRatio * radiusRatio) ** 2 : 0;
+        const rimDistance = (radiusRatio - 1) / 0.105;
+        const rim = depthM * 0.22 * Math.exp(-(rimDistance * rimDistance));
+        const ejecta = radiusRatio > 1 ? depthM * 0.025 * Math.exp(-(radiusRatio - 1) * 5.5) : 0;
+        height += bowl + rim + ejecta;
+      }
+    }
+  }
+  return height;
+}
+
+function terrainDetailHeightForLod(direction, lod) {
+  const resolvedOctaves = Math.max(0, Math.min(DETAIL_OCTAVES.length, lod - 2));
+  return detailHeight(direction, resolvedOctaves) +
+    craterHeight(direction, resolvedCraterScalesForLod(lod));
+}
+
 function bilinear(values, size, x, y) {
   const x0 = Math.max(0, Math.min(size - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(size - 1, Math.floor(y)));
@@ -133,11 +231,9 @@ function generate(message) {
   const u0 = -1 + 2 * key.x / count;
   const v0 = -1 + 2 * key.y / count;
   const size = 2 / count;
-  const resolvedOctaves = Math.max(0, Math.min(DETAIL_OCTAVES.length, key.lod - 2));
-  const parentOctaves = Math.max(0, resolvedOctaves - 1);
   const centerDirection = faceDirection(key.face, u0 + size * 0.5, v0 + size * 0.5);
   const centerBase = sampleBase(base, u0 + size * 0.5, v0 + size * 0.5);
-  const centerHeight = centerBase.height + detailHeight(centerDirection, resolvedOctaves);
+  const centerHeight = centerBase.height + terrainDetailHeightForLod(centerDirection, key.lod);
   const center = centerDirection.map((component) => component * (MARS_REFERENCE_RADIUS_M + centerHeight));
 
   for (let row = 0; row < gridSize; row += 1) {
@@ -149,8 +245,8 @@ function generate(message) {
       const v = v0 + size * tv;
       const direction = faceDirection(key.face, u, v);
       const baseSample = sampleBase(base, u, v);
-      const currentHeight = baseSample.height + detailHeight(direction, resolvedOctaves);
-      const parentHeight = baseSample.height + detailHeight(direction, parentOctaves);
+      const currentHeight = baseSample.height + terrainDetailHeightForLod(direction, key.lod);
+      const parentHeight = baseSample.height + terrainDetailHeightForLod(direction, Math.max(0, key.lod - 1));
       const radius = MARS_REFERENCE_RADIUS_M + currentHeight;
       for (let axis = 0; axis < 3; axis += 1) {
         positions[index * 3 + axis] = direction[axis] * radius - center[axis];
@@ -264,7 +360,7 @@ function generate(message) {
   };
 }
 
-export { generate as generateTerrainTile, TERRAIN_WORKER_REVISION };
+export { generate as generateTerrainTile, terrainDetailHeightForLod, TERRAIN_WORKER_REVISION };
 
 if (typeof self !== "undefined") self.onmessage = (event) => {
   if (event.data?.type !== "generate") return;

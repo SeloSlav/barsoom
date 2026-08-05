@@ -1,20 +1,35 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { generateTerrainTile, TERRAIN_WORKER_REVISION as WORKER_REVISION } from "../public/workers/terrain-worker.js";
+import {
+  generateTerrainTile,
+  terrainDetailHeightForLod as workerTerrainDetailHeightForLod,
+  TERRAIN_WORKER_REVISION as WORKER_REVISION,
+} from "../public/workers/terrain-worker.js";
 import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrain/TerrainWorkerPool";
 import { lodTransitionVisible, neighbourBalanceAncestors } from "../app/planet/terrain/PlanetTerrain";
 import { neighbourTile, parentTile } from "../app/planet/math";
+import { latLonElevationToCartesian } from "../app/planet/math";
+import { proceduralTerrainHeightForLod } from "../app/planet/noise";
 import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
-import { generateSurfaceScatter } from "../app/planet/render/SurfaceDetailRenderer";
+import {
+  calculateSurfaceRockPlacement,
+  generateSurfaceScatter,
+} from "../app/planet/render/SurfaceDetailRenderer";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
 describe("terrain worker geometry", () => {
-  it("ships NASA's full orbital JPEG and a surface-visible aerosol atmosphere", async () => {
-    const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global.jpg"));
-    expect(jpeg.byteLength).toBeGreaterThan(900_000);
+  it("ships an 8K USGS orbital mosaic, full PBR maps, and a surface-visible aerosol atmosphere", async () => {
+    const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global-8k.jpg"));
+    const diffuse = await readFile(path.join(process.cwd(), "public/textures/mars-rock-diffuse.jpg"));
+    const normal = await readFile(path.join(process.cwd(), "public/textures/mars-rock-normal-gl.jpg"));
+    const roughness = await readFile(path.join(process.cwd(), "public/textures/mars-rock-roughness.jpg"));
+    expect(jpeg.byteLength).toBeGreaterThan(9_000_000);
     expect([...jpeg.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    expect(diffuse.byteLength).toBeGreaterThan(750_000);
+    expect(normal.byteLength).toBeGreaterThan(1_300_000);
+    expect(roughness.byteLength).toBeGreaterThan(450_000);
     const atmosphere = createAtmosphereMaterial();
     expect(atmosphere.fragmentShader).toContain("dustySky");
     expect(atmosphere.fragmentShader).toContain("surfaceAlpha");
@@ -41,6 +56,42 @@ describe("terrain worker geometry", () => {
       expect(point.sizeM).toBeGreaterThanOrEqual(config.minimumSizeM);
       expect(point.sizeM).toBeLessThanOrEqual(config.maximumSizeM);
     }
+  });
+  it("seats surface rocks on the same LOD-specific differential surface", () => {
+    const point = {
+      direction: { x: 0.61, y: 0.22, z: -0.76 },
+      sizeM: 2.4,
+      yawRad: 0.4,
+      stretch: { x: 0.8, y: 1.15, z: 0.9 },
+      tint: 0.5,
+    };
+    const sampledLods: number[] = [];
+    const sampler = (direction: { x: number; y: number; z: number }, lod: number) => {
+      sampledLods.push(lod);
+      return direction.x * 320 + direction.z * 140;
+    };
+    const placement = calculateSurfaceRockPlacement(point, 17, sampler);
+    const directionLength = Math.hypot(point.direction.x, point.direction.y, point.direction.z);
+    const direction = {
+      x: point.direction.x / directionLength,
+      y: point.direction.y / directionLength,
+      z: point.direction.z / directionLength,
+    };
+    const height = direction.x * 320 + direction.z * 140;
+    const surface = {
+      x: direction.x * (MARS_REFERENCE_RADIUS_M + height),
+      y: direction.y * (MARS_REFERENCE_RADIUS_M + height),
+      z: direction.z * (MARS_REFERENCE_RADIUS_M + height),
+    };
+    const offset = {
+      x: placement.absolute.x - surface.x,
+      y: placement.absolute.y - surface.y,
+      z: placement.absolute.z - surface.z,
+    };
+    const normalOffset = offset.x * placement.normal.x + offset.y * placement.normal.y + offset.z * placement.normal.z;
+    expect(normalOffset).toBeCloseTo(placement.scale.y * 0.42, 6);
+    expect(Math.hypot(placement.normal.x, placement.normal.y, placement.normal.z)).toBeCloseTo(1, 10);
+    expect(sampledLods.every((lod) => lod === 17)).toBe(true);
   });
   it("uses the same cache-busting revision in the client and worker", () => {
     expect(WORKER_REVISION).toBe(CLIENT_REVISION);
@@ -89,14 +140,23 @@ describe("terrain worker geometry", () => {
     const depth = createTerrainShadowMaterial();
     expect(material.lights).toBe(true);
     expect("directionalLightShadows" in material.uniforms).toBe(true);
-    expect(material.uniforms.uOrbitalTexture.value.name).toContain("NASA JPL Viking");
+    expect(material.uniforms.uOrbitalTexture.value.name).toContain("USGS Viking MDIM 2.1");
+    expect(material.uniforms.uSurfaceDiffuse.value.name).toContain("rocks ground 02 diffuse");
+    expect(material.uniforms.uSurfaceNormal.value.name).toContain("OpenGL normal");
+    expect(material.uniforms.uSurfaceRoughness.value.name).toContain("roughness");
     expect(material.vertexShader).toContain("shadowmap_pars_vertex");
     expect(material.fragmentShader).toContain("shadowmap_pars_fragment");
     expect(material.fragmentShader).toContain("distributionGgx");
     expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
+    expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
+    expect(material.fragmentShader).toContain("sampleSurfaceNormal");
+    expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
     expect(depth.vertexShader).toContain("morphDelta");
     expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
     material.uniforms.uOrbitalTexture.value.dispose();
+    material.uniforms.uSurfaceDiffuse.value.dispose();
+    material.uniforms.uSurfaceNormal.value.dispose();
+    material.uniforms.uSurfaceRoughness.value.dispose();
     material.dispose();
     depth.dispose();
   });
@@ -176,5 +236,16 @@ describe("terrain worker geometry", () => {
     expect(Math.max(...elevations) - Math.min(...elevations)).toBeGreaterThan(1);
     expect(Buffer.from(second.positions.buffer)).toEqual(Buffer.from(first.positions.buffer));
     expect(Buffer.from(second.elevations.buffer)).toEqual(Buffer.from(first.elevations.buffer));
+  });
+
+  it("keeps main-thread sampling byte-equivalent with the worker height bands", () => {
+    for (const lod of [0, 9, 10, 13, 16, 18]) {
+      for (const [latitude, longitude] of [[0, 0], [18.38, 77.58], [-32.1, -142.7], [73, 164.5]]) {
+        const direction = latLonElevationToCartesian(latitude, longitude, 0, 1);
+        const mainHeight = proceduralTerrainHeightForLod(direction, lod);
+        const workerHeight = workerTerrainDetailHeightForLod([direction.x, direction.y, direction.z], lod);
+        expect(workerHeight).toBeCloseTo(mainHeight, 10);
+      }
+    }
   });
 });

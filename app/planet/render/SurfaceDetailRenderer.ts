@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { MARS_REFERENCE_RADIUS_M } from "../constants";
-import { clamp, normalize3 } from "../math";
+import { clamp, normalize3, surfaceNormalAndSlope } from "../math";
 import { spatialSeed } from "../noise";
 import type { Vec3 } from "../types";
 
@@ -24,6 +24,12 @@ export type SurfaceScatterPoint = {
   yawRad: number;
   stretch: Vec3;
   tint: number;
+};
+
+export type SurfaceRockPlacement = {
+  absolute: Vec3;
+  normal: Vec3;
+  scale: Vec3;
 };
 
 const BOULDER_FIELD: SurfaceScatterConfig = {
@@ -130,6 +136,46 @@ export function generateSurfaceScatter(centerInput: Vec3, config: SurfaceScatter
   return points;
 }
 
+/**
+ * Grounds a rock against the exact height band used by the visible terrain
+ * mesh and aligns its local up axis to the true differential surface normal.
+ */
+export function calculateSurfaceRockPlacement(
+  point: SurfaceScatterPoint,
+  terrainLod: number,
+  sampleHeight: (direction: Vec3, lod: number) => number,
+): SurfaceRockPlacement {
+  const direction = normalize3(point.direction);
+  const heightM = sampleHeight(direction, terrainLod);
+  const scale = {
+    x: point.sizeM * point.stretch.x,
+    y: point.sizeM * point.stretch.y,
+    z: point.sizeM * point.stretch.z,
+  };
+  const differential = surfaceNormalAndSlope(
+    direction,
+    (sampleDirection) => sampleHeight(sampleDirection, terrainLod),
+    clamp(point.sizeM * 0.7, 0.35, 5),
+  );
+  const surface = {
+    x: direction.x * (MARS_REFERENCE_RADIUS_M + heightM),
+    y: direction.y * (MARS_REFERENCE_RADIUS_M + heightM),
+    z: direction.z * (MARS_REFERENCE_RADIUS_M + heightM),
+  };
+  // Bury more than half the primitive below the differential surface. This
+  // keeps irregular low-poly rocks seated even on a steep triangle edge.
+  const exposedCenterM = scale.y * 0.42;
+  return {
+    absolute: {
+      x: surface.x + differential.normal.x * exposedCenterM,
+      y: surface.y + differential.normal.y * exposedCenterM,
+      z: surface.z + differential.normal.z * exposedCenterM,
+    },
+    normal: differential.normal,
+    scale,
+  };
+}
+
 type SurfaceField = {
   mesh: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
   config: SurfaceScatterConfig;
@@ -154,10 +200,12 @@ export class SurfaceDetailRenderer {
   private readonly direction = new THREE.Vector3();
   private readonly colour = new THREE.Color();
   private hasAnchor = false;
+  private terrainLod = -1;
 
   constructor(
     scene: THREE.Scene,
-    private readonly sampleHeight: (direction: Vec3) => number,
+    private readonly sampleHeight: (direction: Vec3, lod: number) => number,
+    private readonly renderedLodAtDirection: (direction: Vec3) => number,
   ) {
     const boulderGeometry = new THREE.DodecahedronGeometry(1, 0);
     const rockGeometry = new THREE.IcosahedronGeometry(1, 0);
@@ -207,6 +255,7 @@ export class SurfaceDetailRenderer {
     if (!visible) return;
 
     const cameraDirection = normalize3(cameraDirectionInput);
+    const terrainLod = this.renderedLodAtDirection(cameraDirection);
     const anchorDistanceM = this.hasAnchor
       ? Math.acos(clamp(
         this.anchorDirection.x * cameraDirection.x +
@@ -216,7 +265,9 @@ export class SurfaceDetailRenderer {
         1,
       )) * MARS_REFERENCE_RADIUS_M
       : Infinity;
-    if (anchorDistanceM > SURFACE_DETAIL_REBUILD_DISTANCE_M) this.rebuild(cameraDirection);
+    if (anchorDistanceM > SURFACE_DETAIL_REBUILD_DISTANCE_M || terrainLod !== this.terrainLod) {
+      this.rebuild(cameraDirection, terrainLod);
+    }
 
     this.cameraAbsolute.set(cameraAbsoluteInput.x, cameraAbsoluteInput.y, cameraAbsoluteInput.z);
     for (const field of this.fields) {
@@ -231,27 +282,23 @@ export class SurfaceDetailRenderer {
     }
   }
 
-  private rebuild(centerDirection: Vec3) {
+  private rebuild(centerDirection: Vec3, terrainLod: number) {
     this.anchorDirection.set(centerDirection.x, centerDirection.y, centerDirection.z).normalize();
     this.hasAnchor = true;
+    this.terrainLod = terrainLod;
     const modelUp = new THREE.Vector3(0, 1, 0);
 
     for (const field of this.fields) {
       const points = generateSurfaceScatter(centerDirection, field.config);
       field.instances = points.map((point, index) => {
-        this.direction.set(point.direction.x, point.direction.y, point.direction.z).normalize();
-        const heightM = this.sampleHeight(point.direction);
-        const absolute = this.direction.clone().multiplyScalar(
-          MARS_REFERENCE_RADIUS_M + heightM - point.sizeM * 0.12,
-        );
+        const renderedLod = this.renderedLodAtDirection(point.direction);
+        const placement = calculateSurfaceRockPlacement(point, renderedLod, this.sampleHeight);
+        const absolute = new THREE.Vector3(placement.absolute.x, placement.absolute.y, placement.absolute.z);
+        this.direction.set(placement.normal.x, placement.normal.y, placement.normal.z).normalize();
         this.align.setFromUnitVectors(modelUp, this.direction);
         this.twist.setFromAxisAngle(this.direction, point.yawRad);
         const rotation = this.twist.clone().multiply(this.align);
-        const scale = new THREE.Vector3(
-          point.sizeM * point.stretch.x,
-          point.sizeM * point.stretch.y,
-          point.sizeM * point.stretch.z,
-        );
+        const scale = new THREE.Vector3(placement.scale.x, placement.scale.y, placement.scale.z);
         this.colour.copy(field.dark).lerp(field.light, 0.18 + point.tint * 0.72);
         field.mesh.setColorAt(index, this.colour);
         return { absolute, rotation, scale };

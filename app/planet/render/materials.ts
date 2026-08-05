@@ -6,6 +6,9 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uSunDirection: { value: THREE.Vector3 };
     uCameraAltitude: { value: number };
     uOrbitalTexture: { value: THREE.Texture };
+    uSurfaceDiffuse: { value: THREE.Texture };
+    uSurfaceNormal: { value: THREE.Texture };
+    uSurfaceRoughness: { value: THREE.Texture };
     uTime: { value: number };
     uFade: { value: number };
     uFadeIn: { value: number };
@@ -29,13 +32,36 @@ function createMarsOrbitalTexture() {
     texture.needsUpdate = true;
   } else {
     texture = new THREE.TextureLoader().load(
-      "/textures/mars-viking-global.jpg?revision=nasa-viking-jpl-2025",
+      "/textures/mars-viking-global-8k.jpg?revision=usgs-mdim21-8k-2026",
     );
   }
-  texture.name = "NASA JPL Viking Mars global albedo";
+  texture.name = "NASA USGS Viking MDIM 2.1 Mars global albedo 8K";
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = 8;
+  return texture;
+}
+
+function createMarsSurfaceTexture(
+  path: string,
+  name: string,
+  fallback: [number, number, number, number],
+  colour = false,
+) {
+  let texture: THREE.Texture;
+  if (typeof document === "undefined") {
+    texture = new THREE.DataTexture(new Uint8Array(fallback), 1, 1, THREE.RGBAFormat);
+    texture.needsUpdate = true;
+  } else {
+    texture = new THREE.TextureLoader().load(path);
+  }
+  texture.name = name;
+  texture.colorSpace = colour ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.anisotropy = 8;
@@ -99,6 +125,9 @@ const terrainFragment = /* glsl */ `
   uniform vec3 uSunDirection;
   uniform float uCameraAltitude;
   uniform sampler2D uOrbitalTexture;
+  uniform sampler2D uSurfaceDiffuse;
+  uniform sampler2D uSurfaceNormal;
+  uniform sampler2D uSurfaceRoughness;
   uniform float uTime;
   uniform float uFade;
   uniform float uFadeIn;
@@ -189,6 +218,36 @@ const terrainFragment = /* glsl */ `
     return f0 + (vec3(1.0) - f0) * pow(clamp(1.0 - cosineTheta, 0.0, 1.0), 5.0);
   }
 
+  vec3 triplanarWeights(vec3 normal) {
+    vec3 weights = pow(abs(normal), vec3(5.0));
+    return weights / max(weights.x + weights.y + weights.z, 0.0001);
+  }
+
+  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights) {
+    vec3 x = texture2D(uSurfaceDiffuse, metres.yz / 2.4).rgb;
+    vec3 y = texture2D(uSurfaceDiffuse, metres.xz / 2.4).rgb;
+    vec3 z = texture2D(uSurfaceDiffuse, metres.xy / 2.4).rgb;
+    return x * weights.x + y * weights.y + z * weights.z;
+  }
+
+  float sampleSurfaceRoughness(vec3 metres, vec3 weights) {
+    float x = texture2D(uSurfaceRoughness, metres.yz / 2.4).r;
+    float y = texture2D(uSurfaceRoughness, metres.xz / 2.4).r;
+    float z = texture2D(uSurfaceRoughness, metres.xy / 2.4).r;
+    return x * weights.x + y * weights.y + z * weights.z;
+  }
+
+  vec3 sampleSurfaceNormal(vec3 metres, vec3 baseNormal, vec3 weights) {
+    vec3 mapX = texture2D(uSurfaceNormal, metres.yz / 2.4).xyz * 2.0 - 1.0;
+    vec3 mapY = texture2D(uSurfaceNormal, metres.xz / 2.4).xyz * 2.0 - 1.0;
+    vec3 mapZ = texture2D(uSurfaceNormal, metres.xy / 2.4).xyz * 2.0 - 1.0;
+    vec3 signs = mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), baseNormal));
+    vec3 worldX = normalize(vec3(mapX.z * signs.x, mapX.x, mapX.y));
+    vec3 worldY = normalize(vec3(mapY.x, mapY.z * signs.y, mapY.y));
+    vec3 worldZ = normalize(vec3(mapZ.x, mapZ.y, mapZ.z * signs.z));
+    return normalize(worldX * weights.x + worldY * weights.y + worldZ * weights.z);
+  }
+
   void main() {
     float dither = hash31(vec3(gl_FragCoord.xy, 0.0));
     if (uFade < 0.999) {
@@ -245,16 +304,34 @@ const terrainFragment = /* glsl */ `
     albedo += vec3((fineGrain - 0.5) * 0.035 * grainVisibility);
     albedo *= mix(0.63, 1.0, vSurfaceMask);
 
+    float surfacePbrBlend = 0.0;
+    float mappedRoughness = 0.94;
+    vec3 mappedNormal = normal;
+    if (uTileLod > 12.0 && uCameraAltitude < 9000.0) {
+      float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
+      surfacePbrBlend = smoothstep(13.5, 16.5, uTileLod) *
+        (1.0 - smoothstep(350.0, 7000.0, uCameraAltitude)) *
+        (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
+      vec3 textureWeights = triplanarWeights(normal);
+      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights);
+      vec3 martianRock = photographedRock * vec3(0.96, 0.48, 0.30);
+      martianRock *= 0.82 + macro * 0.24;
+      albedo = mix(albedo, martianRock, surfacePbrBlend * (1.0 - frostWeight));
+      mappedRoughness = sampleSurfaceRoughness(vStableMetres, textureWeights);
+      mappedNormal = sampleSurfaceNormal(vStableMetres, normal, textureWeights);
+    }
+
     float longitude = atan(radial.z, radial.x);
     float latitudeRadians = asin(clamp(radial.y, -1.0, 1.0));
     vec2 orbitalUv = vec2(fract(longitude / 6.28318530718 + 0.5), latitudeRadians / 3.14159265359 + 0.5);
     vec3 orbitalAlbedo = texture2D(uOrbitalTexture, orbitalUv).rgb;
-    float orbitalBlend = smoothstep(120000.0, 1200000.0, uCameraAltitude);
-    albedo = mix(albedo, orbitalAlbedo * 0.88, orbitalBlend);
+    float orbitalBlend = smoothstep(45000.0, 550000.0, uCameraAltitude);
+    albedo = mix(albedo, orbitalAlbedo * 0.91, orbitalBlend);
 
     float roughness = mix(${MATERIAL_CONFIG.regolith.roughness.toFixed(3)}, ${MATERIAL_CONFIG.basalt.roughness.toFixed(3)}, basaltWeight);
     roughness = mix(roughness, ${MATERIAL_CONFIG.frost.roughness.toFixed(3)}, frostWeight);
     roughness = clamp(roughness + (fineGrain - 0.5) * 0.12 * grainVisibility - pebbles * 0.08, 0.48, 0.99);
+    roughness = mix(roughness, clamp(mappedRoughness, 0.58, 0.99), surfacePbrBlend * (1.0 - frostWeight));
     vec3 orbitalMicro = vec3(
       valueNoise(radial * 6200.0 + vec3(0.13,0,0)),
       valueNoise(radial * 6200.0 + vec3(0,0.19,0)),
@@ -270,6 +347,7 @@ const terrainFragment = /* glsl */ `
     }
     metreMicro -= radial * dot(metreMicro, radial);
     normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
+    normal = normalize(mix(normal, mappedNormal, surfacePbrBlend * 0.72 * (1.0 - frostWeight)));
 
     vec3 sun = normalize(uSunDirection);
     float ndl = max(dot(normal, sun), 0.0);
@@ -330,6 +408,22 @@ const terrainFragment = /* glsl */ `
 
 export function createTerrainMaterial(): TerrainMaterial {
   const orbitalTexture = createMarsOrbitalTexture();
+  const surfaceDiffuse = createMarsSurfaceTexture(
+    "/textures/mars-rock-diffuse.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Poly Haven rocks ground 02 diffuse, Mars colour grade",
+    [128, 78, 48, 255],
+    true,
+  );
+  const surfaceNormal = createMarsSurfaceTexture(
+    "/textures/mars-rock-normal-gl.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Poly Haven rocks ground 02 OpenGL normal",
+    [128, 128, 255, 255],
+  );
+  const surfaceRoughness = createMarsSurfaceTexture(
+    "/textures/mars-rock-roughness.jpg?revision=polyhaven-rocks-ground-02-1k",
+    "Poly Haven rocks ground 02 roughness",
+    [235, 235, 235, 255],
+  );
   return new THREE.ShaderMaterial({
     name: "Mars procedural PBR terrain",
     vertexShader: terrainVertex,
@@ -338,6 +432,9 @@ export function createTerrainMaterial(): TerrainMaterial {
       uSunDirection: { value: new THREE.Vector3(1, 0.25, 0.2).normalize() },
       uCameraAltitude: { value: 10_000_000 },
       uOrbitalTexture: { value: orbitalTexture },
+      uSurfaceDiffuse: { value: surfaceDiffuse },
+      uSurfaceNormal: { value: surfaceNormal },
+      uSurfaceRoughness: { value: surfaceRoughness },
       uTime: { value: 0 },
       uFade: { value: 1 },
       uFadeIn: { value: 1 },

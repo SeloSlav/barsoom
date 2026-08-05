@@ -22,7 +22,12 @@ import {
   tileKeyToString,
   toCameraRelative,
 } from "../app/planet/math";
-import { proceduralDetailHeight, spatialSeed } from "../app/planet/noise";
+import {
+  proceduralCraterHeight,
+  proceduralDetailHeight,
+  proceduralTerrainHeightForLod,
+  spatialSeed,
+} from "../app/planet/noise";
 import type { CubeFace } from "../app/planet/types";
 
 describe("planetary coordinate maths", () => {
@@ -154,6 +159,19 @@ describe("continuous detail, zoom, and floating origin", () => {
     expect(spatialSeed(1, 2, 3, 4)).toBe(spatialSeed(1, 2, 3, 4));
     expect(proceduralDetailHeight(direction)).toBe(proceduralDetailHeight(direction));
     expect(proceduralDetailHeight(direction)).not.toBe(proceduralDetailHeight(faceUvToDirection("py", 0.126, -0.75)));
+    expect(proceduralTerrainHeightForLod(direction, 18)).toBe(proceduralTerrainHeightForLod(direction, 18));
+  });
+
+  it("adds sparse crater bowls and raised rims below the MOLA resolution", () => {
+    const heights: number[] = [];
+    for (let latitude = -60; latitude <= 60; latitude += 6) {
+      for (let longitude = -180; longitude < 180; longitude += 8) {
+        const direction = latLonElevationToCartesian(latitude, longitude, 0, 1);
+        heights.push(proceduralCraterHeight(direction));
+      }
+    }
+    expect(Math.min(...heights)).toBeLessThan(-50);
+    expect(Math.max(...heights)).toBeGreaterThan(5);
   });
 
   it("agrees exactly for a shared cube edge direction", () => {
