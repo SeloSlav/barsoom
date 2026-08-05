@@ -16,6 +16,7 @@ const RUN_SPEED_M_S = 7.2;
 const PLAYER_HEIGHT_M = 1.82;
 const CAMERA_DEFAULT_DISTANCE_M = 7;
 const CAMERA_FIRST_PERSON_DISTANCE_M = 0;
+const CAMERA_FIRST_PERSON_ENTER_DISTANCE_M = 0.85;
 const CAMERA_FIRST_PERSON_EXIT_DISTANCE_M = 2.2;
 const CAMERA_MAX_DISTANCE_M = 39;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
@@ -26,6 +27,8 @@ const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-85);
 const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(85);
 const CAMERA_HEIGHT_SMOOTH_TIME_S = 0.34;
 const CAMERA_MAX_HEIGHT_SPEED_M_S = 8;
+const CAMERA_TERRAIN_REBASE_THRESHOLD_M = 12;
+const CAMERA_ENTRY_WHEEL_LOCK_S = 0.45;
 const SURFACE_NORMAL_FOLLOW_RATE = 8;
 const BOOT_SOLE_CLEARANCE_M = 0.025;
 export const MARS_JUMP_ANTICIPATION_DURATION_S = 0.22;
@@ -144,10 +147,25 @@ export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: nu
     CAMERA_FIRST_PERSON_DISTANCE_M,
     CAMERA_MAX_DISTANCE_M,
   );
-  if (wheelDeltaPixels < 0 && nextDistanceM < CAMERA_FIRST_PERSON_EXIT_DISTANCE_M) {
+  if (wheelDeltaPixels < 0 && nextDistanceM <= CAMERA_FIRST_PERSON_ENTER_DISTANCE_M) {
     return CAMERA_FIRST_PERSON_DISTANCE_M;
   }
   return nextDistanceM;
+}
+
+export function rebaseCameraAnchorForTerrainChange(
+  cameraAnchorHeightM: number,
+  previousGroundHeightM: number,
+  nextGroundHeightM: number,
+  thresholdM = CAMERA_TERRAIN_REBASE_THRESHOLD_M,
+) {
+  const terrainDeltaM = nextGroundHeightM - previousGroundHeightM;
+  if (
+    !Number.isFinite(cameraAnchorHeightM) ||
+    !Number.isFinite(terrainDeltaM) ||
+    Math.abs(terrainDeltaM) < Math.max(0, thresholdM)
+  ) return cameraAnchorHeightM;
+  return cameraAnchorHeightM + terrainDeltaM;
 }
 
 export function wowCameraOrbitDistances(cameraPitchRad: number, cameraDistanceM: number) {
@@ -255,6 +273,7 @@ export class SurfaceTraverseController {
   private groundHeightM = 0;
   private surveyFovDegrees: number;
   private autoRun = false;
+  private entryWheelLockSeconds = 0;
   private disposed = false;
   active = false;
 
@@ -348,6 +367,7 @@ export class SurfaceTraverseController {
     this.keys.clear();
     this.mouseButtons.clear();
     this.autoRun = false;
+    this.entryWheelLockSeconds = CAMERA_ENTRY_WHEEL_LOCK_S;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -563,6 +583,7 @@ export class SurfaceTraverseController {
 
   update(deltaSeconds: number): PlanetControlState {
     const delta = clamp(deltaSeconds, 0, 0.05);
+    this.entryWheelLockSeconds = Math.max(0, this.entryWheelLockSeconds - delta);
     this.setLocalBasis();
     const speedMps = this.jumpAnticipationSeconds > 0 ? 0 : this.updateMovement(delta);
     this.setLocalBasis();
@@ -570,8 +591,20 @@ export class SurfaceTraverseController {
     this.updateAnimation(speedMps, airborne, delta);
     this.updateFootsteps(speedMps, airborne || this.jumpAnticipationSeconds > 0, delta);
 
+    const previousGroundHeightM = this.groundHeightM;
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
+    if (this.cameraAnchorInitialized) {
+      const rebasedCameraAnchorHeightM = rebaseCameraAnchorForTerrainChange(
+        this.cameraAnchorHeightM,
+        previousGroundHeightM,
+        this.groundHeightM,
+      );
+      if (rebasedCameraAnchorHeightM !== this.cameraAnchorHeightM) {
+        this.cameraAnchorHeightM = rebasedCameraAnchorHeightM;
+        this.cameraAnchorVelocityMps = 0;
+      }
+    }
     this.sampledSurfaceNormal.set(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
     if (this.sampledSurfaceNormal.dot(this.direction) < 0) this.sampledSurfaceNormal.negate();
     if (!this.surfaceNormalInitialized) {
@@ -783,6 +816,7 @@ export class SurfaceTraverseController {
   private onWheel = (event: WheelEvent) => {
     if (!this.active) return;
     event.preventDefault();
+    if (this.entryWheelLockSeconds > 0) return;
     const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
     this.cameraDistanceM = applyWowCameraZoom(this.cameraDistanceM, event.deltaY * modeScale);
   };

@@ -12,6 +12,7 @@ import {
   marsJumpPoseWeights,
   normalizeMarsSurfaceDirection,
   randomMarsSurfaceDirection,
+  rebaseCameraAnchorForTerrainChange,
   smoothCameraHeight,
   wowCameraOrbitDistances,
   wowMouseAutoRun,
@@ -112,9 +113,16 @@ describe("surface traverse physics", () => {
   });
 
   it("zooms through first person and back to a close third-person view", () => {
-    expect(applyWowCameraZoom(2.3, -120)).toBe(0);
+    expect(applyWowCameraZoom(2.3, -120)).toBeGreaterThan(0.85);
+    expect(applyWowCameraZoom(0.9, -120)).toBe(0);
     expect(applyWowCameraZoom(0, 120)).toBe(2.2);
     expect(applyWowCameraZoom(39, 120)).toBe(39);
+  });
+
+  it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 5_100)).toBe(5_101.4);
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 108)).toBe(101.4);
+    expect(rebaseCameraAnchorForTerrainChange(101.4, 100, 112)).toBe(113.4);
   });
 
   it("follows terrain elevation with continuous, speed-bounded camera motion", () => {
