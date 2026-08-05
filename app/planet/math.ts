@@ -324,6 +324,17 @@ export type DirectionalShadowSnap = {
   texelWorldM: number;
 };
 
+/**
+ * Keeps the local-proxy shadow projection rigid while the astronaut moves.
+ * A terrain-relative follow-camera altitude changes on every slope; feeding
+ * that value into the orthographic extent continuously changes its texel size
+ * and defeats light-plane snapping. Survey mode still expands with altitude.
+ */
+export function directionalShadowExtentM(altitudeM: number, localProxyCoherent: boolean) {
+  if (localProxyCoherent) return 800;
+  return clamp(800 + Math.max(0, altitudeM) * 2.2, 800, 120_000);
+}
+
 export function snappedDirectionalShadowCenter(
   cameraAbsolute: Vec3,
   sunDirectionInput: Vec3,

@@ -6,6 +6,7 @@ import {
   childTiles,
   directionToFaceUv,
   directionToTile,
+  directionalShadowExtentM,
   dot3,
   faceUvToDirection,
   latLonElevationToCartesian,
@@ -229,5 +230,13 @@ describe("continuous detail, zoom, and floating origin", () => {
     expect(Math.abs(rightStep)).toBeLessThan(1.000001);
     expect(Math.abs(upStep)).toBeLessThan(1.000001);
     expect(length3(moved.centerRelative)).toBeLessThan(first.texelWorldM);
+  });
+
+  it("keeps the coherent spaceman shadow projection rigid while terrain height changes", () => {
+    expect(directionalShadowExtentM(0.35, true)).toBe(800);
+    expect(directionalShadowExtentM(8, true)).toBe(800);
+    expect(directionalShadowExtentM(38, true)).toBe(800);
+    expect(directionalShadowExtentM(1_000, false)).toBe(3_000);
+    expect(directionalShadowExtentM(100_000, false)).toBe(120_000);
   });
 });

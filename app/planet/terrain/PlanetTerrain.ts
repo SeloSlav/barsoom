@@ -131,6 +131,18 @@ export function lodTransitionVisible(dither: number, fade: number, fadeIn: boole
   return fadeIn ? dither <= fade : dither > 1 - fade;
 }
 
+const TERRAIN_LOD_MERGE_ERROR_RATIO = 0.75;
+
+/**
+ * Uses separate split and merge thresholds so small camera movements cannot
+ * alternate a ready parent and its children on consecutive frames.
+ */
+export function terrainNodeNeedsRefinement(screenError: number, wasRefined: boolean) {
+  const threshold = TERRAIN_CONFIG.screenSpaceErrorPx *
+    (wasRefined ? TERRAIN_LOD_MERGE_ERROR_RATIO : 1);
+  return screenError > threshold;
+}
+
 export function neighbourBalanceAncestors(tile: TileKey, edge: TileEdge) {
   const neighbour = neighbourTile(tile, edge);
   const ancestors: TileKey[] = [];
@@ -177,6 +189,7 @@ class PlanetTileNode {
   triangleCount = 0;
   geometryBytes = 0;
   failureCount = 0;
+  refined = false;
 
   constructor(readonly key: TileKey, parent: PlanetTileNode | null) {
     this.id = tileKeyToString(key);
@@ -328,15 +341,19 @@ export class PlanetTerrain {
     const focusTile = directionToTile(this.focusDirection, node.key.lod);
     const isFocusBranch = tileKeyToString(focusTile) === node.id;
     const isClipmapRing = visibility.focusProximity <= 2.25;
+    const needsRefinement = terrainNodeNeedsRefinement(visibility.screenError, node.refined);
     const canSplit =
-      visibility.screenError > TERRAIN_CONFIG.screenSpaceErrorPx &&
+      needsRefinement &&
       node.key.lod < TERRAIN_CONFIG.maxRenderLod &&
       (isFocusBranch || isClipmapRing ||
         this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles);
     if (!canSplit) {
+      node.refined = false;
+      node.childrenReadyAt = -1;
       this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
+    node.refined = true;
 
     // Refine the visible branch first. `isClipmapRing` guarantees concentric
     // detail rings around the viewed point; it is independent of traversal

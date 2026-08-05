@@ -3,7 +3,7 @@ import { BarsoomAudio } from "../audio/BarsoomAudio";
 import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
-import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
+import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
@@ -461,7 +461,10 @@ export class PlanetEngine {
       return;
     }
 
-    const extentM = clamp(800 + altitudeM * 2.2, 800, 120_000);
+    const extentM = directionalShadowExtentM(
+      altitudeM,
+      this.surfaceTraverse.active && this.surfaceTraverse.localProxyCoherent,
+    );
     this.surfaceShadowExtentM = extentM;
     const snap = snappedDirectionalShadowCenter(
       this.controlState.cameraAbsolute,

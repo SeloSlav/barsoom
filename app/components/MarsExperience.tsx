@@ -162,7 +162,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               aria-label={audioMuted ? "Enable Barsoom audio" : "Mute Barsoom audio"}
               aria-pressed={!audioMuted}
             ><i aria-hidden="true" /> AUDIO {audioMuted ? "OFF" : "ON"}</button>
-            <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>INSTRUMENT <kbd>H</kbd></button>
+            <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>CONTROLS <kbd>H</kbd></button>
           </div>
         </div>
       </header>

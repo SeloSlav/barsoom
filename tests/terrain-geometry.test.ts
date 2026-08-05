@@ -12,6 +12,7 @@ import {
   lodTransitionVisible,
   neighbourBalanceAncestors,
   sampleMorphedTerrainGrid,
+  terrainNodeNeedsRefinement,
 } from "../app/planet/terrain/PlanetTerrain";
 import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
@@ -199,6 +200,14 @@ describe("terrain worker geometry", () => {
         expect(Number(parent) + Number(child)).toBe(1);
       }
     }
+  });
+
+  it("keeps a refined terrain node stable through small camera-motion error changes", () => {
+    expect(terrainNodeNeedsRefinement(3.3, false)).toBe(false);
+    expect(terrainNodeNeedsRefinement(3.3, true)).toBe(true);
+    expect(terrainNodeNeedsRefinement(2.6, true)).toBe(true);
+    expect(terrainNodeNeedsRefinement(2.5, true)).toBe(false);
+    expect(terrainNodeNeedsRefinement(3.5, false)).toBe(true);
   });
 
   it("forces every neighbour ancestor needed for a global 2:1 LOD balance", () => {
