@@ -66,7 +66,6 @@ export class PlanetEngine {
   private simulationStartPerformance: number;
   private simulationRate: number;
   private lastFrameTime = performance.now();
-  private lastSkyUpdate = -Infinity;
   private lastTelemetryTime = -Infinity;
   private smoothedFrameMs = 16.67;
   private framesSinceQualityChange = 0;
@@ -268,7 +267,6 @@ export class PlanetEngine {
         this.simulationStartPerformance = performance.now();
         this.simulationRate = rate;
         this.skyState = calculateMarsSky(epoch);
-        this.lastSkyUpdate = -Infinity;
       },
       instantiateObserver: () => {
         if (!this.surfaceTraverse.active && this.selectionDirection) this.enterSurfaceTraverse(this.selectionDirection);
@@ -315,10 +313,12 @@ export class PlanetEngine {
     const simulationUtc = new Date(
       this.simulationStartUtc.getTime() + (time - this.simulationStartPerformance) * this.simulationRate,
     );
-    if (time - this.lastSkyUpdate > 250) {
-      this.skyState = calculateMarsSky(simulationUtc);
-      this.lastSkyUpdate = time;
-    }
+    // The model normally advances at 60x real time. Quantizing the Sun to the
+    // former 250 ms sky cadence made its direction (and the whole local shadow
+    // projection) jump by a visible amount four times per second. The
+    // ephemeris calculation is inexpensive, so keep lighting on the render
+    // cadence and let accelerated celestial motion remain continuous.
+    this.skyState = calculateMarsSky(simulationUtc);
     const cameraDirection = this.controlState.cameraDirection;
     const daylight = clamp(
       cameraDirection.x * this.skyState.sunDirection.x +
