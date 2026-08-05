@@ -38,12 +38,20 @@ function formatCoordinate(value: number, positive: string, negative: string) {
   return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? positive : negative}`;
 }
 
-const VISTA_TARGETS = [
-  { label: "Olympus Mons", lat: 18.65, lon: -133.8 },
+const VISTA_TARGETS: ReadonlyArray<{
+  label: string;
+  lat: number;
+  lon: number;
+  headingRad?: number;
+}> = [
+  // The summit is hundreds of kilometres wide and reads as a plain at human
+  // scale. Spawn below the steep northern basal scarp and face the volcano so
+  // its roughly eight-kilometre relief forms the horizon instead.
+  { label: "Olympus Mons scarp", lat: 23.35, lon: -135.95, headingRad: Math.PI },
   { label: "Ius Chasma", lat: -7.29, lon: -84.39 },
   { label: "Noctis Labyrinthus", lat: -6.36, lon: -101.19 },
   { label: "Korolev ice crater", lat: 72.77, lon: 164.58 },
-] as const;
+];
 
 type ObserverActionPosition = { x: number; y: number };
 
@@ -195,7 +203,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <div>{VISTA_TARGETS.map((target) => <button
             key={target.label}
             type="button"
-            onClick={() => window.__BARSOOM__?.instantiateObserverAt(target.lat, target.lon)}
+            onClick={() => window.__BARSOOM__?.instantiateObserverAt(target.lat, target.lon, target.headingRad)}
           >{target.label}</button>)}</div>
         </div>
       </aside>}

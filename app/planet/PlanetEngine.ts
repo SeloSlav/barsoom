@@ -25,7 +25,7 @@ export type PlanetEngineApi = {
   setTerminator: (altitudeM?: number) => void;
   setSimulationUtc: (utcIso: string, rate?: number) => void;
   instantiateObserver: () => void;
-  instantiateObserverAt: (latitudeDeg: number, longitudeDeg: number) => void;
+  instantiateObserverAt: (latitudeDeg: number, longitudeDeg: number, headingRad?: number) => void;
   teleportRandomSurface: () => void;
   exitSurfaceTraverse: () => void;
   getAudioMuted: () => boolean;
@@ -289,10 +289,10 @@ export class PlanetEngine {
       instantiateObserver: () => {
         if (!this.surfaceTraverse.active && this.selectionDirection) void this.enterSurfaceTraverse(this.selectionDirection);
       },
-      instantiateObserverAt: (latitudeDeg, longitudeDeg) => {
+      instantiateObserverAt: (latitudeDeg, longitudeDeg, headingRad) => {
         if (this.surfaceTraverse.active) return;
         const target = latLonElevationToCartesian(latitudeDeg, longitudeDeg, 0, 1);
-        void this.enterSurfaceTraverse(new THREE.Vector3(target.x, target.y, target.z));
+        void this.enterSurfaceTraverse(new THREE.Vector3(target.x, target.y, target.z), headingRad);
       },
       teleportRandomSurface: () => { void this.enterSurfaceTraverse(null); },
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
@@ -576,7 +576,10 @@ export class PlanetEngine {
     }
   };
 
-  private async enterSurfaceTraverse(targetDirection: THREE.Vector3 | null = this.selectionDirection) {
+  private async enterSurfaceTraverse(
+    targetDirection: THREE.Vector3 | null = this.selectionDirection,
+    headingRad?: number,
+  ) {
     const destination = targetDirection?.clone() ?? new THREE.Vector3().copy(
       randomMarsDaylightDirection(this.skyState.sunDirection),
     );
@@ -585,7 +588,7 @@ export class PlanetEngine {
     this.clearSelection();
     await this.terrain.prefetch(destination);
     if (this.disposed || entryRevision !== this.surfaceEntryRevision) return;
-    this.surfaceTraverse.teleportTo(destination);
+    this.surfaceTraverse.teleportTo(destination, headingRad);
     // A retargeted local field receives a fresh, internally coherent lighting
     // solution on its next frame, then remains stable at the new coordinate.
     this.localLightingPhaseLock.reset();
