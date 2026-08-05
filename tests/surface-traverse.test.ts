@@ -13,6 +13,7 @@ import {
   isWowAutoRunKey,
   marsJumpApexHeight,
   marsJumpPoseWeights,
+  nextWowAutoMoveMode,
   normalizeMarsSurfaceDirection,
   randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
@@ -113,6 +114,16 @@ describe("surface traverse physics", () => {
     expect(isWowAutoRunKey("NumLock")).toBe(true);
     expect(isWowAutoRunKey("KeyR")).toBe(true);
     expect(isWowAutoRunKey("KeyW")).toBe(false);
+  });
+
+  it("cycles R through auto-walk, auto-run, and stopped", () => {
+    const walking = nextWowAutoMoveMode("off");
+    const running = nextWowAutoMoveMode(walking);
+    const stopped = nextWowAutoMoveMode(running);
+
+    expect(walking).toBe("walk");
+    expect(running).toBe("run");
+    expect(stopped).toBe("off");
   });
 
   it("orbits the physical camera vertically around the character", () => {

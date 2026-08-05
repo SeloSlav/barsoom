@@ -7,6 +7,7 @@ import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerra
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
+import { MarsFinishingPass } from "./render/MarsFinishingPass";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
@@ -39,6 +40,9 @@ declare global {
 
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
+  private readonly hdrOutputSupported: boolean;
+  private readonly finishingPass: MarsFinishingPass | null;
+  private readonly finishingHost: HTMLElement | null;
   private readonly depthStrategy: "reversed" | "logarithmic";
   private readonly scene = new THREE.Scene();
   private readonly sunShadowLight = new THREE.DirectionalLight(0xffffff, 1);
@@ -73,6 +77,8 @@ export class PlanetEngine {
   private smoothedFrameMs = 16.67;
   private framesSinceQualityChange = 0;
   private qualityScale = 1;
+  private sharpenEnabled = false;
+  private framesSinceSharpenChange = 0;
   private surfaceShadowsEnabled = false;
   private surfaceShadowExtentM = 0;
   private paused = false;
@@ -112,6 +118,7 @@ export class PlanetEngine {
     });
     if (!context) throw new Error("Barsoom requires a WebGL 2 capable browser and GPU.");
     const reversedDepthSupported = context.getExtension("EXT_clip_control") !== null;
+    this.hdrOutputSupported = context.getExtension("EXT_color_buffer_float") !== null;
     this.depthStrategy = reversedDepthSupported ? "reversed" : "logarithmic";
     this.renderer = new THREE.WebGLRenderer({
       canvas,
@@ -121,12 +128,13 @@ export class PlanetEngine {
       depth: true,
       stencil: false,
       powerPreference: "high-performance",
+      outputBufferType: this.hdrOutputSupported ? THREE.HalfFloatType : THREE.UnsignedByteType,
       reversedDepthBuffer: reversedDepthSupported,
       logarithmicDepthBuffer: !reversedDepthSupported,
     });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.14;
+    this.renderer.toneMapping = THREE.AgXToneMapping;
+    this.renderer.toneMappingExposure = 1.22;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.debug.checkShaderErrors = true;
@@ -141,6 +149,10 @@ export class PlanetEngine {
     };
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
+    this.finishingPass = this.hdrOutputSupported ? new MarsFinishingPass() : null;
+    if (this.finishingPass) this.renderer.setEffects([this.finishingPass]);
+    this.finishingHost = canvas.parentElement;
+    this.finishingHost?.classList.toggle("webgl-hdr-finish", this.finishingPass !== null);
     this.scene.background = null;
     this.audio = new BarsoomAudio();
 
@@ -184,6 +196,10 @@ export class PlanetEngine {
     this.controls.setLocation(initialPoint.latitudeDeg, initialPoint.longitudeDeg, 10_000_000);
     this.atmosphere = new AtmosphereRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
+    // Three's HDR output stage begins before Scene.onBeforeRender. Rendering
+    // the sky from this callback therefore keeps both cameras in one linear
+    // half-float target and pays the MSAA resolve, grade and tone-map only once.
+    this.scene.onBeforeRender = this.renderCelestialLayer;
 
     this.selection = new THREE.Group();
     const selectionGuideMaterial = new THREE.MeshBasicMaterial({
@@ -369,15 +385,19 @@ export class PlanetEngine {
     );
 
     this.renderer.info.reset();
-    this.renderer.clear(true, true, true);
-    this.renderer.render(this.celestial.scene, this.skyCamera);
-    this.renderer.clearDepth();
     this.renderer.render(this.scene, this.camera);
     if (time - this.lastTelemetryTime > 100) {
       this.emitTelemetry(simulationUtc, terrainStats);
       this.lastTelemetryTime = time;
     }
     this.adjustQuality();
+    this.adjustFinishingQuality();
+  };
+
+  private renderCelestialLayer = (renderer: THREE.WebGLRenderer) => {
+    renderer.clear(true, true, true);
+    renderer.render(this.celestial.scene, this.skyCamera);
+    renderer.clearDepth();
   };
 
   private emitTelemetry(simulationUtc: Date, terrainStats: TerrainFrameStats) {
@@ -467,8 +487,31 @@ export class PlanetEngine {
     if (next !== this.qualityScale) {
       this.qualityScale = next;
       this.framesSinceQualityChange = 0;
+      this.setSharpenEnabled(false);
       this.resize();
     }
+  }
+
+  private adjustFinishingQuality() {
+    if (!this.finishingPass) return;
+    this.framesSinceSharpenChange += 1;
+    if (this.framesSinceSharpenChange < 120) return;
+
+    // The four-tap sharpen is an opportunistic refinement. It switches on
+    // only with ample native-resolution headroom and switches off well before
+    // adaptive resolution would need to react, with hysteresis to avoid churn.
+    if (this.sharpenEnabled) {
+      if (this.smoothedFrameMs > 14.2 || this.qualityScale < 0.99) this.setSharpenEnabled(false);
+    } else if (this.smoothedFrameMs < 12.5 && this.qualityScale >= 0.99) {
+      this.setSharpenEnabled(true);
+    }
+  }
+
+  private setSharpenEnabled(enabled: boolean) {
+    if (!this.finishingPass || enabled === this.sharpenEnabled) return;
+    this.sharpenEnabled = enabled;
+    this.framesSinceSharpenChange = 0;
+    this.finishingPass.setSharpenStrength(enabled ? 0.11 : 0);
   }
 
   private onSelectionPointerDown = (event: PointerEvent) => {
@@ -601,6 +644,7 @@ export class PlanetEngine {
     this.terrain.dispose();
     this.atmosphere.dispose();
     this.celestial.dispose();
+    this.scene.onBeforeRender = () => {};
     this.audio.dispose();
     this.selection.removeFromParent();
     const selectionMaterials = new Set<THREE.Material>();
@@ -614,6 +658,11 @@ export class PlanetEngine {
     this.sunShadowLight.removeFromParent();
     this.sunShadowTarget.removeFromParent();
     this.sunShadowLight.shadow.dispose();
+    if (this.finishingPass) {
+      this.renderer.setEffects(null);
+      this.finishingPass.dispose();
+    }
+    this.finishingHost?.classList.remove("webgl-hdr-finish");
     this.renderer.dispose();
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
     this.canvas.removeEventListener("pointerup", this.onSelectionPointerUp);

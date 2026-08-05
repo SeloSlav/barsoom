@@ -23,7 +23,8 @@
 | Steer character and camera | Hold right mouse and drag | Turns the camera and makes the astronaut face it. |
 | Free-look orbit | Hold left mouse and drag | Orbits the camera without changing the astronaut's facing direction. |
 | Mouse-run | Hold both mouse buttons | Moves forward while the camera remains under mouse control. |
-| Auto-run | `Num Lock` or `R` | Toggles continuous forward movement. Pressing forward or backward cancels it. |
+| Auto-walk / auto-run | `R` | First press starts walking, second press switches to running, and third press stops. Pressing forward or backward also cancels it. |
+| Auto-run | `Num Lock` | Toggles continuous running. Pressing forward or backward cancels it. |
 | Zoom camera | Mouse wheel | Changes follow distance continuously from first person to the 30,000 km planetary maximum. Crossing the former 39 m camera limit (about a 75 m reconstructed field on the reference viewport) triggers local-proxy coherence feedback but does not stop zoom; crossing inward restores coherence. Zooming all the way in enters first person, and one outward step restores close third person. |
 | Mars jump | `Space` | Launches at 4.8 m/s and falls at Mars surface gravity, 3.721 m/s². |
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |

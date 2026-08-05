@@ -531,6 +531,8 @@ const terrainFragment = /* glsl */ `
     }
 
     gl_FragColor = vec4(max(colour, vec3(0.0)), 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
@@ -781,6 +783,8 @@ const atmosphereFragment = /* glsl */ `
     float surfaceAlpha = nearGround * (0.14 + horizonGlow * 0.46) * (0.30 + localDaylight * 0.70);
     float alpha = clamp(max(surfaceAlpha, opticalAlpha * 0.92 + dot(colour, vec3(0.22))), 0.0, 0.96);
     gl_FragColor = vec4(max(colour, vec3(0.0)), alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 

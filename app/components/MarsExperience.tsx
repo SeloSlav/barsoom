@@ -94,6 +94,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [helpVisible, setHelpVisible] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
+  const [recoherenceVisible, setRecoherenceVisible] = useState(false);
+  const coherenceWasLostRef = useRef(false);
   const [debug, setDebug] = useState<DebugFlags>({ overlay: false, tileBoundaries: false, cubeFaces: false, lodColours: false, normals: false, molaOnly: false, horizonCulling: false });
 
   useEffect(() => {
@@ -128,6 +130,18 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const localProxyCoherenceLost = surfaceMode && !telemetry.localProxyCoherent;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
+  useEffect(() => {
+    const coherenceWasLost = coherenceWasLostRef.current;
+    coherenceWasLostRef.current = localProxyCoherenceLost;
+    if (localProxyCoherenceLost || !surfaceMode || !coherenceWasLost) return;
+    const showTimeout = window.setTimeout(() => setRecoherenceVisible(true), 0);
+    const hideTimeout = window.setTimeout(() => setRecoherenceVisible(false), 2_000);
+    return () => {
+      window.clearTimeout(showTimeout);
+      window.clearTimeout(hideTimeout);
+    };
+  }, [localProxyCoherenceLost, surfaceMode]);
+
   const toggleDebug = (flag: keyof DebugFlags) => {
     const next = !debug[flag];
     setDebug((current) => ({ ...current, [flag]: next }));
@@ -148,6 +162,10 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {localProxyCoherenceLost && <aside className="coherence-warning" role="status" aria-live="polite">
         <strong>LOCAL PROXY COHERENCE LOST</strong>
         <span>75 m reconstructed-field boundary exceeded · orbital solution continues</span>
+      </aside>}
+      {recoherenceVisible && !localProxyCoherenceLost && surfaceMode && <aside className="coherence-warning coherence-restored" role="status" aria-live="polite">
+        <strong>LOCAL PROXY RECOHERENCE RESTORED</strong>
+        <span>75 m local reconstructed field reacquired · human-scale solution stable</span>
       </aside>}
       <header className="mission-header">
         <div className="mission-identity">
@@ -226,7 +244,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
         {surfaceMode ? <>
-          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-run</dt><dd>Num Lock / R</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
+          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom continues to the planetary maximum; beyond the 75 m local-field boundary, the HUD marks the proxy as incoherent.</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>

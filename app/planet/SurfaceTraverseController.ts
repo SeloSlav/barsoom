@@ -160,6 +160,14 @@ export function isWowAutoRunKey(code: string) {
   return code === "NumLock" || code === "KeyR";
 }
 
+export type WowAutoMoveMode = "off" | "walk" | "run";
+
+export function nextWowAutoMoveMode(mode: WowAutoMoveMode): WowAutoMoveMode {
+  if (mode === "off") return "walk";
+  if (mode === "walk") return "run";
+  return "off";
+}
+
 export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: number) {
   if (!Number.isFinite(cameraDistanceM) || !Number.isFinite(wheelDeltaPixels) || wheelDeltaPixels === 0) {
     return clamp(cameraDistanceM, CAMERA_FIRST_PERSON_DISTANCE_M, CAMERA_MAX_DISTANCE_M);
@@ -312,7 +320,7 @@ export class SurfaceTraverseController {
   private footstepCountdown = 0;
   private groundHeightM = 0;
   private surveyFovDegrees: number;
-  private autoRun = false;
+  private autoMoveMode: WowAutoMoveMode = "off";
   private entryWheelLockSeconds = 0;
   private entryReady = false;
   private entryStableSeconds = 0;
@@ -427,7 +435,7 @@ export class SurfaceTraverseController {
     this.footstepCountdown = 0;
     this.keys.clear();
     this.mouseButtons.clear();
-    this.autoRun = false;
+    this.autoMoveMode = "off";
     this.entryWheelLockSeconds = CAMERA_ENTRY_WHEEL_LOCK_S;
     this.entryReady = false;
     this.entryStableSeconds = 0;
@@ -452,7 +460,7 @@ export class SurfaceTraverseController {
     this.localFill.visible = false;
     this.keys.clear();
     this.mouseButtons.clear();
-    this.autoRun = false;
+    this.autoMoveMode = "off";
     this.camera.fov = this.surveyFovDegrees;
     this.camera.updateProjectionMatrix();
   }
@@ -497,7 +505,7 @@ export class SurfaceTraverseController {
       }
     }
 
-    let forwardInput = Number(this.autoRun || this.keys.has("KeyW") || this.keys.has("ArrowUp"))
+    let forwardInput = Number(this.autoMoveMode !== "off" || this.keys.has("KeyW") || this.keys.has("ArrowUp"))
       - Number(this.keys.has("KeyS") || this.keys.has("ArrowDown"));
     if (wowMouseAutoRun(this.mouseButtons.has(0), rightMouse)) forwardInput += 1;
     let strafeInput = Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ"));
@@ -511,7 +519,8 @@ export class SurfaceTraverseController {
     this.right.crossVectors(this.up, this.forward).normalize();
     this.move.copy(this.forward).multiplyScalar(forwardInput).addScaledVector(this.right, strafeInput).normalize();
 
-    let speedMps = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? RUN_SPEED_M_S : WALK_SPEED_M_S;
+    const manualRun = this.autoMoveMode === "off" && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"));
+    let speedMps = this.autoMoveMode === "run" || manualRun ? RUN_SPEED_M_S : WALK_SPEED_M_S;
     if (forwardInput < 0) speedMps *= 0.62;
     const angularDistance = speedMps * deltaSeconds / Math.max(1, MARS_REFERENCE_RADIUS_M + this.groundHeightM);
     this.direction.addScaledVector(this.move, angularDistance).normalize();
@@ -884,13 +893,18 @@ export class SurfaceTraverseController {
     if (!this.active) return;
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
-    if (isWowAutoRunKey(event.code)) {
+    if (event.code === "KeyR") {
       event.preventDefault();
-      if (!event.repeat) this.autoRun = !this.autoRun;
+      if (!event.repeat) this.autoMoveMode = nextWowAutoMoveMode(this.autoMoveMode);
+      return;
+    }
+    if (event.code === "NumLock") {
+      event.preventDefault();
+      if (!event.repeat) this.autoMoveMode = this.autoMoveMode === "run" ? "off" : "run";
       return;
     }
     if (["KeyW", "KeyS", "ArrowUp", "ArrowDown"].includes(event.code)) {
-      this.autoRun = false;
+      this.autoMoveMode = "off";
     }
     if (["KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) {
       event.preventDefault();

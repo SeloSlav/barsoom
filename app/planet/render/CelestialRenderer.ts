@@ -39,6 +39,8 @@ const starFragment = /* glsl */ `
     if (radius > 1.0) discard;
     float psf = exp(-radius * radius * 4.6) * smoothstep(1.0, 0.42, radius);
     gl_FragColor = vec4(vColour * vBrightness * psf, min(1.0, psf * (0.65 + vBrightness)));
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 
@@ -69,9 +71,15 @@ const bodyFragment = /* glsl */ `
     float radius = length(centered) * 2.0;
     if (radius > 1.0) discard;
     float disc = 1.0 - smoothstep(max(0.0, vDiscFraction - 0.12), vDiscFraction, radius);
-    float glare = exp(-radius * radius * 3.2) * max(vIntensity - 1.0, 0.0) * 0.34;
-    float corona = exp(-radius * 5.2) * max(vIntensity - 2.0, 0.0) * 0.075;
-    gl_FragColor = vec4(vColour * (disc * vIntensity + glare + corona), clamp(disc + glare * 0.16 + corona * 0.2, 0.0, 1.0));
+    float glare = exp(-radius * radius * 2.8) * max(vIntensity - 1.0, 0.0) * 0.38;
+    float corona = exp(-radius * 4.35) * max(vIntensity - 2.0, 0.0) * 0.095;
+    float halo = exp(-radius * radius * 1.35) * max(vIntensity - 4.0, 0.0) * 0.026;
+    gl_FragColor = vec4(
+      vColour * (disc * vIntensity + glare + corona + halo),
+      clamp(disc + glare * 0.15 + corona * 0.19 + halo * 0.12, 0.0, 1.0)
+    );
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
   }
 `;
 

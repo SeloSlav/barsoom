@@ -40,9 +40,7 @@ export function SovaTutorial() {
   const [progress, setProgress] = useState(0);
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const currentRef = useRef<SovaTutorialId | null>("telescope");
   const skipFutureRef = useRef(false);
-  const queueRef = useRef<SovaTutorialId[]>([]);
   const seenRef = useRef(new Set<SovaTutorialId>(["telescope"]));
 
   useEffect(() => {
@@ -50,15 +48,10 @@ export function SovaTutorial() {
       const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
       if (!isSovaTutorialId(id) || skipFutureRef.current || seenRef.current.has(id)) return;
       seenRef.current.add(id);
-      if (currentRef.current) {
-        queueRef.current.push(id);
-      } else {
-        currentRef.current = id;
-        setProgress(0);
-        setPlaying(false);
-        setPlaybackBlocked(false);
-        setCurrentId(id);
-      }
+      setProgress(0);
+      setPlaying(false);
+      setPlaybackBlocked(false);
+      setCurrentId(id);
     };
     window.addEventListener(SOVA_TUTORIAL_EVENT, handleTutorial);
     return () => window.removeEventListener(SOVA_TUTORIAL_EVENT, handleTutorial);
@@ -117,13 +110,10 @@ export function SovaTutorial() {
 
   const closeTutorial = () => {
     audioRef.current?.pause();
-    const next = skipFutureRef.current ? null : queueRef.current.shift() ?? null;
-    if (skipFutureRef.current) queueRef.current = [];
-    currentRef.current = next;
     setProgress(0);
     setPlaying(false);
     setPlaybackBlocked(false);
-    setCurrentId(next);
+    setCurrentId(null);
   };
 
   const togglePlayback = () => {
@@ -140,7 +130,6 @@ export function SovaTutorial() {
   const setSkipAll = (skip: boolean) => {
     skipFutureRef.current = skip;
     setSkipFuture(skip);
-    if (skip) queueRef.current = [];
   };
 
   return (
