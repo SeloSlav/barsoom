@@ -20,5 +20,6 @@ test("server-renders the Barsoom Cauchy Array shell", async () => {
   assert.match(html, /CAUCHY ARRAY/);
   assert.match(html, /VIKING ALBEDO · MOLA 16 PPD \/ OBSERVATION PRIORS/);
   assert.match(html, /PLANETARY APERTURE/);
+  assert.match(html, /AUDIO (?:<!-- -->)?ON/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
 });

@@ -4,6 +4,7 @@ import {
   MARS_TRAVERSE_JUMP_SPEED_M_S,
 } from "../app/planet/constants";
 import {
+  applyWowCameraDrag,
   marsJumpApexHeight,
   randomMarsSurfaceDirection,
 } from "../app/planet/SurfaceTraverseController";
@@ -31,5 +32,21 @@ describe("surface traverse physics", () => {
     expect(Math.hypot(equator.x, equator.y, equator.z)).toBeCloseTo(1, 12);
     expect(northPole.y).toBe(1);
     expect(Math.hypot(northPole.x, northPole.z)).toBe(0);
+  });
+
+  it("orbits freely with left drag and steers the astronaut with right drag", () => {
+    const leftDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, false);
+    expect(leftDrag.cameraYawRad).toBeGreaterThan(0.4);
+    expect(leftDrag.cameraPitchRad).toBeLessThan(0.3);
+    expect(leftDrag.headingRad).toBe(1.2);
+
+    const rightDrag = applyWowCameraDrag(0.4, 0.3, 1.2, 40, -20, true);
+    expect(rightDrag.headingRad).toBe(rightDrag.cameraYawRad);
+  });
+
+  it("allows upward mouselook past the horizon", () => {
+    const lookingUp = applyWowCameraDrag(0, 0.1, 0, 0, -400, true);
+    expect(lookingUp.cameraPitchRad).toBeLessThan(0);
+    expect(lookingUp.cameraPitchRad).toBeCloseTo(-Math.PI / 3, 12);
   });
 });

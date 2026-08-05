@@ -353,10 +353,14 @@ const terrainFragment = /* glsl */ `
     float surfaceMaterialResponse = 0.0;
     float mappedRoughness = 0.94;
     vec3 mappedNormal = normal;
-    if (uTileLod > 12.0 && uCameraAltitude < 9000.0) {
+    if (uTileLod > 12.0 && uCameraAltitude < 58.0) {
       float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
+      // The source photograph is a close-range material, not regional
+      // terrain. Hand its colour back to the non-repeating procedural field
+      // before its 2.4 m source scale can read as wallpaper from above.
+      float surfaceAlbedoVisibility = 1.0 - smoothstep(18.0, 58.0, uCameraAltitude);
       surfacePbrBlend = smoothstep(13.5, 16.5, uTileLod) *
-        (1.0 - smoothstep(350.0, 7000.0, uCameraAltitude)) *
+        surfaceAlbedoVisibility *
         (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
       float surfaceAntiTile = smoothstep(5.0, 22.0, uCameraAltitude);
       surfaceMaterialResponse = surfacePbrBlend * (1.0 - smoothstep(9.0, 34.0, uCameraAltitude));

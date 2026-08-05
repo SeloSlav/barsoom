@@ -5,12 +5,13 @@
 | Deploy surface traverse | `~` | Teleports the rigged astronaut to a uniformly random point on Mars and enters third-person mode. Pressing `~` again chooses another random landing site. |
 | Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point with no yaw, pitch, pole, or roll limit. Rotations can wrap repeatedly; only a near-ground endpoint inside terrain is rejected. The first middle drag takes full manual control from the automatic approach composition. |
 | Pan across Mars | Hold right mouse and drag | Clears any locked zoom point, then translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
-| Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. With no selection, the surface point under the cursor anchors inward zoom. With a yellow-ring selection, both inward and outward zoom remain locked to that point. An untouched descent eases from orbital nadir into a 48-degree RTS-style approach below 350 km AGL. |
-| Lock zoom point | Left click | Places the scale-aware yellow geographic marker and locks wheel zoom to that surface point until cleared or replaced. |
-| Clear zoom point | Right click | Removes the yellow marker and returns wheel input to free cursor zoom. Holding the button and dragging continues to pan normally. |
+| Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. With no selection, the surface point under the cursor anchors inward zoom. With a reticle selection, both inward and outward zoom remain locked to that point. An untouched descent eases from orbital nadir into a 48-degree RTS-style approach below 350 km AGL. |
+| Lock zoom point | Left click | Places the scale-aware geographic acquisition reticle and locks wheel zoom to that surface point until cleared or replaced. |
+| Clear zoom point | Right click | Removes the reticle and returns wheel input to free cursor zoom. Holding the button and dragging continues to pan normally. |
 | Toggle diagnostics | `F3` | FPS, timing, tiles, LOD, triangles, calls, tile memory, worker queue, depth range and floating origin. |
 | Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |
 | Toggle help | `H` | Opens or closes the control reference. |
+| Toggle audio | `AUDIO ON/OFF` button | Enables or mutes the ambient score, wind, instrument sonification and astronaut movement sounds. The preference persists in the browser. |
 
 ## Third-person surface traverse
 
@@ -42,4 +43,6 @@ window.__BARSOOM__.setSimulationUtc("2032-04-17T05:23:11.000Z", 0)
 window.__BARSOOM__.getState()
 window.__BARSOOM__.teleportRandomSurface()
 window.__BARSOOM__.exitSurfaceTraverse()
+window.__BARSOOM__.getAudioMuted()
+window.__BARSOOM__.setAudioMuted(true)
 ```

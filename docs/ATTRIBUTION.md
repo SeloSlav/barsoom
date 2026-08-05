@@ -1,5 +1,17 @@
 # Scientific data and software attribution
 
+## Audio
+
+The ambient wind, astronaut foley and instrument cues in `public/audio/` were generated specifically for Barsoom with the ElevenLabs Sound Effects API (`eleven_text_to_sound_v2`) on 2026-08-05. The 96-second instrumental survey score was composed with the ElevenLabs Music API (`music_v2`) after Music API access became available.
+
+- `mars-wind-loop.mp3`: thin Martian wind and dust ambience
+- `barsoom-survey-score.mp3`: 96-second beatless ambient score with a quiet rise-and-return structure
+- `boot-step-a.mp3` through `boot-step-f.mp3`: shuffled natural regolith footstep variations
+- `jump-launch.mp3`, `suit-land.mp3`: spacesuit movement foley
+- `phase-lock.mp3`, `observer-transition.mp3`: scientific instrument sonification
+
+No API key or other ElevenLabs account data is stored in this repository.
+
 ## Astronaut
 
 The surface-traverse character is the rigged and animated **Astronaut** by Quaternius.

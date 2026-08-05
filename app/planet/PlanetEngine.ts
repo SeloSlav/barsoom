@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { BarsoomAudio } from "../audio/BarsoomAudio";
 import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
 import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
@@ -22,6 +23,8 @@ export type PlanetEngineApi = {
   setSimulationUtc: (utcIso: string, rate?: number) => void;
   teleportRandomSurface: () => void;
   exitSurfaceTraverse: () => void;
+  getAudioMuted: () => boolean;
+  setAudioMuted: (muted: boolean) => void;
 };
 
 declare global {
@@ -49,8 +52,9 @@ export class PlanetEngine {
   private readonly celestial: CelestialRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
   private readonly surfaceTraverse: SurfaceTraverseController;
+  private readonly audio: BarsoomAudio;
   private readonly resizeObserver: ResizeObserver;
-  private readonly selection: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  private readonly selection: THREE.Group;
   private readonly viewportSize = new THREE.Vector2();
   private readonly selectionReferenceNormal = new THREE.Vector3(0, 0, 1);
   private selectionDirection: THREE.Vector3 | null = null;
@@ -133,6 +137,7 @@ export class PlanetEngine {
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
     this.scene.background = null;
+    this.audio = new BarsoomAudio();
 
     this.sunShadowLight.name = "Mars local directional sunlight shadows";
     this.sunShadowTarget.name = "Mars shadow-map snapped target";
@@ -162,9 +167,10 @@ export class PlanetEngine {
       this.scene,
       canvas,
       this.camera,
-      (direction) => this.terrain.sampleHeight(direction),
+      (direction) => this.terrain.sampleRenderedSurface(direction),
       (direction) => void this.terrain.prefetch(direction),
       (message) => this.onError(message),
+      (event) => this.audio.handleTraverseEvent(event),
     );
     // Begin above the illuminated hemisphere for a legible first descent. The
     // simulation remains physically time-based; this only chooses the landing
@@ -175,13 +181,30 @@ export class PlanetEngine {
     this.atmosphere = new AtmosphereRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
 
-    this.selection = new THREE.Mesh(
-      new THREE.RingGeometry(0.72, 1, 64),
-      new THREE.MeshBasicMaterial({ color: 0xffb36b, transparent: true, opacity: 0.88, depthWrite: false, side: THREE.DoubleSide }),
-    );
+    this.selection = new THREE.Group();
+    const selectionGuideMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffd1ad,
+      transparent: true,
+      opacity: 0.48,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const selectionAccentMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffa15f,
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const outerRing = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 64), selectionGuideMaterial);
+    const innerRing = new THREE.Mesh(new THREE.RingGeometry(0.33, 0.39, 48), selectionAccentMaterial);
+    const horizontalGuide = new THREE.Mesh(new THREE.PlaneGeometry(2.56, 0.018), selectionGuideMaterial);
+    const verticalGuide = new THREE.Mesh(new THREE.PlaneGeometry(0.018, 2.56), selectionGuideMaterial);
+    const acquisitionPoint = new THREE.Mesh(new THREE.CircleGeometry(0.065, 16), selectionAccentMaterial);
+    this.selection.add(horizontalGuide, verticalGuide, outerRing, innerRing, acquisitionPoint);
     this.selection.name = "Selected surface point";
     this.selection.visible = false;
-    this.selection.renderOrder = 10_000;
+    this.selection.traverse((object) => { object.renderOrder = 10_000; });
     this.scene.add(this.selection);
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -200,6 +223,7 @@ export class PlanetEngine {
       }),
       setLocation: (latitudeDeg, longitudeDeg, altitudeM) => {
         if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+        this.clearSelection();
         this.controls.setLocation(latitudeDeg, longitudeDeg, altitudeM);
       },
       setAltitude: (altitudeM, immediate) => {
@@ -213,6 +237,8 @@ export class PlanetEngine {
         return this.terrain.querySurface(direction);
       },
       setNightSide: (altitudeM = 100) => {
+        if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+        this.clearSelection();
         const night = cartesianToLatLonElevation({
           x: -this.skyState.sunDirection.x,
           y: -this.skyState.sunDirection.y,
@@ -221,6 +247,8 @@ export class PlanetEngine {
         this.controls.setLocation(night.latitudeDeg, night.longitudeDeg, altitudeM);
       },
       setTerminator: (altitudeM = 10_000_000) => {
+        if (this.surfaceTraverse.active) this.exitSurfaceTraverse();
+        this.clearSelection();
         const sun = new THREE.Vector3(
           this.skyState.sunDirection.x,
           this.skyState.sunDirection.y,
@@ -243,8 +271,18 @@ export class PlanetEngine {
       },
       teleportRandomSurface: () => this.enterSurfaceTraverse(),
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
+      getAudioMuted: () => this.getAudioMuted(),
+      setAudioMuted: (muted) => this.setAudioMuted(muted),
     };
     this.renderer.setAnimationLoop(this.animate);
+  }
+
+  getAudioMuted() {
+    return this.audio.isMuted();
+  }
+
+  setAudioMuted(muted: boolean) {
+    this.audio.setMuted(muted);
   }
 
   private resize() {
@@ -264,6 +302,7 @@ export class PlanetEngine {
     const deltaSeconds = Math.min(0.1, Math.max(0.001, (time - this.lastFrameTime) / 1000));
     this.lastFrameTime = time;
     const frameMs = deltaSeconds * 1000;
+    this.audio.update(deltaSeconds);
     this.smoothedFrameMs += (frameMs - this.smoothedFrameMs) * 0.06;
     this.framesSinceQualityChange += 1;
     this.controlState = this.surfaceTraverse.active
@@ -421,9 +460,7 @@ export class PlanetEngine {
     if (event.button === 0) {
       this.pointerDown = { x: event.clientX, y: event.clientY };
     } else if (event.button === 2) {
-      this.pointerDown = null;
-      this.selectionDirection = null;
-      this.controls.setZoomAnchor(null);
+      this.clearSelection();
     }
   };
 
@@ -443,6 +480,7 @@ export class PlanetEngine {
     if (!hit) return;
     this.selectionDirection = new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z);
     this.controls.setZoomAnchor(this.selectionDirection);
+    this.audio.playPhaseLock();
     void this.terrain.prefetch(this.selectionDirection);
   };
 
@@ -469,6 +507,12 @@ export class PlanetEngine {
     this.selection.visible = true;
   }
 
+  private clearSelection() {
+    this.pointerDown = null;
+    this.selectionDirection = null;
+    this.controls.setZoomAnchor(null);
+  }
+
   private onKeyDown = (event: KeyboardEvent) => {
     if (event.code === "Backquote" && !event.repeat) {
       event.preventDefault();
@@ -487,8 +531,10 @@ export class PlanetEngine {
 
   private enterSurfaceTraverse() {
     this.controls.setEnabled(false);
-    this.selectionDirection = null;
+    this.clearSelection();
     this.surfaceTraverse.teleportRandom();
+    this.audio.setSurfaceMode(true);
+    this.audio.playObserverTransition(true);
     this.lastTelemetryTime = -Infinity;
   }
 
@@ -497,7 +543,10 @@ export class PlanetEngine {
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);
     this.surfaceTraverse.deactivate();
+    this.audio.setSurfaceMode(false);
+    this.audio.playObserverTransition(false);
     this.controls.setEnabled(true);
+    this.clearSelection();
     this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, 1_200);
     this.lastTelemetryTime = -Infinity;
   }
@@ -525,9 +574,16 @@ export class PlanetEngine {
     this.terrain.dispose();
     this.atmosphere.dispose();
     this.celestial.dispose();
+    this.audio.dispose();
     this.selection.removeFromParent();
-    this.selection.geometry.dispose();
-    this.selection.material.dispose();
+    const selectionMaterials = new Set<THREE.Material>();
+    this.selection.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      materials.forEach((material) => selectionMaterials.add(material));
+    });
+    selectionMaterials.forEach((material) => material.dispose());
     this.sunShadowLight.removeFromParent();
     this.sunShadowTarget.removeFromParent();
     this.sunShadowLight.shadow.dispose();

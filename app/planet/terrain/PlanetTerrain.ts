@@ -3,6 +3,7 @@ import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG, TERRAIN_CONFIG } from "../const
 import {
   childTiles,
   clamp,
+  directionToFaceUv,
   directionToTile,
   dot3,
   faceUvToDirection,
@@ -28,6 +29,102 @@ type TileRenderState = {
   fadeIn: boolean;
   edgeMorph?: readonly [west: number, east: number, north: number, south: number];
 };
+
+export type RenderedTerrainSurface = {
+  radiusM: number;
+  heightM: number;
+  normal: Vec3;
+  lod: number;
+};
+
+type GridSurfaceSample = Omit<RenderedTerrainSurface, "lod">;
+
+/**
+ * Intersects a radial ray with the same morphed triangle rendered by the
+ * terrain vertex shader. Sampling the analytic height function is not enough:
+ * a streaming tile can be both coarser and partially morphed toward its
+ * parent, so that function can sit metres above or below the visible mesh.
+ */
+export function sampleMorphedTerrainGrid(
+  directionInput: Vec3,
+  key: TileKey,
+  center: Vec3,
+  positions: ArrayLike<number>,
+  morphDeltas: ArrayLike<number>,
+  morphInput: number,
+  edgeMorph: readonly [west: number, east: number, north: number, south: number] = [0, 0, 0, 0],
+  segments: number = TERRAIN_CONFIG.meshSegments,
+): GridSurfaceSample | null {
+  const direction = normalize3(directionInput);
+  const mapped = directionToFaceUv(direction);
+  if (mapped.face !== key.face || segments < 1) return null;
+
+  const bounds = tileBounds(key);
+  const gridX = clamp((mapped.u - bounds.u0) / (bounds.u1 - bounds.u0) * segments, 0, segments);
+  const gridY = clamp((mapped.v - bounds.v0) / (bounds.v1 - bounds.v0) * segments, 0, segments);
+  const column = Math.min(segments - 1, Math.floor(gridX));
+  const row = Math.min(segments - 1, Math.floor(gridY));
+  const tx = gridX - column;
+  const ty = gridY - row;
+  const gridSize = segments + 1;
+  const a = row * gridSize + column;
+  const b = a + 1;
+  const c = a + gridSize;
+  const d = c + 1;
+  const triangle = tx + ty <= 1
+    ? [[a, column, row], [b, column + 1, row], [c, column, row + 1]] as const
+    : [[b, column + 1, row], [d, column + 1, row + 1], [c, column, row + 1]] as const;
+  const morph = clamp(morphInput, 0, 1);
+
+  const vertex = ([index, vertexColumn, vertexRow]: typeof triangle[number]) => {
+    let stitchedEdgeMorph = 0;
+    if (vertexColumn === 0) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[0]);
+    if (vertexColumn === segments) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[1]);
+    if (vertexRow === 0) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[2]);
+    if (vertexRow === segments) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[3]);
+    const morphWeight = Math.max(1 - morph, stitchedEdgeMorph);
+    const offset = index * 3;
+    return {
+      x: center.x + positions[offset] - morphDeltas[offset] * morphWeight,
+      y: center.y + positions[offset + 1] - morphDeltas[offset + 1] * morphWeight,
+      z: center.z + positions[offset + 2] - morphDeltas[offset + 2] * morphWeight,
+    };
+  };
+
+  const p0 = vertex(triangle[0]);
+  const p1 = vertex(triangle[1]);
+  const p2 = vertex(triangle[2]);
+  const edge1X = p1.x - p0.x;
+  const edge1Y = p1.y - p0.y;
+  const edge1Z = p1.z - p0.z;
+  const edge2X = p2.x - p0.x;
+  const edge2Y = p2.y - p0.y;
+  const edge2Z = p2.z - p0.z;
+  let normalX = edge1Y * edge2Z - edge1Z * edge2Y;
+  let normalY = edge1Z * edge2X - edge1X * edge2Z;
+  let normalZ = edge1X * edge2Y - edge1Y * edge2X;
+  const denominator = normalX * direction.x + normalY * direction.y + normalZ * direction.z;
+  if (Math.abs(denominator) < 1e-12) return null;
+  const radiusM = (normalX * p0.x + normalY * p0.y + normalZ * p0.z) / denominator;
+  if (!Number.isFinite(radiusM) || radiusM <= 0) return null;
+
+  const normalLength = Math.hypot(normalX, normalY, normalZ);
+  if (normalLength < 1e-12) return null;
+  if (denominator < 0) {
+    normalX = -normalX;
+    normalY = -normalY;
+    normalZ = -normalZ;
+  }
+  return {
+    radiusM,
+    heightM: radiusM - MARS_REFERENCE_RADIUS_M,
+    normal: {
+      x: normalX / normalLength,
+      y: normalY / normalLength,
+      z: normalZ / normalLength,
+    },
+  };
+}
 
 export function lodTransitionVisible(dither: number, fade: number, fadeIn: boolean) {
   if (fade >= 0.999) return true;
@@ -554,13 +651,52 @@ export class PlanetTerrain {
     return this.sampleHeightAtLod(directionInput, TERRAIN_CONFIG.maxRenderLod);
   }
 
-  renderedLodAtDirection(directionInput: Vec3) {
-    const direction = normalize3(directionInput);
+  private renderedNodeAtDirection(direction: Vec3) {
     for (let lod = TERRAIN_CONFIG.maxRenderLod; lod >= 0; lod -= 1) {
       const node = this.allNodes.get(tileKeyToString(directionToTile(direction, lod)));
-      if (node?.mesh?.visible && this.visibleNodes.has(node)) return lod;
+      if (node?.mesh?.visible && this.visibleNodes.has(node)) return node;
     }
-    return 0;
+    return null;
+  }
+
+  renderedLodAtDirection(directionInput: Vec3) {
+    return this.renderedNodeAtDirection(normalize3(directionInput))?.key.lod ?? 0;
+  }
+
+  sampleRenderedSurface(directionInput: Vec3): RenderedTerrainSurface {
+    const direction = normalize3(directionInput);
+    const node = this.renderedNodeAtDirection(direction);
+    if (node?.mesh && node.center) {
+      const positions = node.mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const morphDeltas = node.mesh.geometry.getAttribute("morphDelta") as THREE.BufferAttribute;
+      const renderState = node.mesh.userData.renderState as TileRenderState;
+      const rendered = sampleMorphedTerrainGrid(
+        direction,
+        node.key,
+        node.center,
+        positions.array,
+        morphDeltas.array,
+        renderState.morph,
+        renderState.edgeMorph,
+      );
+      if (rendered) return { ...rendered, lod: node.key.lod };
+    }
+
+    // Before the first root tile is ready there is no rendered triangle to
+    // intersect. LOD 0 is the closest possible representation of that pending
+    // mesh and avoids snapping the player to invisible high-frequency detail.
+    const lod = node?.key.lod ?? 0;
+    const heightM = this.sampleHeightAtLod(direction, lod);
+    const differential = surfaceNormalAndSlope(
+      direction,
+      (sampleDirection) => this.sampleHeightAtLod(sampleDirection, lod),
+    );
+    return {
+      radiusM: MARS_REFERENCE_RADIUS_M + heightM,
+      heightM,
+      normal: differential.normal,
+      lod,
+    };
   }
 
   sampleSurface(directionInput: Vec3) {

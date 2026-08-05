@@ -89,7 +89,7 @@ function random01(seed: number, lane: number) {
   return spatialSeed(seed, lane) / 0xffffffff;
 }
 
-export function proceduralDetailHeight(direction: Vec3, resolvedOctaves = DETAIL_OCTAVES.length) {
+export function proceduralDetailHeight(direction: Vec3, resolvedOctaves: number = DETAIL_OCTAVES.length) {
   let height = 0;
   const limit = Math.max(0, Math.min(DETAIL_OCTAVES.length, resolvedOctaves));
   for (let octave = 0; octave < limit; octave += 1) {
@@ -126,7 +126,7 @@ export function resolvedCraterScalesForLod(lod: number) {
   return count;
 }
 
-export function proceduralCraterHeight(directionInput: Vec3, resolvedScales = CRATER_SCALES.length) {
+export function proceduralCraterHeight(directionInput: Vec3, resolvedScales: number = CRATER_SCALES.length) {
   const length = Math.hypot(directionInput.x, directionInput.y, directionInput.z) || 1;
   const direction = {
     x: directionInput.x / length,
@@ -201,7 +201,7 @@ export function proceduralCraterHeight(directionInput: Vec3, resolvedScales = CR
 }
 
 /** The exact procedural contribution baked into a mesh at a given LOD. */
-export function proceduralTerrainHeightForLod(direction: Vec3, lod = TERRAIN_CONFIG.maxRenderLod) {
+export function proceduralTerrainHeightForLod(direction: Vec3, lod: number = TERRAIN_CONFIG.maxRenderLod) {
   return proceduralDetailHeight(direction, resolvedDetailOctavesForLod(lod)) +
     proceduralCraterHeight(direction, resolvedCraterScalesForLod(lod));
 }

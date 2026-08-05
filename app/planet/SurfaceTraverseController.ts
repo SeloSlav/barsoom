@@ -9,6 +9,7 @@ import {
 import { clamp, localEnuBasis } from "./math";
 import type { PlanetControlState } from "./PlanetControls";
 import type { Vec3 } from "./types";
+import type { TraverseAudioEvent } from "../audio/BarsoomAudio";
 
 const WALK_SPEED_M_S = 4.2;
 const RUN_SPEED_M_S = 7.2;
@@ -16,8 +17,16 @@ const PLAYER_HEIGHT_M = 1.82;
 const CAMERA_MIN_DISTANCE_M = 3.2;
 const CAMERA_MAX_DISTANCE_M = 14;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
+const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-60);
+const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(80);
+const BOOT_SOLE_CLEARANCE_M = 0.025;
 
 type AnimationName = "idle" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
+
+export type TraverseSurfaceSample = {
+  heightM: number;
+  normal: Vec3;
+};
 
 export function randomMarsSurfaceDirection(random: () => number = Math.random): Vec3 {
   const y = clamp(random() * 2 - 1, -1, 1);
@@ -33,6 +42,26 @@ export function randomMarsSurfaceDirection(random: () => number = Math.random): 
 
 export function marsJumpApexHeight(launchSpeedMps = MARS_TRAVERSE_JUMP_SPEED_M_S) {
   return (launchSpeedMps * launchSpeedMps) / (2 * MARS_SURFACE_GRAVITY_M_S2);
+}
+
+export function applyWowCameraDrag(
+  cameraYawRad: number,
+  cameraPitchRad: number,
+  headingRad: number,
+  deltaX: number,
+  deltaY: number,
+  steeringCharacter: boolean,
+) {
+  const nextCameraYawRad = cameraYawRad + deltaX * 0.0042;
+  return {
+    cameraYawRad: nextCameraYawRad,
+    cameraPitchRad: clamp(
+      cameraPitchRad + deltaY * 0.0032,
+      CAMERA_MIN_PITCH_RAD,
+      CAMERA_MAX_PITCH_RAD,
+    ),
+    headingRad: steeringCharacter ? nextCameraYawRad : headingRad,
+  };
 }
 
 /**
@@ -52,16 +81,15 @@ export class SurfaceTraverseController {
   private readonly north = new THREE.Vector3();
   private readonly east = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
+  private readonly surfaceNormal = new THREE.Vector3(1, 0, 0);
   private readonly forward = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
+  private readonly modelForward = new THREE.Vector3();
+  private readonly modelRight = new THREE.Vector3();
   private readonly move = new THREE.Vector3();
   private readonly scratch = new THREE.Vector3();
   private readonly relativeTarget = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
-  private readonly modelForwardCorrection = new THREE.Quaternion().setFromAxisAngle(
-    new THREE.Vector3(0, 1, 0),
-    Math.PI,
-  );
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
@@ -79,6 +107,7 @@ export class SurfaceTraverseController {
   private verticalVelocityMps = 0;
   private airborneSeconds = 0;
   private landingSeconds = 0;
+  private footstepCountdown = 0;
   private groundHeightM = 0;
   private surveyFovDegrees: number;
   private disposed = false;
@@ -88,9 +117,10 @@ export class SurfaceTraverseController {
     private readonly scene: THREE.Scene,
     private readonly canvas: HTMLCanvasElement,
     private readonly camera: THREE.PerspectiveCamera,
-    private readonly terrainHeight: (direction: Vec3) => number,
+    private readonly terrainSurface: (direction: Vec3) => TraverseSurfaceSample,
     private readonly prefetch: (direction: Vec3) => void,
     private readonly onAssetError: (message: string) => void,
+    private readonly onAudioEvent: (event: TraverseAudioEvent) => void = () => undefined,
   ) {
     this.surveyFovDegrees = camera.fov;
     this.root.name = "Surface traverse astronaut";
@@ -159,6 +189,7 @@ export class SurfaceTraverseController {
     this.verticalVelocityMps = 0;
     this.airborneSeconds = 0;
     this.landingSeconds = 0;
+    this.footstepCountdown = 0;
     this.keys.clear();
     this.mouseButtons.clear();
     this.active = true;
@@ -167,7 +198,7 @@ export class SurfaceTraverseController {
     if (!wasActive) this.surveyFovDegrees = this.camera.fov;
     this.camera.fov = 50;
     this.camera.updateProjectionMatrix();
-    this.groundHeightM = this.terrainHeight(this.direction);
+    this.groundHeightM = this.terrainSurface(this.direction).heightM;
     this.prefetch(this.direction);
     this.canvas.focus({ preventScroll: true });
     this.playAnimation("idle");
@@ -251,6 +282,8 @@ export class SurfaceTraverseController {
       this.verticalVelocityMps = 0;
       this.airborneSeconds = 0;
       this.landingSeconds = 0.28;
+      this.footstepCountdown = 0;
+      this.onAudioEvent({ type: "land" });
       return false;
     }
     return true;
@@ -270,6 +303,19 @@ export class SurfaceTraverseController {
       this.playAnimation("idle");
     }
     this.mixer?.update(deltaSeconds);
+  }
+
+  private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {
+    if (airborne || this.landingSeconds > 0 || speedMps <= 0) {
+      this.footstepCountdown = 0;
+      return;
+    }
+    this.footstepCountdown -= deltaSeconds;
+    if (this.footstepCountdown > 0) return;
+    const running = speedMps >= RUN_SPEED_M_S - 0.1;
+    this.onAudioEvent({ type: "step", running });
+    const cadenceSeconds = running ? 0.34 : 0.52;
+    this.footstepCountdown = cadenceSeconds * (0.94 + Math.random() * 0.12);
   }
 
   private playAnimation(name: AnimationName, fadeSeconds = 0.16) {
@@ -295,27 +341,40 @@ export class SurfaceTraverseController {
     this.setLocalBasis();
     const airborne = this.updateJump(delta);
     this.updateAnimation(speedMps, airborne, delta);
+    this.updateFootsteps(speedMps, airborne, delta);
 
-    this.groundHeightM = this.terrainHeight(this.direction);
+    const surface = this.terrainSurface(this.direction);
+    this.groundHeightM = surface.heightM;
+    this.surfaceNormal.set(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
+    if (this.surfaceNormal.dot(this.direction) < 0) this.surfaceNormal.negate();
     const groundRadiusM = MARS_REFERENCE_RADIUS_M + this.groundHeightM;
     this.footAbsolute.copy(this.direction).multiplyScalar(groundRadiusM);
-    this.playerAbsolute.copy(this.footAbsolute).addScaledVector(this.up, this.verticalOffsetM);
+    this.playerAbsolute.copy(this.footAbsolute).addScaledVector(
+      this.surfaceNormal,
+      this.verticalOffsetM + BOOT_SOLE_CLEARANCE_M,
+    );
 
     this.headingVector(this.headingRad, this.forward);
-    this.right.crossVectors(this.up, this.forward).normalize();
-    this.orientation.makeBasis(this.right, this.up, this.forward);
-    this.root.quaternion.setFromRotationMatrix(this.orientation).multiply(this.modelForwardCorrection);
+    this.modelForward.copy(this.forward)
+      .addScaledVector(this.surfaceNormal, -this.forward.dot(this.surfaceNormal))
+      .normalize();
+    this.modelRight.crossVectors(this.surfaceNormal, this.modelForward).normalize();
+    this.orientation.makeBasis(this.modelRight, this.surfaceNormal, this.modelForward);
+    // This astronaut asset is authored facing local +Z. The basis +Z axis is
+    // the movement heading, so no additional half-turn belongs here.
+    this.root.quaternion.setFromRotationMatrix(this.orientation);
 
     this.headingVector(this.cameraYawRad, this.forward);
-    this.targetAbsolute.copy(this.playerAbsolute).addScaledVector(this.up, CAMERA_TARGET_HEIGHT_M);
+    this.forward.addScaledVector(this.surfaceNormal, -this.forward.dot(this.surfaceNormal)).normalize();
+    this.targetAbsolute.copy(this.playerAbsolute).addScaledVector(this.surfaceNormal, CAMERA_TARGET_HEIGHT_M);
     const horizontalDistance = Math.cos(this.cameraPitchRad) * this.cameraDistanceM;
     const verticalDistance = Math.sin(this.cameraPitchRad) * this.cameraDistanceM;
     this.cameraAbsolute.copy(this.targetAbsolute)
       .addScaledVector(this.forward, -horizontalDistance)
-      .addScaledVector(this.up, verticalDistance);
+      .addScaledVector(this.surfaceNormal, verticalDistance);
 
     this.cameraDirection.copy(this.cameraAbsolute).normalize();
-    const cameraGroundM = this.terrainHeight(this.cameraDirection);
+    const cameraGroundM = this.terrainSurface(this.cameraDirection).heightM;
     let cameraAltitudeM = this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - cameraGroundM;
     if (cameraAltitudeM < 0.65) {
       this.cameraAbsolute.addScaledVector(this.cameraDirection, 0.65 - cameraAltitudeM);
@@ -325,7 +384,7 @@ export class SurfaceTraverseController {
 
     this.root.position.copy(this.playerAbsolute).sub(this.cameraAbsolute);
     this.camera.position.set(0, 0, 0);
-    this.camera.up.copy(this.up);
+    this.camera.up.copy(this.surfaceNormal);
     this.relativeTarget.copy(this.targetAbsolute).sub(this.cameraAbsolute);
     this.camera.lookAt(this.relativeTarget);
     this.camera.near = 0.05;
@@ -360,7 +419,9 @@ export class SurfaceTraverseController {
         this.verticalOffsetM = 0.001;
         this.airborneSeconds = 0;
         this.landingSeconds = 0;
+        this.footstepCountdown = 0;
         this.playAnimation("jump");
+        this.onAudioEvent({ type: "jump" });
       }
     }
     this.keys.add(event.code);
@@ -395,9 +456,17 @@ export class SurfaceTraverseController {
     const dy = event.clientY - this.pointerY;
     this.pointerX = event.clientX;
     this.pointerY = event.clientY;
-    this.cameraYawRad -= dx * 0.0042;
-    this.cameraPitchRad = clamp(this.cameraPitchRad + dy * 0.0032, THREE.MathUtils.degToRad(3), THREE.MathUtils.degToRad(67));
-    if (this.mouseButtons.has(2)) this.headingRad = this.cameraYawRad;
+    const drag = applyWowCameraDrag(
+      this.cameraYawRad,
+      this.cameraPitchRad,
+      this.headingRad,
+      dx,
+      dy,
+      this.mouseButtons.has(2),
+    );
+    this.cameraYawRad = drag.cameraYawRad;
+    this.cameraPitchRad = drag.cameraPitchRad;
+    this.headingRad = drag.headingRad;
     event.preventDefault();
   };
 

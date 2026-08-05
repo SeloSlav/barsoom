@@ -70,14 +70,17 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
   const [debug, setDebug] = useState<DebugFlags>({ overlay: false, tileBoundaries: false, cubeFaces: false, lodColours: false, normals: false, molaOnly: false, horizonCulling: false });
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    let engine: PlanetEngine;
+    let engine: PlanetEngine | null = null;
     try {
       engine = new PlanetEngine(canvasRef.current, setTelemetry, setError, initialSimulationUtc);
+      setAudioMuted(engine.getAudioMuted());
     } catch (caught) {
+      engine?.dispose();
       const message = caught instanceof Error ? caught.message : "WebGL could not start on this device.";
       queueMicrotask(() => setError(message));
       return;
@@ -87,7 +90,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       if (event.code === "KeyH" && !event.ctrlKey && !event.metaKey) setHelpVisible((visible) => !visible);
     };
     window.addEventListener("keydown", keyHandler);
-    return () => { window.removeEventListener("keydown", keyHandler); engine.dispose(); };
+    return () => { window.removeEventListener("keydown", keyHandler); engine?.dispose(); };
   }, [initialSimulationUtc]);
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
@@ -105,7 +108,6 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : "Interactive three-dimensional rendering of Mars"} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
-      <div className="reconstruction-reticle" aria-hidden="true"><i /><span /></div>
       <header className="mission-header">
         <div className="mission-identity">
           <span className="mission-kicker">CAUCHY ARRAY / QSI–04</span>
@@ -119,7 +121,20 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </div>
         <div className="header-actions">
           <span className="array-state"><i /> ARRAY 07 / COHERENT</span>
-          <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>INSTRUMENT <kbd>H</kbd></button>
+          <div className="header-buttons">
+            <button
+              className={`audio-button${audioMuted ? " muted" : ""}`}
+              type="button"
+              onClick={() => {
+                const next = !audioMuted;
+                setAudioMuted(next);
+                window.__BARSOOM__?.setAudioMuted(next);
+              }}
+              aria-label={audioMuted ? "Enable Barsoom audio" : "Mute Barsoom audio"}
+              aria-pressed={!audioMuted}
+            ><i aria-hidden="true" /> AUDIO {audioMuted ? "OFF" : "ON"}</button>
+            <button className="help-button" type="button" onClick={() => setHelpVisible((visible) => !visible)} aria-expanded={helpVisible}>INSTRUMENT <kbd>H</kbd></button>
+          </div>
         </div>
       </header>
       <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
@@ -162,7 +177,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s².</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
-          <p>Left-click a surface point to phase-lock wheel focus to the amber ring. Right-click once to release it and return the solution to cursor-guided focus.</p>
+          <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Right-click once to release it and return the solution to cursor-guided focus.</p>
           <div className="descent-targets"><p className="eyebrow">CALIBRATED MOLA FIELDS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
         </>}
       </aside>}

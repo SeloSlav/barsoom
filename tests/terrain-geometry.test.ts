@@ -11,8 +11,9 @@ import {
   coarserNeighbourEdgeMorphs,
   lodTransitionVisible,
   neighbourBalanceAncestors,
+  sampleMorphedTerrainGrid,
 } from "../app/planet/terrain/PlanetTerrain";
-import { neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
+import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
 import { proceduralTerrainHeightForLod } from "../app/planet/noise";
 import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
@@ -24,6 +25,46 @@ import {
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
 describe("terrain worker geometry", () => {
+  it("samples the exact shader-morphed triangle used as visible ground", () => {
+    const key = { face: "px", lod: 0, x: 0, y: 0 } as const;
+    const childRadiusM = MARS_REFERENCE_RADIUS_M + 120;
+    const parentRadiusM = MARS_REFERENCE_RADIUS_M - 60;
+    const corners = [
+      faceUvToDirection("px", -1, -1),
+      faceUvToDirection("px", 1, -1),
+      faceUvToDirection("px", -1, 1),
+      faceUvToDirection("px", 1, 1),
+    ];
+    const positions = new Float64Array(corners.flatMap((direction) => [
+      direction.x * childRadiusM,
+      direction.y * childRadiusM,
+      direction.z * childRadiusM,
+    ]));
+    const morphDeltas = new Float64Array(corners.flatMap((direction) => [
+      direction.x * (childRadiusM - parentRadiusM),
+      direction.y * (childRadiusM - parentRadiusM),
+      direction.z * (childRadiusM - parentRadiusM),
+    ]));
+    const direction = { x: 1, y: 0, z: 0 };
+
+    const parent = sampleMorphedTerrainGrid(
+      direction, key, { x: 0, y: 0, z: 0 }, positions, morphDeltas, 0, undefined, 1,
+    );
+    const halfway = sampleMorphedTerrainGrid(
+      direction, key, { x: 0, y: 0, z: 0 }, positions, morphDeltas, 0.5, undefined, 1,
+    );
+    const child = sampleMorphedTerrainGrid(
+      direction, key, { x: 0, y: 0, z: 0 }, positions, morphDeltas, 1, undefined, 1,
+    );
+
+    expect(parent?.radiusM).toBeCloseTo(parentRadiusM / Math.sqrt(3), 7);
+    expect(halfway?.radiusM).toBeCloseTo((parentRadiusM + childRadiusM) / (2 * Math.sqrt(3)), 7);
+    expect(child?.radiusM).toBeCloseTo(childRadiusM / Math.sqrt(3), 7);
+    expect(child?.normal.x).toBeCloseTo(1, 12);
+    expect(child?.normal.y).toBeCloseTo(0, 12);
+    expect(child?.normal.z).toBeCloseTo(0, 12);
+  });
+
   it("ships an 8K USGS orbital mosaic, full PBR maps, and a surface-visible aerosol atmosphere", async () => {
     const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global-8k.jpg"));
     const diffuse = await readFile(path.join(process.cwd(), "public/textures/mars-rock-diffuse.jpg"));
@@ -169,6 +210,7 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
     expect(material.fragmentShader).toContain("sampleRandomizedSurfaceDiffuse");
     expect(material.fragmentShader).toContain("surfaceAntiTile");
+    expect(material.fragmentShader).toContain("surfaceAlbedoVisibility");
     expect(material.fragmentShader).toContain("surfaceMaterialResponse");
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
