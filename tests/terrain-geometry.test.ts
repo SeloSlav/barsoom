@@ -88,6 +88,9 @@ describe("terrain worker geometry", () => {
     const atmosphere = createAtmosphereMaterial();
     expect(atmosphere.fragmentShader).toContain("dustySky");
     expect(atmosphere.fragmentShader).toContain("surfaceAlpha");
+    expect(atmosphere.fragmentShader).toContain("atmosphereDither");
+    expect(atmosphere.fragmentShader).toContain("tonemapping_fragment");
+    expect(atmosphere.fragmentShader).toContain("colorspace_fragment");
     atmosphere.dispose();
   });
   it("generates a deterministic planet-anchored surface rock field", () => {
@@ -261,6 +264,10 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("sampleSurfaceNormal(uIceSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness(uIceSurfaceRoughness");
     expect(material.fragmentShader).toContain("mix(martianRock, martianIce, frostWeight)");
+    expect(material.fragmentShader).toContain("shadowFinish");
+    expect(material.fragmentShader).toContain("finishingDitherMask");
+    expect(material.fragmentShader).toContain("tonemapping_fragment");
+    expect(material.fragmentShader).toContain("colorspace_fragment");
     expect(depth.vertexShader).toContain("morphDelta");
     expect(material.vertexShader).toContain("uEdgeMorph");
     expect(depth.vertexShader).toContain("uEdgeMorph");
