@@ -515,7 +515,7 @@ export class PlanetEngine {
   };
 
   private onMoonPointerDown = (event: PointerEvent) => {
-    if (this.observedBody === "Mars" || (event.button !== 1 && event.button !== 2)) return;
+    if (this.observedBody === "Mars" || (event.button !== 0 && event.button !== 1 && event.button !== 2)) return;
     event.preventDefault();
     this.moonDrag = { id: event.pointerId, button: event.button, lastX: event.clientX, lastY: event.clientY };
     this.canvas.setPointerCapture(event.pointerId);
@@ -527,7 +527,7 @@ export class PlanetEngine {
     const deltaY = event.clientY - this.moonDrag.lastY;
     this.moonDrag.lastX = event.clientX;
     this.moonDrag.lastY = event.clientY;
-    if (this.moonDrag.button === 1) {
+    if (this.moonDrag.button === 0 || this.moonDrag.button === 1) {
       this.moonOrbitYawRad -= deltaX * 0.0042;
       this.moonOrbitPitchRad = clamp(this.moonOrbitPitchRad + deltaY * 0.0032, -1.2, 1.2);
       return;

@@ -113,7 +113,7 @@ export class PlanetControls {
   private onPointerDown = (event: PointerEvent) => {
     if (!this.enabled) return;
     this.updateCursor(event);
-    if (event.button !== 1 && event.button !== 2) return;
+    if (event.button !== 0 && event.button !== 1 && event.button !== 2) return;
     event.preventDefault();
     if (event.button === 2) {
       this.lockedZoomAnchor = null;
@@ -131,7 +131,7 @@ export class PlanetControls {
     const dy = event.clientY - this.drag.lastY;
     this.drag.lastX = event.clientX;
     this.drag.lastY = event.clientY;
-    if (this.drag.button === 1) this.orbit(dx, dy);
+    if (this.drag.button === 0 || this.drag.button === 1) this.orbit(dx, dy);
     else this.pan(dx, dy);
     event.preventDefault();
   };

@@ -76,23 +76,27 @@ function trackedHarness(terrainHeight?: (direction: { x: number; y: number; z: n
 }
 
 describe("PlanetControls integration", () => {
-  it("reserves left drag, orbits only with middle drag, and pans only with right drag", () => {
+  it("orbits identically with left or middle drag, and pans only with right drag", () => {
     const { canvas, camera, controls } = trackedHarness();
     const initial = controls.getState();
 
-    pointer(canvas, "pointerdown", 0, 400, 300);
-    pointer(canvas, "pointermove", 0, 510, 350);
-    pointer(canvas, "pointerup", 0, 510, 350);
-    expect(controls.getState()).toEqual(initial);
-
-    expect(pointer(canvas, "pointerdown", 1, 400, 300)).toBe(true);
-    pointer(canvas, "pointermove", 1, 480, 340);
-    pointer(canvas, "pointerup", 1, 480, 340);
+    expect(pointer(canvas, "pointerdown", 0, 400, 300)).toBe(true);
+    pointer(canvas, "pointermove", 0, 480, 340);
+    pointer(canvas, "pointerup", 0, 480, 340);
     const orbited = controls.getState();
     expect(dot3(initial.orbitDirection, orbited.orbitDirection)).toBeLessThan(0.99);
     expect(orbited.latitudeLongitude.latitudeDeg).toBeCloseTo(initial.latitudeLongitude.latitudeDeg, 10);
     expect(orbited.latitudeLongitude.longitudeDeg).toBeCloseTo(initial.latitudeLongitude.longitudeDeg, 10);
     expect(orbited.cameraDistanceM).toBeCloseTo(initial.cameraDistanceM, 8);
+
+    const { canvas: middleCanvas, controls: middleControls } = trackedHarness();
+    expect(pointer(middleCanvas, "pointerdown", 1, 400, 300)).toBe(true);
+    pointer(middleCanvas, "pointermove", 1, 480, 340);
+    pointer(middleCanvas, "pointerup", 1, 480, 340);
+    const middleOrbited = middleControls.getState();
+    expect(middleOrbited.orbitDirection.x).toBeCloseTo(orbited.orbitDirection.x, 12);
+    expect(middleOrbited.orbitDirection.y).toBeCloseTo(orbited.orbitDirection.y, 12);
+    expect(middleOrbited.orbitDirection.z).toBeCloseTo(orbited.orbitDirection.z, 12);
 
     controls.update(1 / 60);
     const forwardBeforePan = camera.getWorldDirection(new THREE.Vector3());
