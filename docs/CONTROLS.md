@@ -2,7 +2,7 @@
 
 | Action | Input | Behaviour |
 |---|---|---|
-| Deploy surface traverse | `~` | Teleports the rigged astronaut to a uniformly random point on Mars and enters third-person mode. Pressing `~` again chooses another random landing site. |
+| Deploy surface traverse | `~` | If a phase lock is active, instantiates the observer at that exact locked surface point. With no lock, chooses a uniformly random point on Mars. Pressing `~` again in traverse mode chooses another random landing site. |
 | Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point with no yaw, pitch, pole, or roll limit. Rotations can wrap repeatedly; only a near-ground endpoint inside terrain is rejected. The first middle drag takes full manual control from the automatic approach composition. |
 | Pan across Mars | Hold right mouse and drag | Clears any locked zoom point, then translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
 | Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. With no selection, the surface point under the cursor anchors inward zoom. With a reticle selection, both inward and outward zoom remain locked to that point. An untouched descent eases from orbital nadir into a 48-degree RTS-style approach below 350 km AGL. |

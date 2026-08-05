@@ -19,6 +19,7 @@ import { proceduralTerrainHeightForLod } from "../app/planet/noise";
 import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
 import {
   calculateSurfaceRockPlacement,
+  createSurfaceRockMaterial,
   generateSurfaceScatter,
 } from "../app/planet/render/SurfaceDetailRenderer";
 
@@ -102,7 +103,15 @@ describe("terrain worker geometry", () => {
       expect(point.sizeM).toBeLessThanOrEqual(config.maximumSizeM);
     }
   });
-  it("seats surface rocks on the same LOD-specific differential surface", () => {
+  it("keeps shadowed surface rocks readable under dusty-sky fill", () => {
+    const material = createSurfaceRockMaterial();
+    expect(material.metalness).toBe(0);
+    expect(material.roughness).toBeLessThan(0.97);
+    expect(material.emissiveIntensity).toBeGreaterThanOrEqual(0.2);
+    expect(material.vertexColors).toBe(true);
+    material.dispose();
+  });
+  it("seats surface rocks on the exact rendered terrain triangle", () => {
     const point = {
       direction: { x: 0.61, y: 0.22, z: -0.76 },
       sizeM: 2.4,
@@ -110,23 +119,26 @@ describe("terrain worker geometry", () => {
       stretch: { x: 0.8, y: 1.15, z: 0.9 },
       tint: 0.5,
     };
-    const sampledLods: number[] = [];
-    const sampler = (direction: { x: number; y: number; z: number }, lod: number) => {
-      sampledLods.push(lod);
-      return direction.x * 320 + direction.z * 140;
+    const supportNormalLength = Math.hypot(0.78, 0.42, -0.16);
+    const support = {
+      radiusM: MARS_REFERENCE_RADIUS_M + 187.25,
+      normal: {
+        x: 0.78 / supportNormalLength,
+        y: 0.42 / supportNormalLength,
+        z: -0.16 / supportNormalLength,
+      },
     };
-    const placement = calculateSurfaceRockPlacement(point, 17, sampler);
+    const placement = calculateSurfaceRockPlacement(point, support);
     const directionLength = Math.hypot(point.direction.x, point.direction.y, point.direction.z);
     const direction = {
       x: point.direction.x / directionLength,
       y: point.direction.y / directionLength,
       z: point.direction.z / directionLength,
     };
-    const height = direction.x * 320 + direction.z * 140;
     const surface = {
-      x: direction.x * (MARS_REFERENCE_RADIUS_M + height),
-      y: direction.y * (MARS_REFERENCE_RADIUS_M + height),
-      z: direction.z * (MARS_REFERENCE_RADIUS_M + height),
+      x: direction.x * support.radiusM,
+      y: direction.y * support.radiusM,
+      z: direction.z * support.radiusM,
     };
     const offset = {
       x: placement.absolute.x - surface.x,
@@ -134,9 +146,9 @@ describe("terrain worker geometry", () => {
       z: placement.absolute.z - surface.z,
     };
     const normalOffset = offset.x * placement.normal.x + offset.y * placement.normal.y + offset.z * placement.normal.z;
-    expect(normalOffset).toBeCloseTo(placement.scale.y * 0.42, 6);
+    expect(normalOffset).toBeCloseTo(placement.scale.y * 0.32, 6);
     expect(Math.hypot(placement.normal.x, placement.normal.y, placement.normal.z)).toBeCloseTo(1, 10);
-    expect(sampledLods.every((lod) => lod === 17)).toBe(true);
+    expect(placement.normal).toEqual(support.normal);
   });
   it("uses the same cache-busting revision in the client and worker", () => {
     expect(WORKER_REVISION).toBe(CLIENT_REVISION);
@@ -208,8 +220,13 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("distributionGgx");
     expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
-    expect(material.fragmentShader).toContain("sampleRandomizedSurfaceDiffuse");
-    expect(material.fragmentShader).toContain("surfaceAntiTile");
+    expect(material.fragmentShader).toContain("rotateSurfaceUv");
+    expect(material.fragmentShader).toContain("sampleSurfaceDiffuseProjection");
+    expect(material.fragmentShader).toContain("sampleSurfaceRoughnessProjection");
+    expect(material.fragmentShader).toContain("sampleSurfaceNormalProjection");
+    expect(material.fragmentShader).toContain("surfaceMapBlend");
+    expect(material.fragmentShader).not.toContain("sampleRandomizedSurfaceDiffuse");
+    expect(material.fragmentShader).not.toContain("surfaceAntiTile");
     expect(material.fragmentShader).toContain("surfaceAlbedoVisibility");
     expect(material.fragmentShader).toContain("surfaceMaterialResponse");
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");

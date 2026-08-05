@@ -21,7 +21,9 @@ const CAMERA_ORBIT_ELEVATION_RAD = THREE.MathUtils.degToRad(14);
 const CAMERA_INITIAL_LOOK_PITCH_RAD = -CAMERA_ORBIT_ELEVATION_RAD;
 const CAMERA_MIN_PITCH_RAD = THREE.MathUtils.degToRad(-85);
 const CAMERA_MAX_PITCH_RAD = THREE.MathUtils.degToRad(85);
-const CAMERA_HEIGHT_FOLLOW_RATE = 5.5;
+const CAMERA_HEIGHT_SMOOTH_TIME_S = 0.34;
+const CAMERA_MAX_HEIGHT_SPEED_M_S = 8;
+const SURFACE_NORMAL_FOLLOW_RATE = 8;
 const BOOT_SOLE_CLEARANCE_M = 0.025;
 
 type AnimationName = "idle" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
@@ -40,6 +42,18 @@ export function randomMarsSurfaceDirection(random: () => number = Math.random): 
     x: horizontal * Math.cos(longitude),
     y,
     z: horizontal * Math.sin(longitude),
+  };
+}
+
+export function normalizeMarsSurfaceDirection(direction: Vec3): Vec3 {
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  if (!Number.isFinite(length) || length <= Number.EPSILON) {
+    throw new RangeError("Surface target direction must be a finite, non-zero vector.");
+  }
+  return {
+    x: direction.x / length,
+    y: direction.y / length,
+    z: direction.z / length,
   };
 }
 
@@ -74,14 +88,45 @@ export function wowMouseAutoRun(leftMouseHeld: boolean, rightMouseHeld: boolean)
   return leftMouseHeld && rightMouseHeld;
 }
 
-export function dampCameraHeight(
+export type CameraHeightMotion = {
+  heightM: number;
+  velocityMps: number;
+};
+
+/**
+ * Critically damped vertical camera motion with a bounded catch-up speed.
+ * Unlike a first-order lerp, this preserves velocity between frames, so a
+ * streaming/triangle height change cannot instantly change camera velocity.
+ */
+export function smoothCameraHeight(
   currentHeightM: number,
   targetHeightM: number,
+  currentVelocityMps: number,
   deltaSeconds: number,
-  followRate = CAMERA_HEIGHT_FOLLOW_RATE,
-) {
-  const blend = 1 - Math.exp(-Math.max(0, deltaSeconds) * Math.max(0, followRate));
-  return currentHeightM + (targetHeightM - currentHeightM) * blend;
+  smoothTimeS = CAMERA_HEIGHT_SMOOTH_TIME_S,
+  maxSpeedMps = CAMERA_MAX_HEIGHT_SPEED_M_S,
+): CameraHeightMotion {
+  const delta = Math.max(0, deltaSeconds);
+  if (delta === 0) return { heightM: currentHeightM, velocityMps: currentVelocityMps };
+
+  const smoothTime = Math.max(0.0001, smoothTimeS);
+  const omega = 2 / smoothTime;
+  const scaledDelta = omega * delta;
+  const decay = 1 / (1 + scaledDelta + 0.48 * scaledDelta ** 2 + 0.235 * scaledDelta ** 3);
+  const originalTarget = targetHeightM;
+  const maximumChange = Math.max(0, maxSpeedMps) * smoothTime;
+  const change = clamp(currentHeightM - targetHeightM, -maximumChange, maximumChange);
+  const boundedTarget = currentHeightM - change;
+  const temporaryVelocity = (currentVelocityMps + omega * change) * delta;
+  let velocityMps = (currentVelocityMps - omega * temporaryVelocity) * decay;
+  let heightM = boundedTarget + (change + temporaryVelocity) * decay;
+
+  // Numerical protection against crossing a stationary target on a long frame.
+  if ((originalTarget - currentHeightM > 0) === (heightM > originalTarget)) {
+    heightM = originalTarget;
+    velocityMps = 0;
+  }
+  return { heightM, velocityMps };
 }
 
 /**
@@ -102,6 +147,7 @@ export class SurfaceTraverseController {
   private readonly east = new THREE.Vector3();
   private readonly up = new THREE.Vector3();
   private readonly surfaceNormal = new THREE.Vector3(1, 0, 0);
+  private readonly sampledSurfaceNormal = new THREE.Vector3(1, 0, 0);
   private readonly forward = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly modelForward = new THREE.Vector3();
@@ -124,7 +170,9 @@ export class SurfaceTraverseController {
   private cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
   private cameraDistanceM = 7;
   private cameraAnchorHeightM = 0;
+  private cameraAnchorVelocityMps = 0;
   private cameraAnchorInitialized = false;
+  private surfaceNormalInitialized = false;
   private verticalOffsetM = 0;
   private verticalVelocityMps = 0;
   private airborneSeconds = 0;
@@ -200,14 +248,20 @@ export class SurfaceTraverseController {
   }
 
   teleportRandom(random: () => number = Math.random) {
+    this.teleportTo(randomMarsSurfaceDirection(random), random() * Math.PI * 2);
+  }
+
+  teleportTo(targetDirection: Vec3, headingRad = Math.random() * Math.PI * 2) {
     const wasActive = this.active;
-    const next = randomMarsSurfaceDirection(random);
-    this.direction.set(next.x, next.y, next.z).normalize();
-    this.headingRad = random() * Math.PI * 2;
+    const next = normalizeMarsSurfaceDirection(targetDirection);
+    this.direction.set(next.x, next.y, next.z);
+    this.headingRad = headingRad;
     this.cameraYawRad = this.headingRad;
     this.cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
     this.cameraDistanceM = 7;
+    this.cameraAnchorVelocityMps = 0;
     this.cameraAnchorInitialized = false;
+    this.surfaceNormalInitialized = false;
     this.verticalOffsetM = 0;
     this.verticalVelocityMps = 0;
     this.airborneSeconds = 0;
@@ -368,8 +422,15 @@ export class SurfaceTraverseController {
 
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
-    this.surfaceNormal.set(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
-    if (this.surfaceNormal.dot(this.direction) < 0) this.surfaceNormal.negate();
+    this.sampledSurfaceNormal.set(surface.normal.x, surface.normal.y, surface.normal.z).normalize();
+    if (this.sampledSurfaceNormal.dot(this.direction) < 0) this.sampledSurfaceNormal.negate();
+    if (!this.surfaceNormalInitialized) {
+      this.surfaceNormal.copy(this.sampledSurfaceNormal);
+      this.surfaceNormalInitialized = true;
+    } else {
+      const normalBlend = 1 - Math.exp(-delta * SURFACE_NORMAL_FOLLOW_RATE);
+      this.surfaceNormal.lerp(this.sampledSurfaceNormal, normalBlend).normalize();
+    }
     const groundRadiusM = MARS_REFERENCE_RADIUS_M + this.groundHeightM;
     this.footAbsolute.copy(this.direction).multiplyScalar(groundRadiusM);
     this.playerAbsolute.copy(this.footAbsolute).addScaledVector(
@@ -387,19 +448,26 @@ export class SurfaceTraverseController {
     // the movement heading, so no additional half-turn belongs here.
     this.root.quaternion.setFromRotationMatrix(this.orientation);
 
+    // The camera frame stays tangent to the smooth planetary radial direction.
+    // Rendered triangle normals are intentionally excluded: they are piecewise
+    // planar and can change during LOD morphs, which used to snap both camera
+    // position and look direction at every terrain-normal discontinuity.
     this.headingVector(this.cameraYawRad, this.forward);
-    this.forward.addScaledVector(this.surfaceNormal, -this.forward.dot(this.surfaceNormal)).normalize();
-    const desiredCameraAnchorHeightM = this.playerAbsolute.length() - MARS_REFERENCE_RADIUS_M +
-      CAMERA_TARGET_HEIGHT_M;
+    const desiredCameraAnchorHeightM = this.groundHeightM + this.verticalOffsetM +
+      BOOT_SOLE_CLEARANCE_M + CAMERA_TARGET_HEIGHT_M;
     if (!this.cameraAnchorInitialized) {
       this.cameraAnchorHeightM = desiredCameraAnchorHeightM;
+      this.cameraAnchorVelocityMps = 0;
       this.cameraAnchorInitialized = true;
     } else {
-      this.cameraAnchorHeightM = dampCameraHeight(
+      const heightMotion = smoothCameraHeight(
         this.cameraAnchorHeightM,
         desiredCameraAnchorHeightM,
+        this.cameraAnchorVelocityMps,
         delta,
       );
+      this.cameraAnchorHeightM = heightMotion.heightM;
+      this.cameraAnchorVelocityMps = heightMotion.velocityMps;
     }
     this.targetAbsolute.copy(this.direction).multiplyScalar(
       MARS_REFERENCE_RADIUS_M + this.cameraAnchorHeightM,

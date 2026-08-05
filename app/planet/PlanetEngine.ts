@@ -154,8 +154,7 @@ export class PlanetEngine {
     this.terrain = new PlanetTerrain(this.scene);
     this.surfaceDetails = new SurfaceDetailRenderer(
       this.scene,
-      (direction, lod) => this.terrain.sampleHeightAtLod(direction, lod),
-      (direction) => this.terrain.renderedLodAtDirection(direction),
+      (direction) => this.terrain.sampleVisibleRenderedSurface(direction),
     );
     this.controls = new PlanetControls(
       canvas,
@@ -269,7 +268,7 @@ export class PlanetEngine {
         this.skyState = calculateMarsSky(epoch);
         this.lastSkyUpdate = -Infinity;
       },
-      teleportRandomSurface: () => this.enterSurfaceTraverse(),
+      teleportRandomSurface: () => this.enterSurfaceTraverse(null),
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
       getAudioMuted: () => this.getAudioMuted(),
       setAudioMuted: (muted) => this.setAudioMuted(muted),
@@ -529,10 +528,12 @@ export class PlanetEngine {
     }
   };
 
-  private enterSurfaceTraverse() {
+  private enterSurfaceTraverse(targetDirection: THREE.Vector3 | null = this.selectionDirection) {
+    const lockedTarget = targetDirection?.clone() ?? null;
     this.controls.setEnabled(false);
     this.clearSelection();
-    this.surfaceTraverse.teleportRandom();
+    if (lockedTarget) this.surfaceTraverse.teleportTo(lockedTarget);
+    else this.surfaceTraverse.teleportRandom();
     this.audio.setSurfaceMode(true);
     this.audio.playObserverTransition(true);
     this.lastTelemetryTime = -Infinity;

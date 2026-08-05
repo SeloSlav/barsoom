@@ -177,7 +177,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s².</p>
         </> : <>
           <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Middle-mouse drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Solver diagnostics</dt><dd>F3</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
-          <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Right-click once to release it and return the solution to cursor-guided focus.</p>
+          <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. Press <kbd>~</kbd> to instantiate the observer at that exact coordinate. Right-click once to release the lock and return the solution to cursor-guided focus.</p>
           <div className="descent-targets"><p className="eyebrow">CALIBRATED MOLA FIELDS</p><div>{DESCENT_TARGETS.map((target) => <button key={target.label} type="button" onClick={() => { window.__BARSOOM__?.setLocation(target.lat, target.lon, target.altitudeM); setHelpVisible(false); }}>{target.label}</button>)}</div></div>
         </>}
       </aside>}

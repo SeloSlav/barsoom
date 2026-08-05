@@ -243,49 +243,64 @@ const terrainFragment = /* glsl */ `
     return weights / max(weights.x + weights.y + weights.z, 0.0001);
   }
 
-  vec3 sampleRandomizedSurfaceDiffuse(vec2 projectedMetres, float antiTile) {
-    vec2 textureUv = projectedMetres / 2.4;
-    if (antiTile < 0.001) return texture2D(uSurfaceDiffuse, textureUv).rgb;
-
-    // Blend four deterministic phase offsets over broad, world-anchored
-    // patches. Neighbouring patches share the same samples at their boundary,
-    // so the photographed detail remains continuous without exposing its
-    // original 2.4 m repeat lattice in wider surface views.
-    vec2 patchUv = projectedMetres / 6.7;
-    vec2 patchCell = floor(patchUv);
-    vec2 patchBlend = fract(patchUv);
-    patchBlend = patchBlend * patchBlend * (3.0 - 2.0 * patchBlend);
-    vec3 lowerLeft = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell)).rgb;
-    vec3 lowerRight = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(1.0, 0.0))).rgb;
-    vec3 upperLeft = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(0.0, 1.0))).rgb;
-    vec3 upperRight = texture2D(uSurfaceDiffuse, textureUv + hash22(patchCell + vec2(1.0, 1.0))).rgb;
-    vec3 randomized = mix(
-      mix(lowerLeft, lowerRight, patchBlend.x),
-      mix(upperLeft, upperRight, patchBlend.x),
-      patchBlend.y
-    );
-    if (antiTile > 0.999) return randomized;
-    return mix(texture2D(uSurfaceDiffuse, textureUv).rgb, randomized, antiTile);
+  mat2 rotateSurfaceUv(float angle) {
+    float cosine = cos(angle);
+    float sine = sin(angle);
+    return mat2(cosine, sine, -sine, cosine);
   }
 
-  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights, float antiTile) {
-    vec3 x = sampleRandomizedSurfaceDiffuse(metres.yz, antiTile);
-    vec3 y = sampleRandomizedSurfaceDiffuse(metres.xz, antiTile);
-    vec3 z = sampleRandomizedSurfaceDiffuse(metres.xy, antiTile);
+  float surfaceMapBlend(vec2 projectedMetres, float seed) {
+    float variation = valueNoise(vec3(projectedMetres / 14.0, seed * 9.31 + 2.7));
+    return smoothstep(0.20, 0.80, variation);
+  }
+
+  vec2 surfaceMapUv(vec2 projectedMetres, float seed, bool secondary) {
+    float angle = secondary ? -0.91 + seed * 0.83 : 0.47 + seed * 1.71;
+    float scaleM = secondary ? 5.65 : 3.15;
+    vec2 offset = hash22(vec2(seed * 17.13 + (secondary ? 8.1 : 1.7), seed * 5.73)) * 19.0;
+    return rotateSurfaceUv(angle) * projectedMetres / scaleM + offset;
+  }
+
+  vec3 sampleSurfaceDiffuseProjection(vec2 projectedMetres, float seed) {
+    vec3 primary = texture2D(uSurfaceDiffuse, surfaceMapUv(projectedMetres, seed, false)).rgb;
+    vec3 secondary = texture2D(uSurfaceDiffuse, surfaceMapUv(projectedMetres, seed, true)).rgb;
+    return mix(primary, secondary, surfaceMapBlend(projectedMetres, seed));
+  }
+
+  float sampleSurfaceRoughnessProjection(vec2 projectedMetres, float seed) {
+    float primary = texture2D(uSurfaceRoughness, surfaceMapUv(projectedMetres, seed, false)).r;
+    float secondary = texture2D(uSurfaceRoughness, surfaceMapUv(projectedMetres, seed, true)).r;
+    return mix(primary, secondary, surfaceMapBlend(projectedMetres, seed));
+  }
+
+  vec3 sampleSurfaceNormalProjection(vec2 projectedMetres, float seed) {
+    float primaryAngle = 0.47 + seed * 1.71;
+    float secondaryAngle = -0.91 + seed * 0.83;
+    vec3 primary = texture2D(uSurfaceNormal, surfaceMapUv(projectedMetres, seed, false)).xyz * 2.0 - 1.0;
+    vec3 secondary = texture2D(uSurfaceNormal, surfaceMapUv(projectedMetres, seed, true)).xyz * 2.0 - 1.0;
+    primary.xy = rotateSurfaceUv(-primaryAngle) * primary.xy;
+    secondary.xy = rotateSurfaceUv(-secondaryAngle) * secondary.xy;
+    return normalize(mix(primary, secondary, surfaceMapBlend(projectedMetres, seed)));
+  }
+
+  vec3 sampleSurfaceDiffuse(vec3 metres, vec3 weights) {
+    vec3 x = sampleSurfaceDiffuseProjection(metres.yz, 0.17);
+    vec3 y = sampleSurfaceDiffuseProjection(metres.xz, 1.73);
+    vec3 z = sampleSurfaceDiffuseProjection(metres.xy, 3.41);
     return x * weights.x + y * weights.y + z * weights.z;
   }
 
   float sampleSurfaceRoughness(vec3 metres, vec3 weights) {
-    float x = texture2D(uSurfaceRoughness, metres.yz / 2.4).r;
-    float y = texture2D(uSurfaceRoughness, metres.xz / 2.4).r;
-    float z = texture2D(uSurfaceRoughness, metres.xy / 2.4).r;
+    float x = sampleSurfaceRoughnessProjection(metres.yz, 0.17);
+    float y = sampleSurfaceRoughnessProjection(metres.xz, 1.73);
+    float z = sampleSurfaceRoughnessProjection(metres.xy, 3.41);
     return x * weights.x + y * weights.y + z * weights.z;
   }
 
   vec3 sampleSurfaceNormal(vec3 metres, vec3 baseNormal, vec3 weights) {
-    vec3 mapX = texture2D(uSurfaceNormal, metres.yz / 2.4).xyz * 2.0 - 1.0;
-    vec3 mapY = texture2D(uSurfaceNormal, metres.xz / 2.4).xyz * 2.0 - 1.0;
-    vec3 mapZ = texture2D(uSurfaceNormal, metres.xy / 2.4).xyz * 2.0 - 1.0;
+    vec3 mapX = sampleSurfaceNormalProjection(metres.yz, 0.17);
+    vec3 mapY = sampleSurfaceNormalProjection(metres.xz, 1.73);
+    vec3 mapZ = sampleSurfaceNormalProjection(metres.xy, 3.41);
     vec3 signs = mix(vec3(-1.0), vec3(1.0), step(vec3(0.0), baseNormal));
     vec3 worldX = normalize(vec3(mapX.z * signs.x, mapX.x, mapX.y));
     vec3 worldY = normalize(vec3(mapY.x, mapY.z * signs.y, mapY.y));
@@ -353,19 +368,17 @@ const terrainFragment = /* glsl */ `
     float surfaceMaterialResponse = 0.0;
     float mappedRoughness = 0.94;
     vec3 mappedNormal = normal;
-    if (uTileLod > 12.0 && uCameraAltitude < 58.0) {
+    if (uCameraAltitude < 68.0) {
       float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
-      // The source photograph is a close-range material, not regional
-      // terrain. Hand its colour back to the non-repeating procedural field
-      // before its 2.4 m source scale can read as wallpaper from above.
-      float surfaceAlbedoVisibility = 1.0 - smoothstep(18.0, 58.0, uCameraAltitude);
-      surfacePbrBlend = smoothstep(13.5, 16.5, uTileLod) *
-        surfaceAlbedoVisibility *
+      // Material visibility depends on continuous camera/fragment metrics,
+      // never streamed LOD. This prevents a close PBR field from pulsing as
+      // geometry refines beneath it.
+      float surfaceAlbedoVisibility = 1.0 - smoothstep(24.0, 68.0, uCameraAltitude);
+      surfacePbrBlend = surfaceAlbedoVisibility *
         (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
-      float surfaceAntiTile = smoothstep(5.0, 22.0, uCameraAltitude);
       surfaceMaterialResponse = surfacePbrBlend * (1.0 - smoothstep(9.0, 34.0, uCameraAltitude));
       vec3 textureWeights = triplanarWeights(normal);
-      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights, surfaceAntiTile);
+      vec3 photographedRock = sampleSurfaceDiffuse(vStableMetres, textureWeights);
       vec3 martianRock = photographedRock * vec3(1.10, 0.67, 0.46);
       martianRock *= 0.88 + macro * 0.22;
       albedo = mix(albedo, martianRock, surfacePbrBlend * (1.0 - frostWeight));
@@ -404,7 +417,7 @@ const terrainFragment = /* glsl */ `
     }
     metreMicro -= radial * dot(metreMicro, radial);
     normal = normalize(normal + orbitalMicro * 0.025 + metreMicro * (0.12 * grainVisibility));
-    normal = normalize(mix(normal, mappedNormal, surfaceMaterialResponse * 0.72 * (1.0 - frostWeight)));
+    normal = normalize(mix(normal, mappedNormal, surfaceMaterialResponse * 0.50 * (1.0 - frostWeight)));
 
     vec3 sun = normalize(uSunDirection);
     float ndl = max(dot(normal, sun), 0.0);

@@ -659,11 +659,7 @@ export class PlanetTerrain {
     return null;
   }
 
-  renderedLodAtDirection(directionInput: Vec3) {
-    return this.renderedNodeAtDirection(normalize3(directionInput))?.key.lod ?? 0;
-  }
-
-  sampleRenderedSurface(directionInput: Vec3): RenderedTerrainSurface {
+  sampleVisibleRenderedSurface(directionInput: Vec3): RenderedTerrainSurface | null {
     const direction = normalize3(directionInput);
     const node = this.renderedNodeAtDirection(direction);
     if (node?.mesh && node.center) {
@@ -682,10 +678,18 @@ export class PlanetTerrain {
       if (rendered) return { ...rendered, lod: node.key.lod };
     }
 
+    return null;
+  }
+
+  sampleRenderedSurface(directionInput: Vec3): RenderedTerrainSurface {
+    const direction = normalize3(directionInput);
+    const rendered = this.sampleVisibleRenderedSurface(direction);
+    if (rendered) return rendered;
+
     // Before the first root tile is ready there is no rendered triangle to
     // intersect. LOD 0 is the closest possible representation of that pending
     // mesh and avoids snapping the player to invisible high-frequency detail.
-    const lod = node?.key.lod ?? 0;
+    const lod = 0;
     const heightM = this.sampleHeightAtLod(direction, lod);
     const differential = surfaceNormalAndSlope(
       direction,
