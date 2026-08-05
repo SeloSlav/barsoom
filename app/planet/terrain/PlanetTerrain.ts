@@ -366,12 +366,17 @@ export class PlanetTerrain {
         positiveModulo(node.center!.y, MATERIAL_PERIOD_M),
         positiveModulo(node.center!.z, MATERIAL_PERIOD_M),
       );
+      // Every tile shares this ShaderMaterial. Three.js otherwise uploads
+      // custom uniforms only for the first object using the material, leaving
+      // later tiles with another tile's fade, morph, LOD and stable origin.
+      this.material.uniformsNeedUpdate = true;
     };
     mesh.customDepthMaterial = this.shadowMaterial;
     mesh.receiveShadow = true;
     mesh.onBeforeShadow = () => {
       const renderState = mesh.userData.renderState as TileRenderState;
       this.shadowMaterial.uniforms.uMorph.value = renderState.morph;
+      this.shadowMaterial.uniformsNeedUpdate = true;
     };
     this.scene.add(mesh);
     node.mesh = mesh;
