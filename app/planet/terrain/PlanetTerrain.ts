@@ -7,12 +7,14 @@ import {
   length3,
   neighbourTile,
   normalize3,
+  surfaceDifferentialDirections,
+  surfaceNormalAndSlope,
   tileBounds,
   tileKeyToString,
 } from "../math";
 import { MolaTileLoader } from "../mola";
 import { proceduralDetailHeight } from "../noise";
-import type { DebugFlags, TileKey, Vec3 } from "../types";
+import type { DebugFlags, TileEdge, TileKey, Vec3 } from "../types";
 import { createTerrainMaterial, type TerrainMaterial } from "../render/materials";
 import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPool";
 
@@ -21,7 +23,28 @@ type TileState = "idle" | "loading-data" | "queued" | "ready" | "failed";
 type TileRenderState = {
   fade: number;
   morph: number;
+  fadeIn: boolean;
 };
+
+export function lodTransitionVisible(dither: number, fade: number, fadeIn: boolean) {
+  if (fade >= 0.999) return true;
+  return fadeIn ? dither <= fade : dither > 1 - fade;
+}
+
+export function neighbourBalanceAncestors(tile: TileKey, edge: TileEdge) {
+  const neighbour = neighbourTile(tile, edge);
+  const ancestors: TileKey[] = [];
+  for (let lod = 0; lod < neighbour.lod; lod += 1) {
+    const divisor = 2 ** (neighbour.lod - lod);
+    ancestors.push({
+      face: neighbour.face,
+      lod,
+      x: Math.floor(neighbour.x / divisor),
+      y: Math.floor(neighbour.y / divisor),
+    });
+  }
+  return { neighbour, ancestors };
+}
 
 class PlanetTileNode {
   readonly id: string;
@@ -179,7 +202,7 @@ export class PlanetTerrain {
       node.key.lod < TERRAIN_CONFIG.maxRenderLod &&
       this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles;
     if (!canSplit) {
-      this.addVisible(node, { fade: 1, morph: 1 });
+      this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
 
@@ -192,17 +215,17 @@ export class PlanetTerrain {
     const allChildrenReady = children.every((child) => child.state === "ready");
     if (!allChildrenReady) {
       node.childrenReadyAt = -1;
-      this.addVisible(node, { fade: 1, morph: 1 });
+      this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
 
     if (node.childrenReadyAt < 0) node.childrenReadyAt = this.nowS;
     const transition = Math.min(1, Math.max(0, (this.nowS - node.childrenReadyAt) / TERRAIN_CONFIG.morphDurationS));
-    if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1 });
+    if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1, fadeIn: false });
     for (const child of children) {
       if (transition < 1) {
         const childVisibility = this.visibility(child);
-        if (childVisibility.visible) this.addVisible(child, { fade: transition, morph: transition });
+        if (childVisibility.visible) this.addVisible(child, { fade: transition, morph: transition, fadeIn: true });
       } else {
         this.visit(child, visibility.screenError);
       }
@@ -226,18 +249,15 @@ export class PlanetTerrain {
     // T-junctions. The two-frame lifetime removes root traversal order bias.
     if (node.key.lod === 0) return;
     for (const edge of ["north", "east", "south", "west"] as const) {
-      const neighbour = neighbourTile(node.key, edge);
-      let current = this.roots[FACE_INDEX[neighbour.face]];
-      for (let depth = 1; depth <= neighbour.lod; depth += 1) {
+      const { neighbour, ancestors } = neighbourBalanceAncestors(node.key, edge);
+      for (const ancestor of ancestors) {
+        const current = this.allNodes.get(tileKeyToString(ancestor));
+        if (!current) throw new Error(`Missing quadtree ancestor ${tileKeyToString(ancestor)}`);
         current.lastWantedFrame = this.frame;
         current.forcedSplitUntilFrame = Math.max(current.forcedSplitUntilFrame, this.frame + 2);
-        const children = this.ensureChildren(current);
-        const shift = neighbour.lod - depth;
-        const xBit = (Math.floor(neighbour.x / 2 ** shift)) & 1;
-        const yBit = (Math.floor(neighbour.y / 2 ** shift)) & 1;
-        current = children[xBit + yBit * 2];
+        this.ensureChildren(current);
       }
-      current.lastWantedFrame = this.frame;
+      this.allNodes.get(tileKeyToString(neighbour))!.lastWantedFrame = this.frame;
     }
   }
 
@@ -329,10 +349,11 @@ export class PlanetTerrain {
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.userData.tileNode = node;
-    mesh.userData.renderState = { fade: 1, morph: 1 } satisfies TileRenderState;
+    mesh.userData.renderState = { fade: 1, morph: 1, fadeIn: false } satisfies TileRenderState;
     mesh.onBeforeRender = () => {
       const renderState = mesh.userData.renderState as TileRenderState;
       this.material.uniforms.uFade.value = renderState.fade;
+      this.material.uniforms.uFadeIn.value = renderState.fadeIn ? 1 : 0;
       this.material.uniforms.uMorph.value = renderState.morph;
       this.material.uniforms.uTileLod.value = node.key.lod;
       this.material.uniforms.uFaceIndex.value = FACE_INDEX[node.key.face];
@@ -357,8 +378,9 @@ export class PlanetTerrain {
   }
 
   private addVisible(node: PlanetTileNode, renderState: TileRenderState) {
-    if (!node.mesh || node.state !== "ready" || renderState.fade <= 0.001) {
-      if (node.parent) this.addVisible(node.parent, { fade: 1, morph: 1 });
+    if (renderState.fade <= 0.001) return;
+    if (!node.mesh || node.state !== "ready") {
+      if (node.parent) this.addVisible(node.parent, { fade: 1, morph: 1, fadeIn: false });
       return;
     }
     node.mesh.visible = true;
@@ -457,6 +479,21 @@ export class PlanetTerrain {
       radiusHeightM,
       areoidElevationM: radiusHeightM - areoidHeightM,
     };
+  }
+
+  async querySurface(directionInput: Vec3) {
+    const direction = normalize3(directionInput);
+    const samples = surfaceDifferentialDirections(direction);
+    await Promise.all([
+      samples.direction,
+      samples.east,
+      samples.west,
+      samples.north,
+      samples.south,
+    ].map((sampleDirection) => this.loader.prefetchDirection(sampleDirection)));
+    const surface = this.sampleSurface(direction);
+    const differential = surfaceNormalAndSlope(direction, (sampleDirection) => this.sampleHeight(sampleDirection));
+    return { ...surface, normal: differential.normal, slopeDegrees: differential.slopeDegrees };
   }
 
   prefetch(direction: Vec3) {

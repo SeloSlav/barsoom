@@ -1,12 +1,12 @@
 import * as THREE from "three";
 import { MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
-import { calculateMarsSky, type MarsSkyState } from "./ephemeris";
-import { cartesianToLatLonElevation, clamp, raySphereIntersection } from "./math";
+import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsSkyState } from "./ephemeris";
+import { cartesianToLatLonElevation, clamp, latLonElevationToCartesian, rayTerrainIntersection } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
-import type { DebugFlags, PlanetTelemetry } from "./types";
+import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
 export type PlanetEngineApi = {
   getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null };
@@ -14,6 +14,9 @@ export type PlanetEngineApi = {
   setAltitude: (altitudeM: number, immediate?: boolean) => void;
   setDebug: (flag: keyof DebugFlags, value: boolean) => void;
   getDebug: () => DebugFlags;
+  querySurface: (latitudeDeg: number, longitudeDeg: number) => Promise<SurfaceQuery>;
+  setNightSide: (altitudeM?: number) => void;
+  setTerminator: (altitudeM?: number) => void;
 };
 
 declare global {
@@ -91,6 +94,16 @@ export class PlanetEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.14;
+    this.renderer.debug.checkShaderErrors = true;
+    this.renderer.debug.onShaderError = (gl, program, vertexShader, fragmentShader) => {
+      const details = [
+        gl.getProgramInfoLog(program),
+        gl.getShaderInfoLog(vertexShader),
+        gl.getShaderInfoLog(fragmentShader),
+      ].filter(Boolean).join("\n");
+      console.error("Barsoom GPU shader compilation failed", details);
+      this.onError("A Mars rendering shader could not compile on this GPU. Details are in the browser console.");
+    };
     this.renderer.autoClear = false;
     this.renderer.info.autoReset = false;
     this.scene.background = null;
@@ -106,8 +119,9 @@ export class PlanetEngine {
     // Begin above the illuminated hemisphere for a legible first descent. The
     // simulation remains physically time-based; this only chooses the landing
     // point, it does not move the Sun or add a scene-wide fill light.
-    const subsolarPoint = cartesianToLatLonElevation(this.skyState.sunDirection, 1);
-    this.controls.setLocation(subsolarPoint.latitudeDeg, subsolarPoint.longitudeDeg, 10_000_000);
+    const composition = chooseOrbitalSurveyComposition(this.skyState);
+    const initialPoint = cartesianToLatLonElevation(composition.focusDirection, 1);
+    this.controls.setLocation(initialPoint.latitudeDeg, initialPoint.longitudeDeg, 10_000_000);
     this.atmosphere = new AtmosphereRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
 
@@ -134,6 +148,29 @@ export class PlanetEngine {
       setAltitude: (altitudeM, immediate) => this.controls.setAltitude(altitudeM, immediate),
       setDebug: (flag, value) => { this.debug[flag] = value; },
       getDebug: () => ({ ...this.debug }),
+      querySurface: (latitudeDeg, longitudeDeg) => {
+        const direction = latLonElevationToCartesian(latitudeDeg, longitudeDeg, 0, 1);
+        return this.terrain.querySurface(direction);
+      },
+      setNightSide: (altitudeM = 100) => {
+        const night = cartesianToLatLonElevation({
+          x: -this.skyState.sunDirection.x,
+          y: -this.skyState.sunDirection.y,
+          z: -this.skyState.sunDirection.z,
+        }, 1);
+        this.controls.setLocation(night.latitudeDeg, night.longitudeDeg, altitudeM);
+      },
+      setTerminator: (altitudeM = 10_000_000) => {
+        const sun = new THREE.Vector3(
+          this.skyState.sunDirection.x,
+          this.skyState.sunDirection.y,
+          this.skyState.sunDirection.z,
+        );
+        const reference = Math.abs(sun.y) < 0.9 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(1, 0, 0);
+        const terminator = new THREE.Vector3().crossVectors(sun, reference).normalize();
+        const location = cartesianToLatLonElevation(terminator, 1);
+        this.controls.setLocation(location.latitudeDeg, location.longitudeDeg, altitudeM);
+      },
     };
     this.renderer.setAnimationLoop(this.animate);
   }
@@ -272,14 +309,9 @@ export class PlanetEngine {
       -((event.clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1,
     );
     const direction = new THREE.Vector3(ndc.x, ndc.y, 0.4).unproject(this.camera).normalize();
-    const distance = raySphereIntersection(this.controlState.cameraAbsolute, direction, MARS_REFERENCE_RADIUS_M + 2_000);
-    if (distance === null) return;
-    const point = new THREE.Vector3(
-      this.controlState.cameraAbsolute.x,
-      this.controlState.cameraAbsolute.y,
-      this.controlState.cameraAbsolute.z,
-    ).addScaledVector(direction, distance);
-    this.selectionDirection = point.normalize();
+    const hit = rayTerrainIntersection(this.controlState.cameraAbsolute, direction, (sampleDirection) => this.terrain.sampleHeight(sampleDirection));
+    if (!hit) return;
+    this.selectionDirection = new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z);
     void this.terrain.prefetch(this.selectionDirection);
   };
 

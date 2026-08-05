@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { calculateMarsSky, inertialToMarsFixedVector, marsOrientationMatrix } from "../app/planet/ephemeris";
+import { calculateMarsSky, chooseOrbitalSurveyComposition, inertialToMarsFixedVector, marsOrientationMatrix } from "../app/planet/ephemeris";
 import { dot3, length3 } from "../app/planet/math";
 
 describe("embedded astronomical data", () => {
@@ -58,8 +58,10 @@ describe("embedded astronomical data", () => {
     const sky = calculateMarsSky(utc);
     expect(calculateMarsSky(new Date(utc)).sunDirection).toEqual(sky.sunDirection);
     expect(length3(sky.sunDirection)).toBeCloseTo(1, 12);
+    expect(sky.sunAngularRadiusRad).toBeGreaterThan(0.0025);
+    expect(sky.sunAngularRadiusRad).toBeLessThan(0.0037);
     expect(sky.bodies.map((body) => body.name)).toEqual([
-      "Mercury", "Venus", "Earth", "Jupiter", "Saturn", "Uranus", "Neptune", "Phobos", "Deimos",
+      "Mercury", "Venus", "Earth", "Jupiter", "Saturn", "Uranus", "Neptune",
     ]);
     for (const body of sky.bodies) {
       expect(length3(body.direction)).toBeCloseTo(1, 10);
@@ -69,5 +71,14 @@ describe("embedded astronomical data", () => {
     }
     const later = calculateMarsSky(new Date(utc.getTime() + 3_600_000));
     expect(dot3(sky.sunDirection, later.sunDirection)).toBeLessThan(0.9999);
+
+    const composition = chooseOrbitalSurveyComposition(sky);
+    expect(dot3(composition.focusDirection, sky.sunDirection)).toBeGreaterThanOrEqual(0.28);
+    if (composition.featuredBody) {
+      const body = sky.bodies.find((candidate) => candidate.name === composition.featuredBody)!;
+      const viewCenter = { x: -composition.focusDirection.x, y: -composition.focusDirection.y, z: -composition.focusDirection.z };
+      const offsetDegrees = Math.acos(dot3(body.direction, viewCenter)) * 180 / Math.PI;
+      expect(offsetDegrees).toBeCloseTo(18, 8);
+    }
   });
 });

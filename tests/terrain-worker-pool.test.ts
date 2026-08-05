@@ -6,14 +6,14 @@ class FakeWorker {
   static instances: FakeWorker[] = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
-  readonly posted: Array<Record<string, any>> = [];
+  readonly posted: Array<Record<string, unknown>> = [];
   terminated = false;
 
   constructor() {
     FakeWorker.instances.push(this);
   }
 
-  postMessage(message: Record<string, any>) {
+  postMessage(message: Record<string, unknown>) {
     this.posted.push(message);
   }
 

@@ -2,6 +2,7 @@ import { Body, HelioVector } from "astronomy-engine";
 import type { Vec3 } from "./types";
 
 const AU_KM = 149_597_870.7;
+const SUN_RADIUS_KM = 695_700;
 const J2000_MS = Date.UTC(2000, 0, 1, 12, 0, 0);
 
 export type CelestialBodyState = {
@@ -16,8 +17,14 @@ export type CelestialBodyState = {
 export type MarsSkyState = {
   utc: Date;
   sunDirection: Vec3;
+  sunAngularRadiusRad: number;
   inertialToMarsFixed: number[];
   bodies: CelestialBodyState[];
+};
+
+export type OrbitalSurveyComposition = {
+  focusDirection: Vec3;
+  featuredBody: string | null;
 };
 
 const BODY_DATA: Array<{
@@ -48,6 +55,40 @@ function cross(a: Vec3, b: Vec3): Vec3 {
   return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
 }
 
+function sphericalInterpolate(from: Vec3, to: Vec3, fraction: number): Vec3 {
+  const cosine = Math.max(-1, Math.min(1, dot(from, to)));
+  const angle = Math.acos(cosine);
+  if (angle < 1e-8) return normalize(from);
+  const sine = Math.sin(angle);
+  const a = Math.sin((1 - fraction) * angle) / sine;
+  const b = Math.sin(fraction * angle) / sine;
+  return normalize({ x: from.x * a + to.x * b, y: from.y * a + to.y * b, z: from.z * a + to.z * b });
+}
+
+export function chooseOrbitalSurveyComposition(
+  sky: MarsSkyState,
+  limbOffsetDegrees = 18,
+  minimumDaylight = 0.28,
+): OrbitalSurveyComposition {
+  const antiSun = { x: -sky.sunDirection.x, y: -sky.sunDirection.y, z: -sky.sunDirection.z };
+  const offset = limbOffsetDegrees * Math.PI / 180;
+  let best: { score: number; focusDirection: Vec3; name: string } | null = null;
+  for (const body of sky.bodies) {
+    if (body.name === "Phobos" || body.name === "Deimos") continue;
+    const separation = Math.acos(Math.max(-1, Math.min(1, dot(body.direction, antiSun))));
+    if (separation <= offset + 0.02) continue;
+    const viewCenter = sphericalInterpolate(body.direction, antiSun, offset / separation);
+    const focusDirection = { x: -viewCenter.x, y: -viewCenter.y, z: -viewCenter.z };
+    const daylight = dot(focusDirection, sky.sunDirection);
+    if (daylight < minimumDaylight) continue;
+    const score = body.magnitude + (1 - daylight) * 2.5;
+    if (!best || score < best.score) best = { score, focusDirection, name: body.name };
+  }
+  return best
+    ? { focusDirection: best.focusDirection, featuredBody: best.name }
+    : { focusDirection: normalize(sky.sunDirection), featuredBody: null };
+}
+
 export function marsOrientationMatrix(utc: Date) {
   const days = (utc.getTime() - J2000_MS) / 86_400_000;
   const centuries = days / 36_525;
@@ -70,27 +111,9 @@ export function inertialToMarsFixedVector(vector: Vec3, matrix: number[]): Vec3 
   return { x: dot(vector, { x: matrix[0], y: matrix[1], z: matrix[2] }), y: dot(vector, { x: matrix[3], y: matrix[4], z: matrix[5] }), z: dot(vector, { x: matrix[6], y: matrix[7], z: matrix[8] }) };
 }
 
-function phobosAndDeimos(utc: Date): CelestialBodyState[] {
-  const days = (utc.getTime() - J2000_MS) / 86_400_000;
-  return [
-    { name: "Phobos", periodDays: 0.31891023, radiusKm: 11.27, orbitKm: 9_376, colour: [0.72, 0.59, 0.47] as [number, number, number] },
-    { name: "Deimos", periodDays: 1.26244, radiusKm: 6.2, orbitKm: 23_463, colour: [0.68, 0.61, 0.54] as [number, number, number] },
-  ].map((moon, index) => {
-    const angle = 2 * Math.PI * (days / moon.periodDays + index * 0.31);
-    const inclination = (index === 0 ? 1.08 : 1.79) * Math.PI / 180;
-    return {
-      name: moon.name,
-      direction: normalize({ x: Math.cos(angle), y: Math.sin(angle) * Math.sin(inclination), z: Math.sin(angle) * Math.cos(inclination) }),
-      distanceAu: moon.orbitKm / AU_KM,
-      angularRadiusRad: Math.asin(moon.radiusKm / moon.orbitKm),
-      magnitude: index === 0 ? 11.3 : 12.4,
-      colour: moon.colour,
-    };
-  });
-}
-
 export function calculateMarsSky(utc: Date): MarsSkyState {
   const mars = HelioVector(Body.Mars, utc);
+  const sunDistanceAu = Math.hypot(mars.x, mars.y, mars.z);
   const matrix = marsOrientationMatrix(utc);
   const sunInertial = normalize({ x: -mars.x, y: -mars.y, z: -mars.z });
   const bodies: CelestialBodyState[] = BODY_DATA.map((entry) => {
@@ -106,10 +129,10 @@ export function calculateMarsSky(utc: Date): MarsSkyState {
       colour: entry.colour,
     };
   });
-  bodies.push(...phobosAndDeimos(utc));
   return {
     utc,
     sunDirection: normalize(inertialToMarsFixedVector(sunInertial, matrix)),
+    sunAngularRadiusRad: Math.asin(Math.min(1, SUN_RADIUS_KM / (sunDistanceAu * AU_KM))),
     inertialToMarsFixed: matrix,
     bodies,
   };

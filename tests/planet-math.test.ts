@@ -9,11 +9,15 @@ import {
   dot3,
   faceUvToDirection,
   latLonElevationToCartesian,
+  length3,
   localEnuBasis,
   neighbourTile,
   nonlinearZoomAltitude,
   parentTile,
+  raySphereIntersection,
+  rayTerrainIntersection,
   splitHighLow,
+  surfaceNormalAndSlope,
   tileKeyToString,
   toCameraRelative,
 } from "../app/planet/math";
@@ -50,6 +54,39 @@ describe("planetary coordinate maths", () => {
   it("calculates altitude above queried local ground", () => {
     const camera = latLonElevationToCartesian(12, 34, 157.25);
     expect(cameraAltitudeAboveGround(camera, () => 42.25)).toBeCloseTo(115, 6);
+  });
+
+  it("refines screen rays against actual local terrain radius", () => {
+    const origin = { x: MARS_REFERENCE_RADIUS_M + 50_000, y: 0, z: 0 };
+    const hit = rayTerrainIntersection(origin, { x: -1, y: 0, z: 0 }, () => 12_345);
+    expect(hit).not.toBeNull();
+    expect(Math.abs(hit!.distance - (50_000 - 12_345))).toBeLessThan(0.02);
+    expect(Math.abs(hit!.point.x - (MARS_REFERENCE_RADIUS_M + 12_345))).toBeLessThan(0.02);
+  });
+
+  it("picks elevated terrain at the limb when the reference sphere is missed", () => {
+    const originRadius = MARS_REFERENCE_RADIUS_M + 100_000;
+    const impactRadius = MARS_REFERENCE_RADIUS_M + 10_000;
+    const sine = impactRadius / originRadius;
+    const direction = { x: -Math.sqrt(1 - sine * sine), y: sine, z: 0 };
+    const origin = { x: originRadius, y: 0, z: 0 };
+    expect(raySphereIntersection(origin, direction, MARS_REFERENCE_RADIUS_M)).toBeNull();
+    const hit = rayTerrainIntersection(origin, direction, () => 20_000);
+    expect(hit).not.toBeNull();
+    expect(length3(hit!.point)).toBeCloseTo(MARS_REFERENCE_RADIUS_M + 20_000, 2);
+  });
+
+  it("queries mesh-independent surface normals and slopes", () => {
+    const direction = latLonElevationToCartesian(23.5, -71.2, 0, 1);
+    const flat = surfaceNormalAndSlope(direction, () => 420);
+    expect(dot3(flat.normal, direction)).toBeCloseTo(1, 10);
+    expect(flat.slopeDegrees).toBeCloseTo(0, 7);
+    const eastRising = surfaceNormalAndSlope(direction, (sample) => {
+      const basis = localEnuBasis(23.5, -71.2);
+      return dot3(sample, basis.east) * MARS_REFERENCE_RADIUS_M * 0.2;
+    });
+    expect(eastRising.slopeDegrees).toBeGreaterThan(10);
+    expect(eastRising.slopeDegrees).toBeLessThan(13);
   });
 });
 

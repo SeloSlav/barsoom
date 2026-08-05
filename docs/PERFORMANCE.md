@@ -23,7 +23,7 @@ Measured on the production build in this repository:
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 37 maths, data, generated-geometry, and navigation integration cases. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 58 maths, data, generated-geometry, worker-scheduling, celestial, and navigation integration cases, including every required screenshot altitude. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
@@ -32,17 +32,17 @@ Measured on the production build in this repository:
 | Metric | Result |
 |---|---:|
 | Generated payload per tile | 65,428 bytes |
-| Mean generation time | 2.61 ms |
-| Median generation time | 2.48 ms |
-| 95th percentile | 3.69 ms |
-| Maximum | 4.23 ms |
-| Two-worker P95 throughput estimate | 542 tiles/s |
+| Mean generation time | 3.39 ms |
+| Median generation time | 3.23 ms |
+| 95th percentile | 4.87 ms |
+| Maximum | 5.76 ms |
+| Two-worker P95 throughput estimate | 411 tiles/s |
 
 This is a repeatable CPU throughput measurement, not a substitute for the live `F3` GPU/frame-time telemetry. The pre-implementation repository had no renderer or terrain job to benchmark, so its corresponding throughput and frame-time measurements are not applicable rather than zero.
 
 ## Frame-time instrumentation
 
-The `F3` overlay reports exponentially smoothed frame time/FPS, active/loading tiles, selected LOD range, triangles, draw calls, decoded tile memory, worker queue, near/far planes and camera-relative origin. Resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs.
+The `F3` overlay reports exponentially smoothed frame time/FPS, active/loading tiles, retained nodes, selected LOD range, horizon rejections, triangles, draw calls, decoded MOLA memory, GPU geometry memory, worker queue, active depth strategy, near/far planes and camera-relative origin. The horizon-audit toggle temporarily disables occlusion culling so its effect is directly measurable. Resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs.
 
 No geometry, material, texture or network request is constructed in the steady-state render loop. Tile-node arrays grow only on first subdivision. Mesh and geometry containers are reused. The asynchronous request queue rejects stale jobs after rapid movement, and every MOLA request uses browser HTTP caching.
 

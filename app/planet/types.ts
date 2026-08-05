@@ -23,6 +23,13 @@ export type EnuBasis = {
   up: Vec3;
 };
 
+export type SurfaceQuery = {
+  radiusHeightM: number;
+  areoidElevationM: number;
+  normal: Vec3;
+  slopeDegrees: number;
+};
+
 export type PlanetTelemetry = {
   latitudeDeg: number;
   longitudeDeg: number;

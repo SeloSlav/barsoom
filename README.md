@@ -1,6 +1,6 @@
 # Barsoom
 
-Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, analytic atmospheric scattering, a real bright-star catalogue, and Mars-centred ephemerides.
+Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, ray-marched single-scattering atmosphere, a real bright-star catalogue, and Mars-centred ephemerides.
 
 ## Run
 
@@ -16,6 +16,7 @@ Then open `http://localhost:5190`. Build and test with:
 ```bash
 npm test
 npm run build
+npm run benchmark:terrain
 node --test tests/rendered-html.test.mjs
 ```
 
@@ -28,8 +29,8 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 - 2,046 static cube-sphere tiles derived from the official 16-pixel/degree MOLA planetary-radius and areoid MEGDRs. These give complete global coverage and stream real elevation into the terrain vertices by tile.
 - Worker-generated fixed-resolution terrain geometry with continuous planet-space procedural ridges, erosion, rock and regolith detail.
 - A data-driven procedural Mars PBR shader with dust, regolith, basalt, light rock, and polar frost blends.
-- Analytic Rayleigh, dust/Mie, transmittance-inspired limb, terminator, horizon haze, and terrain aerial perspective.
-- 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric vectors transformed into the IAU Mars body frame.
+- Bounded single-scattering integration with Rayleigh and dust/Mie density profiles, view/sun optical depth, transmittance, planetary shadow, a thin limb, horizon haze, and terrain aerial perspective.
+- 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric planet vectors transformed into the IAU Mars body frame.
 - Dedicated middle-orbit, right-pan, left-select, cursor-wheel zoom controls and a live orbital HUD/debug overlay.
 
 See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pipelines](docs/DATA_PIPELINES.md), [attribution](docs/ATTRIBUTION.md), and [performance notes](docs/PERFORMANCE.md).

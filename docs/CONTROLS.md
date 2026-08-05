@@ -2,7 +2,7 @@
 
 | Action | Input | Behaviour |
 |---|---|---|
-| Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point. Terrain collision stops the arc without moving the focus. |
+| Orbit around geographic focus | Hold middle mouse and drag | Rotates a fixed-radius camera offset around the unchanged focus point with no yaw, pitch, pole, or roll limit. Rotations can wrap repeatedly; only a near-ground endpoint inside terrain is rejected. |
 | Pan across Mars | Hold right mouse and drag | Translates camera and focus together using the current screen-right/screen-up basis, preserving viewing direction and roll. Speed follows the visible scale. |
 | Zoom | Mouse wheel | Exponential altitude curve, smoothed over time. The surface point under the cursor becomes the zoom anchor when the cursor ray hits Mars. |
 | Select surface point | Left click | Leaves left mouse free for gameplay and places a scale-aware geographic marker. |
@@ -18,5 +18,8 @@ Developer landmarks and individual visual layers are available only inside the `
 window.__BARSOOM__.setLocation(latitudeDeg, longitudeDeg, altitudeM)
 window.__BARSOOM__.setAltitude(altitudeM, true)
 window.__BARSOOM__.setDebug("tileBoundaries", true)
+window.__BARSOOM__.querySurface(latitudeDeg, longitudeDeg)
+window.__BARSOOM__.setTerminator(altitudeM)
+window.__BARSOOM__.setNightSide(altitudeM)
 window.__BARSOOM__.getState()
 ```

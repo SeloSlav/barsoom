@@ -102,12 +102,13 @@ const options = argumentsFrom(process.argv.slice(2));
 const radiusPath = options.radius;
 const areoidPath = options.areoid;
 const outputPath = options.out ?? "public/data/mola";
-const maxLod = Number(options["max-lod"] ?? 2);
-const gridSize = Number(options.grid ?? 33);
+const maxLod = Number(options["max-lod"] ?? 4);
+const gridSize = Number(options.grid ?? 65);
 if (!radiusPath || !areoidPath) {
   throw new Error("Usage: preprocess-mola --radius path/to/megr...img --areoid path/to/mega...img [--out public/data/mola]");
 }
-if (gridSize < 2 || gridSize > 255) throw new Error("Grid size must be between 2 and 255");
+if (!Number.isInteger(maxLod) || maxLod < 0 || maxLod > 16) throw new Error("Max LOD must be an integer between 0 and 16");
+if (!Number.isInteger(gridSize) || gridSize < 2 || gridSize > 255) throw new Error("Grid size must be an integer between 2 and 255");
 
 const radiusLabelPath = radiusPath.replace(/\.img$/i, ".lbl");
 const areoidLabelPath = areoidPath.replace(/\.img$/i, ".lbl");
@@ -128,6 +129,9 @@ for (const info of [radiusInfo, areoidInfo]) {
     throw new Error("PDS image byte length does not match its label");
   }
 }
+for (const field of ["lines", "samples", "resolution", "coordinateSystem", "longitudeDirection"]) {
+  if (radiusInfo[field] !== areoidInfo[field]) throw new Error(`Radius and areoid metadata disagree on ${field}`);
+}
 
 await mkdir(outputPath, { recursive: true });
 const manifest = {
@@ -143,7 +147,18 @@ const manifest = {
     areoidProductId: areoidInfo.productId,
     productVersion: radiusInfo.productVersion,
     coordinateSystem: radiusInfo.coordinateSystem,
+    positiveLongitudeDirection: radiusInfo.longitudeDirection,
     sourceResolutionPixelsPerDegree: radiusInfo.resolution,
+    sourceLines: radiusInfo.lines,
+    sourceLineSamples: radiusInfo.samples,
+    sampleType: radiusInfo.sampleType,
+    sampleBits: radiusInfo.bits,
+    scalingFactor: radiusInfo.scale,
+    offsetM: radiusInfo.offset,
+    radiusSha256: createHash("sha256").update(radiusRaw).digest("hex"),
+    areoidSha256: createHash("sha256").update(areoidRaw).digest("hex"),
+    radiusLabelSha256: createHash("sha256").update(radiusLabel).digest("hex"),
+    areoidLabelSha256: createHash("sha256").update(areoidLabel).digest("hex"),
     radiusUrl: productUrl(radiusInfo.productId, radiusInfo.resolution),
     areoidUrl: productUrl(areoidInfo.productId, areoidInfo.resolution),
   },

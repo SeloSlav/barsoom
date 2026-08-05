@@ -12,7 +12,7 @@ import {
   clamp,
   latLonElevationToCartesian,
   nonlinearZoomAltitude,
-  raySphereIntersection,
+  rayTerrainIntersection,
 } from "./math";
 import type { Vec3 } from "./types";
 
@@ -132,12 +132,10 @@ export class PlanetControls {
     this.viewUp.applyQuaternion(this.pitchQuaternion);
     this.viewUp.addScaledVector(this.orbitDirection, -this.viewUp.dot(this.orbitDirection)).normalize();
 
-    // Stop at terrain/the local horizon instead of moving the focus or letting
-    // a large pointer delta put the camera on the far side of Mars.
-    if (
-      this.focusDirection.dot(this.orbitDirection) <= 0
-      || this.cameraAltitudeAtDistance(this.cameraDistanceM) < CAMERA_SURFACE_EPSILON_M
-    ) {
+    // Orbit angles are intentionally unbounded. Only reject an endpoint that
+    // would put the camera inside local terrain; at orbital distance this
+    // permits complete, repeated rotations in every screen-space direction.
+    if (this.cameraAltitudeAtDistance(this.cameraDistanceM) < CAMERA_SURFACE_EPSILON_M) {
       this.orbitDirection.copy(oldOrbit);
       this.viewUp.copy(oldUp);
       return;
@@ -224,13 +222,8 @@ export class PlanetControls {
   private cursorSurfacePoint() {
     const ray = this.scratchA.set(this.cursorNdc.x, this.cursorNdc.y, 0.4).unproject(this.camera).normalize();
     const origin = { x: this.cameraAbsolute.x, y: this.cameraAbsolute.y, z: this.cameraAbsolute.z };
-    let distance = raySphereIntersection(origin, ray, MARS_REFERENCE_RADIUS_M);
-    if (distance === null) return null;
-    const point = this.scratchB.copy(this.cameraAbsolute).addScaledVector(ray, distance);
-    const direction = point.normalize();
-    distance = raySphereIntersection(origin, ray, MARS_REFERENCE_RADIUS_M + this.terrainHeight(direction));
-    if (distance === null) return direction.clone();
-    return this.scratchB.copy(this.cameraAbsolute).addScaledVector(ray, distance).normalize().clone();
+    const hit = rayTerrainIntersection(origin, ray, this.terrainHeight);
+    return hit ? new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z) : null;
   }
 
   private moveFocusTowardZoomAnchor(amount: number) {
@@ -241,6 +234,11 @@ export class PlanetControls {
 
   update(deltaSeconds: number): PlanetControlState {
     if (this.disposed) throw new Error("PlanetControls has been disposed");
+    // MOLA may arrive after the camera target was established. Re-solve the
+    // distance from the authoritative requested AGL so streamed macro terrain
+    // cannot silently move the camera above the public maximum or below ground.
+    this.updateFocusAbsolute();
+    this.desiredCameraDistanceM = this.distanceForAltitude(this.desiredAltitudeM);
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 10.5);
     const previousDistanceM = this.cameraDistanceM;
     const distanceDifference = this.desiredCameraDistanceM - this.cameraDistanceM;
@@ -272,6 +270,12 @@ export class PlanetControls {
       this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
       this.cameraDirection.copy(this.cameraAbsolute).normalize();
       actualAltitude = 0;
+    } else if (actualAltitude > MAX_CAMERA_ALTITUDE_M) {
+      this.cameraDistanceM = this.distanceForAltitude(MAX_CAMERA_ALTITUDE_M);
+      this.desiredCameraDistanceM = Math.min(this.desiredCameraDistanceM, this.cameraDistanceM);
+      this.cameraAbsolute.copy(this.focusAbsolute).addScaledVector(this.orbitDirection, this.cameraDistanceM);
+      this.cameraDirection.copy(this.cameraAbsolute).normalize();
+      actualAltitude = MAX_CAMERA_ALTITUDE_M;
     }
     this.altitudeM = clamp(actualAltitude, MIN_CAMERA_ALTITUDE_M, MAX_CAMERA_ALTITUDE_M);
 

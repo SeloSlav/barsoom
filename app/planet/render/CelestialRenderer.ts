@@ -46,13 +46,16 @@ const bodyVertex = /* glsl */ `
   attribute vec3 bodyColour;
   attribute float pointSize;
   attribute float intensity;
+  attribute float discFraction;
   varying vec3 vColour;
   varying float vIntensity;
+  varying float vDiscFraction;
   void main() {
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     gl_PointSize = pointSize;
     vColour = bodyColour;
     vIntensity = intensity;
+    vDiscFraction = discFraction;
   }
 `;
 
@@ -60,13 +63,15 @@ const bodyFragment = /* glsl */ `
   precision highp float;
   varying vec3 vColour;
   varying float vIntensity;
+  varying float vDiscFraction;
   void main() {
     vec2 centered = gl_PointCoord - 0.5;
     float radius = length(centered) * 2.0;
     if (radius > 1.0) discard;
-    float disc = smoothstep(1.0, 0.76, radius);
-    float glare = exp(-radius * radius * 2.3) * max(vIntensity - 1.0, 0.0);
-    gl_FragColor = vec4(vColour * (disc * vIntensity + glare), max(disc, glare * 0.12));
+    float disc = 1.0 - smoothstep(max(0.0, vDiscFraction - 0.12), vDiscFraction, radius);
+    float glare = exp(-radius * radius * 3.2) * max(vIntensity - 1.0, 0.0) * 0.34;
+    float corona = exp(-radius * 5.2) * max(vIntensity - 2.0, 0.0) * 0.075;
+    gl_FragColor = vec4(vColour * (disc * vIntensity + glare + corona), clamp(disc + glare * 0.16 + corona * 0.2, 0.0, 1.0));
   }
 `;
 
@@ -79,6 +84,7 @@ export class CelestialRenderer {
   private readonly colours = new Float32Array(10 * 3);
   private readonly sizes = new Float32Array(10);
   private readonly intensities = new Float32Array(10);
+  private readonly discFractions = new Float32Array(10);
   private bodyCount = 0;
   private skyMatrix = new THREE.Matrix4();
 
@@ -88,6 +94,7 @@ export class CelestialRenderer {
     this.bodyGeometry.setAttribute("bodyColour", new THREE.BufferAttribute(this.colours, 3));
     this.bodyGeometry.setAttribute("pointSize", new THREE.BufferAttribute(this.sizes, 1));
     this.bodyGeometry.setAttribute("intensity", new THREE.BufferAttribute(this.intensities, 1));
+    this.bodyGeometry.setAttribute("discFraction", new THREE.BufferAttribute(this.discFractions, 1));
     this.bodyGeometry.setDrawRange(0, 0);
     const material = new THREE.ShaderMaterial({
       vertexShader: bodyVertex,
@@ -175,7 +182,7 @@ export class CelestialRenderer {
     const pixelsPerRadian = viewportHeight / (2 * Math.tan(fovRadians * 0.5));
     for (let index = 0; index < this.bodyCount; index += 1) {
       const direction = index === 0 ? sky.sunDirection : sky.bodies[index - 1].direction;
-      const angularRadiusRad = index === 0 ? 0.00465 : sky.bodies[index - 1].angularRadiusRad;
+      const angularRadiusRad = index === 0 ? sky.sunAngularRadiusRad : sky.bodies[index - 1].angularRadiusRad;
       const magnitude = index === 0 ? -26.7 : sky.bodies[index - 1].magnitude;
       const colour = index === 0 ? ([1, 0.91, 0.66] as const) : sky.bodies[index - 1].colour;
       this.positions[index * 3] = direction.x * 9.5;
@@ -183,7 +190,11 @@ export class CelestialRenderer {
       this.positions[index * 3 + 2] = direction.z * 9.5;
       this.colours.set(colour, index * 3);
       const physicalSize = angularRadiusRad * 2 * pixelsPerRadian * pixelRatio;
-      this.sizes[index] = Math.max(index === 0 ? 9 : 3.2, Math.min(index === 0 ? 80 : 22, physicalSize));
+      const spriteSize = index === 0
+        ? Math.max(18, Math.min(80, physicalSize * 3.2))
+        : Math.max(3.2, Math.min(22, physicalSize));
+      this.sizes[index] = spriteSize;
+      this.discFractions[index] = index === 0 ? Math.min(0.82, physicalSize / spriteSize) : 0.88;
       const zenithCosine = Math.max(0.055,
         direction.x * cameraDirection.x + direction.y * cameraDirection.y + direction.z * cameraDirection.z,
       );
@@ -200,6 +211,7 @@ export class CelestialRenderer {
     (this.bodyGeometry.getAttribute("bodyColour") as THREE.BufferAttribute).needsUpdate = true;
     (this.bodyGeometry.getAttribute("pointSize") as THREE.BufferAttribute).needsUpdate = true;
     (this.bodyGeometry.getAttribute("intensity") as THREE.BufferAttribute).needsUpdate = true;
+    (this.bodyGeometry.getAttribute("discFraction") as THREE.BufferAttribute).needsUpdate = true;
     this.bodyGeometry.setDrawRange(0, this.bodyCount);
   }
 

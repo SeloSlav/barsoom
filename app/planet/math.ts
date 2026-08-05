@@ -111,6 +111,42 @@ export function directionToEnuBasis(direction: Vec3): EnuBasis {
   return localEnuBasis(coordinates.latitudeDeg, coordinates.longitudeDeg);
 }
 
+export function surfaceDifferentialDirections(directionInput: Vec3, sampleSpacingM = 5) {
+  const direction = normalize3(directionInput);
+  const basis = directionToEnuBasis(direction);
+  const angularStep = Math.max(0.05, sampleSpacingM) / MARS_REFERENCE_RADIUS_M;
+  const offsetDirection = (tangent: Vec3, sign: number) => normalize3({
+    x: direction.x + tangent.x * angularStep * sign,
+    y: direction.y + tangent.y * angularStep * sign,
+    z: direction.z + tangent.z * angularStep * sign,
+  });
+  const east = offsetDirection(basis.east, 1);
+  const west = offsetDirection(basis.east, -1);
+  const north = offsetDirection(basis.north, 1);
+  const south = offsetDirection(basis.north, -1);
+  return { direction, east, west, north, south };
+}
+
+export function surfaceNormalAndSlope(
+  directionInput: Vec3,
+  heightAtDirection: (direction: Vec3) => number,
+  sampleSpacingM = 5,
+) {
+  const { direction, east, west, north, south } = surfaceDifferentialDirections(directionInput, sampleSpacingM);
+  const surfacePoint = (sampleDirection: Vec3) =>
+    scale3(sampleDirection, MARS_REFERENCE_RADIUS_M + heightAtDirection(sampleDirection));
+  const eastPoint = surfacePoint(east);
+  const westPoint = surfacePoint(west);
+  const northPoint = surfacePoint(north);
+  const southPoint = surfacePoint(south);
+  const eastDerivative = subtract3(eastPoint, westPoint);
+  const northDerivative = subtract3(northPoint, southPoint);
+  let normal = normalize3(cross3(northDerivative, eastDerivative));
+  if (dot3(normal, direction) < 0) normal = scale3(normal, -1);
+  const slopeRadians = Math.acos(clamp(dot3(normal, direction), -1, 1));
+  return { normal, slopeRadians, slopeDegrees: slopeRadians * RAD2DEG };
+}
+
 export function faceUvToDirection(face: CubeFace, u: number, v: number): Vec3 {
   switch (face) {
     case "px":
@@ -296,3 +332,41 @@ export function raySphereIntersection(
   return far >= 0 ? far : null;
 }
 
+export function rayTerrainIntersection(
+  rayOrigin: Vec3,
+  rayDirectionInput: Vec3,
+  terrainHeightM: (direction: Vec3) => number,
+  iterations = 28,
+) {
+  const rayDirection = normalize3(rayDirectionInput);
+  // MOLA's relief plus deterministic detail remains well inside this shell.
+  // Starting from the shell (rather than the reference sphere) keeps elevated
+  // limb terrain pickable even when the ray misses the areoid-sized globe.
+  const envelopeRadiusM = MARS_REFERENCE_RADIUS_M + 50_000;
+  const closestDistance = -dot3(rayOrigin, rayDirection);
+  if (closestDistance <= 0) return null;
+  const envelopeIntersection = length3(rayOrigin) <= envelopeRadiusM
+    ? 0
+    : raySphereIntersection(rayOrigin, rayDirection, envelopeRadiusM);
+  if (envelopeIntersection === null || envelopeIntersection >= closestDistance) return null;
+  let outsideDistance: number = envelopeIntersection;
+  const gap = (distance: number) => {
+    const point = add3(rayOrigin, scale3(rayDirection, distance));
+    const direction = normalize3(point);
+    return length3(point) - MARS_REFERENCE_RADIUS_M - terrainHeightM(direction);
+  };
+  if (gap(outsideDistance) <= 0) {
+    const point = add3(rayOrigin, scale3(rayDirection, outsideDistance));
+    return { distance: outsideDistance, point, direction: normalize3(point) };
+  }
+  if (gap(closestDistance) > 0) return null;
+  let insideDistance = closestDistance;
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const midpoint = (outsideDistance + insideDistance) * 0.5;
+    if (gap(midpoint) > 0) outsideDistance = midpoint;
+    else insideDistance = midpoint;
+  }
+  const distance = (outsideDistance + insideDistance) * 0.5;
+  const point = add3(rayOrigin, scale3(rayDirection, distance));
+  return { distance, point, direction: normalize3(point) };
+}

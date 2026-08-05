@@ -7,6 +7,7 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uCameraAltitude: { value: number };
     uTime: { value: number };
     uFade: { value: number };
+    uFadeIn: { value: number };
     uMorph: { value: number };
     uTileLod: { value: number };
     uFaceIndex: { value: number };
@@ -61,6 +62,7 @@ const terrainFragment = /* glsl */ `
   uniform float uCameraAltitude;
   uniform float uTime;
   uniform float uFade;
+  uniform float uFadeIn;
   uniform float uTileLod;
   uniform float uFaceIndex;
   uniform float uDebugTileBoundaries;
@@ -126,8 +128,11 @@ const terrainFragment = /* glsl */ `
   }
 
   void main() {
-    float dither = hash31(vec3(gl_FragCoord.xy, uTileLod * 11.0));
-    if (uFade < 0.999 && dither > uFade) discard;
+    float dither = hash31(vec3(gl_FragCoord.xy, 0.0));
+    if (uFade < 0.999) {
+      if (uFadeIn > 0.5 && dither > uFade) discard;
+      if (uFadeIn < 0.5 && dither <= 1.0 - uFade) discard;
+    }
 
     vec3 radial = normalize(vPlanetDirection);
     vec3 normal = normalize(vNormal);
@@ -238,6 +243,7 @@ export function createTerrainMaterial(): TerrainMaterial {
       uCameraAltitude: { value: 10_000_000 },
       uTime: { value: 0 },
       uFade: { value: 1 },
+      uFadeIn: { value: 1 },
       uMorph: { value: 1 },
       uTileLod: { value: 0 },
       uFaceIndex: { value: 0 },
@@ -380,7 +386,7 @@ export type AtmosphereMaterial = THREE.ShaderMaterial & {
 
 export function createAtmosphereMaterial(): AtmosphereMaterial {
   return new THREE.ShaderMaterial({
-    name: "Mars analytic Rayleigh-Mie atmosphere",
+    name: "Mars ray-marched Rayleigh-Mie atmosphere",
     vertexShader: atmosphereVertex,
     fragmentShader: atmosphereFragment,
     uniforms: {

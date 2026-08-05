@@ -41,6 +41,18 @@ const LANDMARKS = [
   { label: "Valles Marineris", lat: -13.9, lon: -59.2 },
   { label: "Hellas Planitia", lat: -42.4, lon: 70.5 },
   { label: "North polar cap", lat: 86, lon: 30 },
+  { label: "Cube face edge", lat: 0, lon: 45 },
+] as const;
+
+const QA_ALTITUDES = [
+  { label: "30,000 km", metres: 30_000_000 },
+  { label: "10,000 km", metres: 10_000_000 },
+  { label: "1,000 km", metres: 1_000_000 },
+  { label: "100 km", metres: 100_000 },
+  { label: "10 km", metres: 10_000 },
+  { label: "1 km", metres: 1_000 },
+  { label: "100 m", metres: 100 },
+  { label: "0 m", metres: 0 },
 ] as const;
 
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
@@ -56,7 +68,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     try {
       engine = new PlanetEngine(canvasRef.current, setTelemetry, setError);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "WebGL could not start on this device.");
+      const message = caught instanceof Error ? caught.message : "WebGL could not start on this device.";
+      queueMicrotask(() => setError(message));
       return;
     }
     const keyHandler = (event: KeyboardEvent) => {
@@ -108,7 +121,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="debug-heading"><span>RENDER DIAGNOSTICS</span><b>{telemetry.fps.toFixed(0)} FPS</b></div>
         <div className="debug-metrics"><span>Frame</span><b>{telemetry.frameMs.toFixed(2)} ms</b><span>Tiles</span><b>{telemetry.activeTiles} active / {telemetry.loadingTiles} loading</b><span>Nodes</span><b>{telemetry.terrainNodes} retained</b><span>LOD</span><b>{telemetry.minLod}—{telemetry.maxLod}</b><span>Horizon</span><b>{telemetry.horizonCulled} culled</b><span>Triangles</span><b>{telemetry.triangles.toLocaleString()}</b><span>Draw calls</span><b>{telemetry.drawCalls}</b><span>MOLA cache</span><b>{telemetry.textureMemoryMb.toFixed(2)} MB</b><span>Geometry</span><b>{telemetry.geometryMemoryMb.toFixed(2)} MB</b><span>Worker queue</span><b>{telemetry.workerQueue}</b><span>Depth mode</span><b>{telemetry.depthStrategy}</b><span>Depth</span><b>{formatDistance(telemetry.nearM)} / {formatDistance(telemetry.farM)}</b><span>Origin X</span><b>{formatDistance(telemetry.floatingOrigin.x)}</b><span>Origin Y</span><b>{formatDistance(telemetry.floatingOrigin.y)}</b><span>Origin Z</span><b>{formatDistance(telemetry.floatingOrigin.z)}</b></div>
         <div className="debug-switches">{(["tileBoundaries", "cubeFaces", "lodColours", "normals", "molaOnly", "horizonCulling"] as const).map((flag) => <button key={flag} type="button" className={debug[flag] ? "active" : ""} onClick={() => toggleDebug(flag)}>{flag === "horizonCulling" ? "horizon audit" : flag.replace(/([A-Z])/g, " $1")}</button>)}</div>
+        <div className="qa-altitudes" aria-label="Visual QA altitudes">{QA_ALTITUDES.map((level) => <button key={level.metres} type="button" onClick={() => window.__BARSOOM__?.setAltitude(level.metres, true)}>{level.label}</button>)}</div>
         <div className="landmarks">{LANDMARKS.map((place) => <button key={place.label} type="button" onClick={() => window.__BARSOOM__?.setLocation(place.lat, place.lon, Math.max(telemetry.altitudeM, 2_000_000))}>{place.label}</button>)}</div>
+        <div className="sky-checks"><button type="button" onClick={() => window.__BARSOOM__?.setTerminator()}>Terminator orbit</button><button type="button" onClick={() => window.__BARSOOM__?.setNightSide()}>Night surface</button></div>
       </aside>}
       <footer className="mission-footer"><span>MOLA MEGDR 16 PPD · IAU 2000</span><span className="footer-center"><i /> GLOBAL TERRAIN STREAM NOMINAL</span><span>CAMERA-RELATIVE / CUBE-SPHERE</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}

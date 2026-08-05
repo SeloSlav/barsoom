@@ -21,7 +21,7 @@ node scripts/preprocess-mola.mjs \
   --grid 65
 ```
 
-The script validates label dimensions, big-endian signed 16-bit encoding, byte length and longitude direction. It applies PDS `OFFSET`/`SCALING_FACTOR`, wraps 0–360° longitude, clamps the poles, bilinearly samples the simple-cylindrical source at exact cube-sphere directions, and writes every LOD independently from the source. The runtime worker then samples those elevations into each mesh vertex before rendering. Independent inclusive border sampling keeps parent levels and face edges deterministic.
+The script validates label dimensions, big-endian signed 16-bit encoding, byte length and longitude direction. It applies PDS `OFFSET`/`SCALING_FACTOR`, wraps 0–360° longitude, clamps the poles, bilinearly samples the simple-cylindrical source at exact cube-sphere directions, and writes every LOD independently from the source. The manifest records the SHA-256 of both source rasters and labels together with dimensions, encoding, scale, offset, coordinate system, longitude convention, and preprocessing settings. The runtime worker then samples those elevations into each mesh vertex before rendering. Independent inclusive border sampling keeps parent levels and face edges deterministic.
 
 Runtime format `MOL2` stores two little-endian signed-int16 metre grids per tile: radius relative to 3,389,500 m and areoid radius relative to the same reference. A 24-byte header contains key, range metadata and payload CRC32. The manifest records SHA-256, CRC32, sizes, source products and preprocessing settings for all 2,046 files. Ordinary HTTP cache headers cache tile requests.
 

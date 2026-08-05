@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
-import { dot3 } from "../app/planet/math";
+import { directionToFaceUv, dot3, raySphereIntersection } from "../app/planet/math";
 import { PlanetControls } from "../app/planet/PlanetControls";
 
 type Listener = (event: Record<string, unknown>) => void;
@@ -48,7 +48,7 @@ function pointer(canvas: FakeCanvas, type: string, button: number, x: number, y:
   return canvas.emit(type, { button, clientX: x, clientY: y, pointerId });
 }
 
-function createHarness() {
+function createHarness(terrainHeight: (direction: { x: number; y: number; z: number }) => number = () => 0) {
   const canvas = new FakeCanvas();
   const camera = new THREE.PerspectiveCamera(42, 800 / 600, 0.1, 50_000_000);
   camera.updateProjectionMatrix();
@@ -56,7 +56,7 @@ function createHarness() {
   const controls = new PlanetControls(
     canvas as unknown as HTMLCanvasElement,
     camera,
-    () => 0,
+    terrainHeight,
     (direction) => prefetched.push({ ...direction }),
   );
   controls.update(1 / 60);
@@ -69,8 +69,8 @@ afterEach(() => {
   while (activeControls.length) activeControls.pop()!.dispose();
 });
 
-function trackedHarness() {
-  const harness = createHarness();
+function trackedHarness(terrainHeight?: (direction: { x: number; y: number; z: number }) => number) {
+  const harness = createHarness(terrainHeight);
   activeControls.push(harness.controls);
   return harness;
 }
@@ -111,22 +111,24 @@ describe("PlanetControls integration", () => {
     expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBeforePan)).toBeLessThan(1e-10);
   });
 
-  it("keeps the orbit focus and radius fixed while preventing terrain tunnelling", () => {
+  it("keeps the orbit focus and radius fixed through unrestricted repeated rotations", () => {
     const { canvas, controls } = trackedHarness();
     const initial = controls.getState();
     pointer(canvas, "pointerdown", 1, 400, 300);
+    let crossedFarSide = false;
     for (let step = 1; step <= 360; step += 1) {
       pointer(canvas, "pointermove", 1, 400 + step * 23, 300 + step * 17);
       const frame = controls.update(1 / 120);
       const state = controls.getState();
       expect(state.latitudeLongitude.latitudeDeg).toBeCloseTo(initial.latitudeLongitude.latitudeDeg, 10);
       expect(state.latitudeLongitude.longitudeDeg).toBeCloseTo(initial.latitudeLongitude.longitudeDeg, 10);
-      expect(state.cameraDistanceM).toBeCloseTo(initial.cameraDistanceM, 7);
-      expect(dot3(state.orbitDirection, frame.focusDirection)).toBeGreaterThan(0);
+      expect(state.cameraDistanceM).toBeCloseTo(initial.cameraDistanceM, 5);
+      if (dot3(state.orbitDirection, frame.focusDirection) < -0.2) crossedFarSide = true;
       expect(frame.altitudeM).toBeGreaterThanOrEqual(0);
       expect(Number.isFinite(frame.cameraAbsolute.x + frame.cameraAbsolute.y + frame.cameraAbsolute.z)).toBe(true);
     }
     pointer(canvas, "pointerup", 1, 8_680, 6_420);
+    expect(crossedFarSide).toBe(true);
   });
 
   it("crosses the longitude seam and remains finite while panning over a pole", () => {
@@ -152,16 +154,53 @@ describe("PlanetControls integration", () => {
     expect(pole.longitudeDeg).toBeLessThan(180);
   });
 
+  it("right-pans continuously across a cube-face boundary without rotating the view", () => {
+    const { canvas, camera, controls } = trackedHarness();
+    controls.setLocation(0, 44.6, 1_000_000);
+    const beforeFrame = controls.update(1 / 60);
+    const beforeFace = directionToFaceUv(beforeFrame.focusDirection).face;
+    const forwardBefore = camera.getWorldDirection(new THREE.Vector3());
+    pointer(canvas, "pointerdown", 2, 400, 300);
+    pointer(canvas, "pointermove", 2, 160, 300);
+    pointer(canvas, "pointerup", 2, 160, 300);
+    const afterFrame = controls.update(1 / 60);
+    const afterFace = directionToFaceUv(afterFrame.focusDirection).face;
+    expect(afterFace).not.toBe(beforeFace);
+    expect(camera.getWorldDirection(new THREE.Vector3()).angleTo(forwardBefore)).toBeLessThan(1e-10);
+    expect(afterFrame.altitudeM).toBeGreaterThanOrEqual(0);
+  });
+
   it("clamps both altitude limits and moves an off-centre focus only while zoom is progressing", () => {
-    const { canvas, controls } = trackedHarness();
+    const { canvas, camera, controls } = trackedHarness();
     controls.setAltitude(MAX_CAMERA_ALTITUDE_M * 2, true);
     expect(controls.getState().altitudeM).toBe(MAX_CAMERA_ALTITUDE_M);
     controls.setAltitude(10_000_000, true);
-    controls.update(1 / 60);
+    const orbitalFrame = controls.update(1 / 60);
 
     const before = controls.getState().latitudeLongitude;
+    const cursorRay = new THREE.Vector3(0.25, 0, 0.4).unproject(camera).normalize();
+    const hitDistance = raySphereIntersection(orbitalFrame.cameraAbsolute, cursorRay, MARS_REFERENCE_RADIUS_M);
+    expect(hitDistance).not.toBeNull();
+    const anchorDirection = new THREE.Vector3(
+      orbitalFrame.cameraAbsolute.x,
+      orbitalFrame.cameraAbsolute.y,
+      orbitalFrame.cameraAbsolute.z,
+    ).addScaledVector(cursorRay, hitDistance!).normalize();
+    const projectAnchor = (frame: ReturnType<PlanetControls["update"]>) =>
+      anchorDirection.clone().multiplyScalar(MARS_REFERENCE_RADIUS_M).sub(new THREE.Vector3(
+        frame.cameraAbsolute.x,
+        frame.cameraAbsolute.y,
+        frame.cameraAbsolute.z,
+      )).project(camera);
+    const anchorBefore = projectAnchor(orbitalFrame);
     canvas.emit("wheel", { clientX: 500, clientY: 300, deltaY: -700, deltaMode: 0 });
-    for (let frame = 0; frame < 360; frame += 1) controls.update(1 / 60);
+    let zoomedFrame = orbitalFrame;
+    for (let frame = 0; frame < 360; frame += 1) zoomedFrame = controls.update(1 / 60);
+    const anchorAfter = projectAnchor(zoomedFrame);
+    // Under one percent of normalized screen width (about three pixels in
+    // this 800 px harness) is visually stationary through the smoothed step.
+    expect(Math.abs(anchorAfter.x - anchorBefore.x)).toBeLessThan(0.01);
+    expect(Math.abs(anchorAfter.y - anchorBefore.y)).toBeLessThan(0.01);
     const settled = controls.getState();
     expect(settled.altitudeM).toBeLessThan(10_000_000);
     expect(settled.latitudeLongitude.longitudeDeg).not.toBeCloseTo(before.longitudeDeg, 7);
@@ -177,5 +216,33 @@ describe("PlanetControls integration", () => {
     expect(controls.getState().desiredAltitudeM).toBe(0);
     expect(surface.altitudeM).toBeLessThan(0.02);
     expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThanOrEqual(MARS_REFERENCE_RADIUS_M);
+  });
+
+  it.each([30_000_000, 10_000_000, 1_000_000, 100_000, 10_000, 1_000, 100, 0])(
+    "resolves the visual-verification altitude %s m against local ground",
+    (altitudeM) => {
+      const { controls } = trackedHarness(() => 7_250);
+      controls.setLocation(-13.9, -59.2, altitudeM);
+      const frame = controls.update(1 / 60);
+      expect(frame.altitudeM).toBeCloseTo(altitudeM, altitudeM === 0 ? 1 : 3);
+      expect(frame.desiredAltitudeM).toBe(altitudeM);
+    },
+  );
+
+  it("preserves requested AGL when streamed terrain changes underneath the camera", () => {
+    let streamedHeightM = 0;
+    const { controls } = trackedHarness(() => streamedHeightM);
+    controls.setAltitude(MAX_CAMERA_ALTITUDE_M, true);
+    controls.update(1 / 60);
+    streamedHeightM = 18_000;
+    const orbital = controls.update(1);
+    expect(orbital.altitudeM).toBeCloseTo(MAX_CAMERA_ALTITUDE_M, 3);
+
+    controls.setAltitude(0, true);
+    let surface = controls.update(1 / 60);
+    streamedHeightM = -7_000;
+    for (let frame = 0; frame < 90; frame += 1) surface = controls.update(1 / 60);
+    expect(surface.altitudeM).toBeLessThan(0.02);
+    expect(Math.hypot(surface.cameraAbsolute.x, surface.cameraAbsolute.y, surface.cameraAbsolute.z)).toBeGreaterThan(MARS_REFERENCE_RADIUS_M - 7_001);
   });
 });

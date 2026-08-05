@@ -85,8 +85,22 @@ describe("MOLA decoding and global terrain coverage", () => {
     expect(manifest.source.areoidProductId).toBe("MEGA90N000EB.IMG");
     expect(manifest.gridSize).toBe(65);
     expect(manifest.maxLod).toBe(4);
+    expect(manifest.source).toMatchObject({
+      positiveLongitudeDirection: "EAST",
+      sourceLines: 2880,
+      sourceLineSamples: 5760,
+      sampleType: "MSB_INTEGER",
+      sampleBits: 16,
+      scalingFactor: 1,
+      offsetM: 3_396_000,
+    });
+    for (const field of ["radiusSha256", "areoidSha256", "radiusLabelSha256", "areoidLabelSha256"]) {
+      expect(manifest.source[field]).toMatch(/^[0-9a-f]{64}$/);
+    }
     expect(Object.keys(manifest.tiles)).toHaveLength(2_046);
-    expect(Object.values(manifest.tiles).every((entry: any) => /^[0-9a-f]{64}$/.test(entry.sha256))).toBe(true);
+    expect(Object.values(manifest.tiles).every((entry) =>
+      /^[0-9a-f]{64}$/.test((entry as { sha256: string }).sha256),
+    )).toBe(true);
     const entries = Object.entries(manifest.tiles) as Array<[string, { path: string; bytes: number; sha256: string }]>;
     for (let offset = 0; offset < entries.length; offset += 64) {
       await Promise.all(entries.slice(offset, offset + 64).map(async ([key, entry]) => {
