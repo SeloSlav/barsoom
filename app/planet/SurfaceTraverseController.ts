@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import {
   MAX_CAMERA_ALTITUDE_M,
   MARS_ATMOSPHERE_TOP_M,
+  MARS_MOON_MAX_ORBIT_RADIUS_M,
   MARS_REFERENCE_RADIUS_M,
   MARS_SURFACE_GRAVITY_M_S2,
   MARS_TRAVERSE_JUMP_SPEED_M_S,
@@ -872,6 +873,7 @@ export class SurfaceTraverseController {
     this.camera.far = Math.max(
       350_000,
       Math.sqrt(2 * MARS_REFERENCE_RADIUS_M * (cameraAltitudeM + MARS_ATMOSPHERE_TOP_M)) * 3.2,
+      this.cameraAbsolute.length() + MARS_MOON_MAX_ORBIT_RADIUS_M + 50_000,
     );
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);

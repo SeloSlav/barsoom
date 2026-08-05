@@ -86,6 +86,7 @@ describe("embedded astronomical data", () => {
   it("advances physical, inclined Mars moon orbits on the simulation clock", () => {
     const epoch = new Date("2026-08-05T23:58:50.816Z");
     const initial = calculateMarsMoons(epoch);
+    const inertial = calculateMarsMoons(epoch, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
     const oneHour = calculateMarsMoons(new Date(epoch.getTime() + 3_600_000));
     expect(initial[0].semiAxesM).toEqual([13_400, 11_200, 9_200]);
     expect(initial[1].semiAxesM).toEqual([7_500, 6_100, 5_200]);
@@ -93,6 +94,17 @@ describe("embedded astronomical data", () => {
     expect(length3(initial[0].positionM)).toBeLessThan(9_525_000);
     expect(length3(initial[1].positionM)).toBeGreaterThan(23_450_000);
     expect(length3(initial[1].positionM)).toBeLessThan(23_467_000);
+    const horizonsReferenceM = [
+      { x: 5_161_591.815, y: 7_691_347.656, z: 1_235_648.264 },
+      { x: 20_199_427.65, y: 11_118_183.75, z: -4_312_025.593 },
+    ];
+    for (let index = 0; index < inertial.length; index += 1) {
+      expect(Math.hypot(
+        inertial[index].positionM.x - horizonsReferenceM[index].x,
+        inertial[index].positionM.y - horizonsReferenceM[index].y,
+        inertial[index].positionM.z - horizonsReferenceM[index].z,
+      )).toBeLessThan(2);
+    }
     for (const moon of initial) {
       expect(length3(moon.orbitNormal)).toBeCloseTo(1, 12);
       expect(dot3(moon.positionM, moon.orbitNormal)).toBeCloseTo(0, -3);

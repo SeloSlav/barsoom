@@ -39,7 +39,7 @@ The renderer probes `EXT_clip_control` before construction. Supported GPUs use r
 
 ## Astronomy
 
-Astronomy Engine supplies compact, tested VSOP87/NOVAS-derived heliocentric vectors. Planet vectors are made Mars-centred by subtracting Mars' heliocentric vector, then transformed from equatorial J2000 into the Mars IAU body frame using the time-dependent north pole and prime-meridian rotation. The same Sun vector drives terrain, atmosphere, terminator and solar disc. Terrain drawn after the depth-independent sky naturally occludes celestial objects behind Mars. Phobos and Deimos are intentionally omitted until a compact client ephemeris can meet the same non-invented-position standard; simple period-only circles are not presented as accurate moon ephemerides.
+Astronomy Engine supplies compact, tested VSOP87/NOVAS-derived heliocentric vectors. Planet vectors are made Mars-centred by subtracting Mars' heliocentric vector, then transformed from equatorial J2000 into the Mars IAU body frame using the time-dependent north pole and prime-meridian rotation. The same Sun vector drives terrain, atmosphere, terminator and solar disc. Phobos and Deimos use a compact NASA/JPL Horizons MAR099 model: current osculating elements and fitted nodal, apsidal and mean-anomaly rates are transformed through the same Mars body frame. Their physical-scale meshes share the terrain depth buffer, so Mars naturally occludes a moon on the far side while foreground transits remain possible.
 
 ## Recovery and extension
 
