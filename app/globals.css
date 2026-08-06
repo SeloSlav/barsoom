@@ -122,6 +122,14 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
 .scale-bar i { position: relative; width: 124px; height: 7px; border: 1px solid rgba(255,232,216,.58); border-top: 0; }
 .scale-bar i::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 1px; height: 4px; background: rgba(255,232,216,.58); }
 
+.planet-landmark-layer { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+.planet-landmark-beacon { position: absolute; min-width: 24px; min-height: 24px; transform: translate(-50%, -50%); border: 1px solid rgba(255,190,145,.36); border-radius: 50%; box-shadow: 0 0 10px rgba(255,126,67,.12), inset 0 0 9px rgba(255,177,116,.06); transition: opacity .16s ease, border-color .16s ease, box-shadow .16s ease; }
+.planet-landmark-beacon::before { content: ""; position: absolute; inset: -1px; border: 1px solid rgba(255,155,99,.48); border-radius: inherit; animation: landmark-ambient-pulse 2.7s cubic-bezier(.2,.62,.32,1) infinite; animation-delay: inherit; }
+.planet-landmark-beacon::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; transform: translate(-50%, -50%); border-radius: 50%; background: rgba(255,217,185,.74); box-shadow: 0 0 7px rgba(255,139,78,.78); }
+.planet-landmark-beacon.active { border-color: rgba(255,218,187,.88); box-shadow: 0 0 18px rgba(255,128,67,.38), inset 0 0 12px rgba(255,177,116,.14); }
+.planet-landmark-beacon.active::before { border-color: rgba(255,181,126,.8); }
+@keyframes landmark-ambient-pulse { 0% { opacity: 0; transform: scale(.72); } 26% { opacity: .72; } 100% { opacity: 0; transform: scale(1.72); } }
+
 .planet-feature-reticle { position: absolute; z-index: 6; width: 30px; height: 30px; transform: translate(-50%, -50%); pointer-events: none; border: 1px solid rgba(255,180,126,.72); border-radius: 50%; box-shadow: 0 0 16px rgba(255,122,64,.35), inset 0 0 10px rgba(255,122,64,.12); animation: feature-acquire 1.2s ease-in-out infinite; }
 .planet-feature-reticle::before, .planet-feature-reticle::after { content: ""; position: absolute; left: 50%; top: 50%; background: rgba(255,209,173,.88); box-shadow: 0 0 7px rgba(255,137,77,.65); }
 .planet-feature-reticle::before { width: 42px; height: 1px; transform: translate(-50%, -50%); }
@@ -244,4 +252,4 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
   .tutorial-library-reset { align-items: stretch; flex-direction: column; }
 }
 
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .surface-entry-screen i, .sova-vocalizer.speaking span, .coherence-loss-field, .coherence-warning.coherence-restored, .planet-feature-reticle { animation: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .surface-entry-screen i, .sova-vocalizer.speaking span, .coherence-loss-field, .coherence-warning.coherence-restored, .planet-feature-reticle, .planet-landmark-beacon::before { animation: none; } .planet-landmark-beacon::before { opacity: .42; } }

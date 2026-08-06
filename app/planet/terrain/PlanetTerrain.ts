@@ -18,7 +18,13 @@ import {
 import { MolaTileLoader } from "../mola";
 import { proceduralTerrainHeightForLod } from "../noise";
 import type { DebugFlags, TileEdge, TileKey, Vec3 } from "../types";
-import { createTerrainMaterial, createTerrainShadowMaterial, type TerrainMaterial } from "../render/materials";
+import {
+  createOrbitalCoherenceMaterial,
+  createTerrainMaterial,
+  createTerrainShadowMaterial,
+  type OrbitalCoherenceMaterial,
+  type TerrainMaterial,
+} from "../render/materials";
 import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPool";
 
 type TileState = "idle" | "loading-data" | "queued" | "ready" | "failed";
@@ -171,6 +177,11 @@ export function terrainNodeNeedsRefinement(screenError: number, wasRefined: bool
 }
 
 const MARS_TERRAIN_OCCLUSION_RADIUS_M = MARS_REFERENCE_RADIUS_M - 9_000;
+const ORBITAL_COHERENCE_MIN_ALTITUDE_M = 180_000;
+
+export function orbitalCoherenceSubstrateVisible(cameraAltitudeM: number) {
+  return cameraAltitudeM >= ORBITAL_COHERENCE_MIN_ALTITUDE_M;
+}
 
 /**
  * Conservative relief-aware horizon limit. Both the camera and a raised
@@ -275,6 +286,15 @@ export class PlanetTerrain {
   private readonly workers = new TerrainWorkerPool();
   private readonly material = createTerrainMaterial();
   private readonly shadowMaterial = createTerrainShadowMaterial();
+  private readonly coherenceMaterial: OrbitalCoherenceMaterial = createOrbitalCoherenceMaterial(
+    this.material.uniforms.uOrbitalTexture.value,
+  );
+  private readonly coherenceGeometry = new THREE.SphereGeometry(
+    MARS_REFERENCE_RADIUS_M - 11_000,
+    96,
+    64,
+  );
+  private readonly coherenceMesh = new THREE.Mesh(this.coherenceGeometry, this.coherenceMaterial);
   private readonly projectionScreen = new THREE.Matrix4();
   private readonly frustum = new THREE.Frustum();
   private readonly sphere = new THREE.Sphere();
@@ -304,6 +324,13 @@ export class PlanetTerrain {
   };
 
   constructor(private readonly scene: THREE.Scene) {
+    this.coherenceMesh.name = "Mars orbital coherence substrate";
+    this.coherenceMesh.frustumCulled = false;
+    // Draw after every opaque terrain tile so its depth test naturally limits
+    // the substrate to genuine coverage voids.
+    this.coherenceMesh.renderOrder = 10_000;
+    this.coherenceMesh.visible = false;
+    this.scene.add(this.coherenceMesh);
     this.roots = (["px", "nx", "py", "ny", "pz", "nz"] as const).map((face) => {
       const node = new PlanetTileNode({ face, lod: 0, x: 0, y: 0 }, null);
       this.allNodes.set(node.id, node);
@@ -352,6 +379,14 @@ export class PlanetTerrain {
     this.material.uniforms.uDebugLod.value = debug.lodColours ? 1 : 0;
     this.material.uniforms.uDebugNormals.value = debug.normals ? 1 : 0;
     this.material.uniforms.uDebugMolaOnly.value = debug.molaOnly ? 1 : 0;
+    this.coherenceMesh.visible = orbitalCoherenceSubstrateVisible(cameraAltitudeM);
+    this.coherenceMesh.position.set(-cameraAbsolute.x, -cameraAbsolute.y, -cameraAbsolute.z);
+    this.coherenceMaterial.uniforms.uSunDirection.value.set(
+      sunDirection.x,
+      sunDirection.y,
+      sunDirection.z,
+    );
+    this.coherenceMaterial.uniforms.uTime.value = nowS;
 
     const rootsByPriority = [...this.roots].sort(
       (a, b) => this.visibility(b).priority - this.visibility(a).priority,
@@ -819,6 +854,9 @@ export class PlanetTerrain {
   }
 
   dispose() {
+    this.coherenceMesh.removeFromParent();
+    this.coherenceGeometry.dispose();
+    this.coherenceMaterial.dispose();
     for (const node of this.readyNodes) this.releaseNodeGeometry(node);
     for (const geometry of this.geometryPool) geometry.dispose();
     this.geometryPool.length = 0;

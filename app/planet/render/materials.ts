@@ -28,6 +28,14 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
   };
 };
 
+export type OrbitalCoherenceMaterial = THREE.ShaderMaterial & {
+  uniforms: {
+    uOrbitalTexture: { value: THREE.Texture };
+    uSunDirection: { value: THREE.Vector3 };
+    uTime: { value: number };
+  };
+};
+
 function createMarsOrbitalTexture() {
   let texture: THREE.Texture;
   if (typeof document === "undefined") {
@@ -543,6 +551,24 @@ const terrainFragment = /* glsl */ `
     vec3 colour = direct + skyBounce;
     colour += vec3(0.16, 0.055, 0.025) * albedo * 0.018 * (1.0 - daylight);
 
+    // The streamed parent/child handoff is normally invisible. At orbital
+    // scale, give its advancing threshold a tiny spectral signature so any
+    // exposed coherence substrate reads as part of the same reconstruction
+    // event instead of an unrelated layer beneath the terrain.
+    if (uFade < 0.999 && uCameraAltitude > 180000.0) {
+      float handoffPhase = uFadeIn > 0.5 ? uFade : 1.0 - uFade;
+      float handoffEdge = 1.0 - smoothstep(0.012, 0.065, abs(dither - handoffPhase));
+      float handoffWave = 0.5 + 0.5 * sin(
+        dot(radial, vec3(173.0, -229.0, 137.0)) + uTime * 1.7
+      );
+      vec3 handoffColour = mix(
+        vec3(0.035, 0.52, 0.58),
+        vec3(0.58, 0.12, 0.86),
+        handoffWave
+      );
+      colour += handoffColour * handoffEdge * (0.035 + handoffWave * 0.055);
+    }
+
     float distanceM = length(vWorldPosition);
     float surfaceDensity = exp(-max(uCameraAltitude, 0.0) / ${ATMOSPHERE_CONFIG.scaleHeightM.toFixed(1)});
     float horizonPath = 1.0 - exp(-distanceM / 90000.0);
@@ -654,6 +680,109 @@ export function createTerrainMaterial(): TerrainMaterial {
     toneMapped: true,
     glslVersion: THREE.GLSL1,
   }) as TerrainMaterial;
+}
+
+const orbitalCoherenceVertex = /* glsl */ `
+  varying vec3 vPlanetDirection;
+
+  void main() {
+    vPlanetDirection = normalize(position);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const orbitalCoherenceFragment = /* glsl */ `
+  precision highp float;
+
+  uniform sampler2D uOrbitalTexture;
+  uniform vec3 uSunDirection;
+  uniform float uTime;
+
+  varying vec3 vPlanetDirection;
+
+  float coherenceHash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  void main() {
+    vec3 radial = normalize(vPlanetDirection);
+    float longitude = atan(radial.z, radial.x);
+    float latitude = asin(clamp(radial.y, -1.0, 1.0));
+    vec2 orbitalUv = vec2(
+      fract(longitude / 6.28318530718 + 0.5),
+      latitude / 3.14159265359 + 0.5
+    );
+
+    // A displaced RGB echo retains just enough of the observed geography to
+    // make this read as an uncertain Mars solution rather than a second body.
+    float drift = sin(latitude * 31.0 + uTime * 0.33) * 0.0017;
+    vec3 spectralEcho = vec3(
+      texture2D(uOrbitalTexture, orbitalUv + vec2(drift, 0.0)).r,
+      texture2D(uOrbitalTexture, orbitalUv).g,
+      texture2D(uOrbitalTexture, orbitalUv - vec2(drift, 0.0)).b
+    );
+
+    float waveA = sin(dot(radial, normalize(vec3(0.83, 0.29, -0.47))) * 188.0 + uTime * 0.74);
+    float waveB = sin(dot(radial, normalize(vec3(-0.31, 0.91, 0.27))) * 239.0 - uTime * 0.57);
+    float waveC = sin(dot(radial, normalize(vec3(0.22, -0.41, 0.88))) * 317.0 + uTime * 0.39);
+    float interference = 1.0 - smoothstep(0.035, 0.20, abs(waveA + waveB * 0.72 + waveC * 0.44));
+
+    vec2 latticeUv = vec2(longitude * 8.0, latitude * 13.0);
+    vec2 latticeCell = abs(fract(latticeUv + vec2(uTime * 0.012, 0.0)) - 0.5);
+    float lattice = 1.0 - smoothstep(0.012, 0.040, min(latticeCell.x, latticeCell.y));
+    float packetNoise = coherenceHash(floor(latticeUv * 2.0));
+    float packet = pow(max(0.0, waveA * waveB), 7.0) * smoothstep(0.38, 0.88, packetNoise);
+    float coherence = clamp(interference * 0.82 + lattice * 0.13 + packet * 0.52, 0.0, 1.0);
+
+    float spectralPhase = 0.5 + 0.5 * sin((waveA - waveC) * 3.2 + uTime * 0.9);
+    vec3 spectralColour = mix(
+      vec3(0.025, 0.74, 0.72),
+      vec3(0.68, 0.12, 1.0),
+      spectralPhase
+    );
+    spectralColour = mix(spectralColour, vec3(1.0, 0.31, 0.08), packet * 0.42);
+
+    float daylight = smoothstep(-0.28, 0.38, dot(radial, normalize(uSunDirection)));
+    float pulse = 0.76 + 0.24 * sin(uTime * 1.25 + waveB * 2.0);
+    vec3 colour = spectralEcho * (0.018 + daylight * 0.025);
+    colour += spectralColour * coherence * pulse * (0.20 + daylight * 0.22);
+    colour += vec3(0.018, 0.004, 0.035);
+
+    gl_FragColor = vec4(colour, 1.0);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
+/**
+ * Opaque safety layer below the lowest Martian relief. It is invisible under
+ * healthy terrain depth, but turns a transient orbital coverage void into a
+ * coherent reconstruction artefact rather than a patch of background space.
+ */
+export function createOrbitalCoherenceMaterial(
+  orbitalTexture: THREE.Texture,
+): OrbitalCoherenceMaterial {
+  return new THREE.ShaderMaterial({
+    name: "Mars orbital quantum coherence substrate",
+    vertexShader: orbitalCoherenceVertex,
+    fragmentShader: orbitalCoherenceFragment,
+    uniforms: {
+      uOrbitalTexture: { value: orbitalTexture },
+      uSunDirection: { value: new THREE.Vector3(1, 0.25, 0.2).normalize() },
+      uTime: { value: 0 },
+    },
+    // Terrain writes first; this late pass only colours pixels that still
+    // contain clear depth. Avoiding a substrate depth write is also important
+    // on reversed-depth GPUs, where an early inner sphere can claim coverage.
+    depthWrite: false,
+    depthTest: true,
+    transparent: false,
+    side: THREE.FrontSide,
+    toneMapped: true,
+    glslVersion: THREE.GLSL1,
+  }) as OrbitalCoherenceMaterial;
 }
 
 const terrainShadowVertex = /* glsl */ `

@@ -8,7 +8,7 @@ export type SovaTutorialDefinition = {
   title: string;
   audioSrc: string;
   autoPlayDelayMs: number;
-  body: readonly string[];
+  body: readonly [string];
 };
 
 export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
@@ -19,8 +19,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-quantum-telescope.mp3",
     autoPlayDelayMs: 0,
     body: [
-      "SOVA online. Welcome to the Cauchy Array. What you are seeing is not a conventional telescope image, and it is not instantaneous. Receivers in a distributed optical interferometer collect real photons that left Mars several minutes ago.",
-      "Quantum-enhanced clocks, squeezed-light measurements, and phase references reduce uncertainty as the baselines are combined; elevation data supplies a geometric prior. Entanglement improves measurement precision—it does not transmit an image or information faster than light. You and I are operating from a compartmentalized site on Earth to identify a landing region before our autonomous colonization swarm departs. Quietly, preferably.",
+      "SOVA online. From our clandestine Cauchy Array site on Earth, you are reconstructing Mars from real photons that departed minutes ago—not watching a live feed. Quantum-enhanced clocks and interferometry sharpen the solution without sending information faster than light. Use the wheel to zoom through the solved light field; the telescope never moves. Your task is to find a landing zone before our autonomous colonization swarm launches.",
     ],
   },
   surface: {
@@ -30,8 +29,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-surface-selection.mp3",
     autoPlayDelayMs: 1_300,
     body: [
-      "A surface click phase-locks the reconstruction to that coordinate. The wheel changes focal height around the selected point. Right-click releases it; middle-mouse drag rotates the solved field, and right-mouse drag shifts the virtual aperture.",
-      "Evaluate elevation, relief, slopes, illumination, and approach geometry. Lower terrain offers more atmosphere for entry, gentle ground reduces landing risk, and latitude affects solar power and thermal cycles. This optical survey cannot prove buried ice or soil strength, so promising regions still need orbital radar and robotic scouts. We are choosing where machines must land, survive, make power, find water, and build the first logistics chain.",
+      "Click Mars to phase-lock the reconstruction to a candidate landing site, then scroll to descend and inspect it; right-click releases the lock. Judge elevation, slope, light, and approach geometry—low, gentle ground gives the swarm more atmosphere for entry and a safer first foothold. The array cannot see buried ice or soil strength, so this coordinate is a hypothesis our orbital radar and robotic scouts must test.",
     ],
   },
   spaceman: {
@@ -41,8 +39,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-spaceman.mp3",
     autoPlayDelayMs: 2_300,
     body: [
-      "No human was teleported to Mars. The spaceman is a kinematic scale proxy instantiated inside the reconstructed light field. Its feet follow the rendered terrain model, and its jump uses measured Martian surface gravity: 3.721 metres per second squared. Use WASD to move, Shift to run, Space to jump, and the mouse to inspect human-scale relief.",
-      "The real mission is an AI-enabled robotic swarm: scouts map, cargo units deploy power, excavators expose ice-bearing material, in-situ systems make water, oxygen, and fuel, and construction units build shielded habitats. Terraforming is a speculative, generations-long objective constrained by energy, volatiles, low gravity, and atmospheric loss. The immediate objective is simpler: give autonomous infrastructure its first survivable foothold.",
+      "No human was teleported to Mars. This spaceman is a scale proxy inside the reconstructed field. Use WASD to move, Shift to run, Space to jump, and the mouse to inspect terrain at human scale under Martian gravity. Read every ridge as a construction problem: our autonomous scouts, excavators, and builders must find water, make power, and raise shielded habitats before any human follows.",
     ],
   },
 };

@@ -11,6 +11,7 @@ import {
   coarserNeighbourEdgeMorphs,
   lodTransitionVisible,
   neighbourBalanceAncestors,
+  orbitalCoherenceSubstrateVisible,
   sampleMorphedTerrainGrid,
   terrainEdgeMorphWeight,
   terrainHorizonLimitRadians,
@@ -19,7 +20,12 @@ import {
 import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
 import { proceduralTerrainHeightForLod } from "../app/planet/noise";
-import { createAtmosphereMaterial, createTerrainMaterial, createTerrainShadowMaterial } from "../app/planet/render/materials";
+import {
+  createAtmosphereMaterial,
+  createOrbitalCoherenceMaterial,
+  createTerrainMaterial,
+  createTerrainShadowMaterial,
+} from "../app/planet/render/materials";
 import {
   calculateSurfaceRockPlacement,
   createSurfaceRockMaterial,
@@ -69,8 +75,10 @@ describe("terrain worker geometry", () => {
     expect(child?.normal.z).toBeCloseTo(0, 12);
   });
 
-  it("ships an 8K USGS orbital mosaic, rock and ice PBR maps, and a surface-visible aerosol atmosphere", async () => {
+  it("ships the Mars and moon albedo assets, terrain PBR maps, and a surface-visible aerosol atmosphere", async () => {
     const jpeg = await readFile(path.join(process.cwd(), "public/textures/mars-viking-global-8k.jpg"));
+    const phobos = await readFile(path.join(process.cwd(), "public/textures/phobos-albedo.png"));
+    const deimos = await readFile(path.join(process.cwd(), "public/textures/deimos-albedo.png"));
     const diffuse = await readFile(path.join(process.cwd(), "public/textures/mars-rock-diffuse.jpg"));
     const normal = await readFile(path.join(process.cwd(), "public/textures/mars-rock-normal-gl.jpg"));
     const roughness = await readFile(path.join(process.cwd(), "public/textures/mars-rock-roughness.jpg"));
@@ -79,6 +87,11 @@ describe("terrain worker geometry", () => {
     const iceRoughness = await readFile(path.join(process.cwd(), "public/textures/mars-ice-roughness.jpg"));
     expect(jpeg.byteLength).toBeGreaterThan(9_000_000);
     expect([...jpeg.subarray(0, 2)]).toEqual([0xff, 0xd8]);
+    for (const moonMap of [phobos, deimos]) {
+      expect(moonMap.byteLength).toBeGreaterThan(2_500_000);
+      expect([...moonMap.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      expect(moonMap.readUInt32BE(16) / moonMap.readUInt32BE(20)).toBeCloseTo(2, 2);
+    }
     expect(diffuse.byteLength).toBeGreaterThan(750_000);
     expect(normal.byteLength).toBeGreaterThan(1_300_000);
     expect(roughness.byteLength).toBeGreaterThan(450_000);
@@ -272,6 +285,7 @@ describe("terrain worker geometry", () => {
   it("configures morph-aware directional cast shadows without skirt occluders", () => {
     const material = createTerrainMaterial();
     const depth = createTerrainShadowMaterial();
+    const coherence = createOrbitalCoherenceMaterial(material.uniforms.uOrbitalTexture.value);
     expect(material.lights).toBe(true);
     expect("directionalLightShadows" in material.uniforms).toBe(true);
     expect(material.uniforms.uOrbitalTexture.value.name).toContain("USGS Viking MDIM 2.1");
@@ -309,6 +323,8 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("shadowFinish");
     expect(material.fragmentShader).toContain("finishingDitherMask");
     expect(material.fragmentShader).toContain("stableSurfaceDither(vStableMetres)");
+    expect(material.fragmentShader).toContain("handoffEdge");
+    expect(material.fragmentShader).toContain("handoffColour");
     expect(material.fragmentShader).not.toContain("gl_FragCoord");
     expect(material.fragmentShader).toContain("tonemapping_fragment");
     expect(material.fragmentShader).toContain("colorspace_fragment");
@@ -324,6 +340,12 @@ describe("terrain worker geometry", () => {
     expect(depth.fragmentShader).toContain("uFadeIn > 0.5");
     expect(depth.uniforms.uFade.value).toBe(1);
     expect(depth.uniforms.uFadeIn.value).toBe(1);
+    expect(coherence.name).toContain("quantum coherence substrate");
+    expect(coherence.fragmentShader).toContain("spectralEcho");
+    expect(coherence.fragmentShader).toContain("interference");
+    expect(coherence.fragmentShader).toContain("lattice");
+    expect(coherence.depthWrite).toBe(false);
+    expect(coherence.transparent).toBe(false);
     material.uniforms.uOrbitalTexture.value.dispose();
     material.uniforms.uSurfaceDiffuse.value.dispose();
     material.uniforms.uSurfaceNormal.value.dispose();
@@ -333,6 +355,13 @@ describe("terrain worker geometry", () => {
     material.uniforms.uIceSurfaceRoughness.value.dispose();
     material.dispose();
     depth.dispose();
+    coherence.dispose();
+  });
+
+  it("limits the coherence substrate to orbital imagery distances", () => {
+    expect(orbitalCoherenceSubstrateVisible(179_999)).toBe(false);
+    expect(orbitalCoherenceSubstrateVisible(180_000)).toBe(true);
+    expect(orbitalCoherenceSubstrateVisible(10_000_000)).toBe(true);
   });
 
   it("bakes sampled MOLA elevations into the radial vertex positions", () => {

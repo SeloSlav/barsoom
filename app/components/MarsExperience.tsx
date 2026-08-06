@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
-import { PlanetEngine, type MarsLandmarkHover, type ObservedBody } from "../planet/PlanetEngine";
+import { PlanetEngine, type MarsLandmarkHover, type MarsLandmarkMarker, type ObservedBody } from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
@@ -105,6 +105,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [audioMuted, setAudioMuted] = useState(false);
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [hoveredLandmark, setHoveredLandmark] = useState<PresentedLandmark | null>(null);
+  const [landmarkMarkers, setLandmarkMarkers] = useState<readonly MarsLandmarkMarker[]>([]);
   const [recoherenceVisible, setRecoherenceVisible] = useState(false);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
@@ -123,6 +124,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         initialSimulationUtc,
         (position) => setObserverAction(position ? positionObserverAction(position.x, position.y) : null),
         (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
+        setLandmarkMarkers,
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);
@@ -173,6 +175,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     setTutorialLibraryVisible(false);
     setObserverAction(null);
     setHoveredLandmark(null);
+    setLandmarkMarkers([]);
     window.__BARSOOM__?.focusBody(body);
     canvasRef.current?.focus();
   };
@@ -324,6 +327,20 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>}
       {!moonMode && <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>}
+      {!surfaceMode && !moonMode && landmarkMarkers.length > 0 && <div className="planet-landmark-layer" aria-hidden="true">
+        {landmarkMarkers.map((marker, index) => <i
+          key={marker.id}
+          className={`planet-landmark-beacon${hoveredLandmark?.id === marker.id ? " active" : ""}`}
+          style={{
+            left: marker.x,
+            top: marker.y,
+            width: marker.radiusPx * 2,
+            height: marker.radiusPx * 2,
+            animationDelay: `${-(index % 6) * 0.38}s`,
+          }}
+          title={marker.name}
+        />)}
+      </div>}
       {hoveredLandmark && !surfaceMode && !moonMode && <>
         <i
           className="planet-feature-reticle"

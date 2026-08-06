@@ -90,8 +90,15 @@ The Mars moon renderer uses physical dimensions, albedo and NASA/JPL Horizons
 MAR099 osculating elements. The reference state is 2026-08-06 00:00 TDB, with
 local nodal, apsidal and mean-anomaly rates fitted across the following 32 days.
 Both irregular meshes remain at physical scale and rotate synchronously toward
-Mars; their detailed albedo maps are deterministic procedural interpretations,
-not spacecraft image mosaics.
+Mars. Their detailed equirectangular albedo maps are AI-assisted artistic
+interpretations designed to resemble neutral spacecraft surface imaging; they
+are not scientific products or spacecraft image mosaics.
+
+- Assets: `public/textures/phobos-albedo.png`, `public/textures/deimos-albedo.png`
+- Generated with: OpenAI built-in image generation, 2026-08-06
+- Texture brief: shadow-free photorealistic 2:1 global albedo maps; battered,
+  grooved Stickney-dominated terrain for Phobos and smoother dust-mantled
+  regolith for Deimos
 
 - Orbit source: https://ssd.jpl.nasa.gov/horizons/
 - Ephemeris: MAR099 (Phobos 401, Deimos 402, Mars-centred ICRF elements)
