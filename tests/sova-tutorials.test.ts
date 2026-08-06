@@ -7,7 +7,7 @@ describe("SOVA tutorials", () => {
       const words = tutorial.body[0].trim().split(/\s+/);
 
       expect(tutorial.body).toHaveLength(1);
-      expect(words.length).toBeLessThanOrEqual(75);
+      expect(words.length).toBeLessThanOrEqual(60);
     }
   });
 });

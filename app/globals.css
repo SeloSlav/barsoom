@@ -40,6 +40,7 @@ button { font: inherit; }
 .coherence-warning strong, .coherence-warning span { display: block; font-family: var(--font-geist-mono), monospace; text-transform: uppercase; }
 .coherence-warning strong { color: rgba(255,194,162,.98); font-size: clamp(17px, 2.2vw, 26px); line-height: 1.08; letter-spacing: .15em; text-shadow: 0 0 18px rgba(255,112,70,.28); }
 .coherence-warning span { margin-top: 10px; color: rgba(241,211,196,.68); font-size: clamp(8px, .9vw, 11px); line-height: 1.35; letter-spacing: .12em; }
+.coherence-warning .coherence-countdown b { color: rgba(255,221,198,.98); font-size: 1.25em; font-variant-numeric: tabular-nums; font-weight: 650; }
 .coherence-warning.coherence-restored { border-color: rgba(132,235,198,.52); border-top-color: rgba(156,244,211,.92); background: rgba(5,20,18,.86); box-shadow: 0 0 38px rgba(87,226,180,.18); animation: recoherence-confirm 2s ease-out both; }
 .coherence-warning.coherence-restored strong { color: rgba(193,255,231,.98); text-shadow: 0 0 18px rgba(92,234,187,.3); }
 .coherence-warning.coherence-restored span { color: rgba(193,235,219,.68); }

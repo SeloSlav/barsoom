@@ -635,6 +635,9 @@ export class PlanetEngine {
       controlMode: this.surfaceTraverse.active ? "surface" : "survey",
       surfaceReady: this.surfaceTraverse.surfaceReady,
       localProxyCoherent: this.surfaceTraverse.localProxyCoherent,
+      localProxyCoherenceRemainingS: this.surfaceTraverse.active && !this.surfaceTraverse.localProxyCoherent
+        ? Math.max(0, LOCAL_PROXY_COHERENCE_GRACE_S - this.localProxyCoherenceLossSeconds)
+        : null,
     };
     this.onTelemetry(this.telemetry);
   }

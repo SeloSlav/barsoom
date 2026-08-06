@@ -18,6 +18,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
     frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true, localProxyCoherent: true,
+    localProxyCoherenceRemainingS: null,
   };
 }
 
@@ -222,8 +223,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
       {localProxyCoherenceLost && <aside className="coherence-warning" role="status" aria-live="polite">
-        <strong>LOCAL PROXY COHERENCE LOST</strong>
-        <span>Local field divergence · planetary aperture fallback armed</span>
+        <strong>LOSING LOCAL PROXY COHERENCE</strong>
+        <span className="coherence-countdown">Planetary aperture fallback in <b>{(telemetry.localProxyCoherenceRemainingS ?? 0).toFixed(1)} s</b> · move inward to recover</span>
       </aside>}
       {recoherenceVisible && !localProxyCoherenceLost && surfaceMode && <aside className="coherence-warning coherence-restored" role="status" aria-live="polite">
         <strong>LOCAL PROXY RECOHERENCE RESTORED</strong>
@@ -267,7 +268,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <small>CAUSAL DELAY EMBEDDED · MODEL RATE 60×</small>
         </div>
         <div className="header-actions">
-          <span className={`array-state${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY / COHERENCE LOST" : "ARRAY 07 / COHERENT"}</span>
+          <span className={`array-state${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY / LOSING COHERENCE" : "ARRAY 07 / COHERENT"}</span>
           <div className="header-buttons">
             <button
               className={`audio-button${audioMuted ? " muted" : ""}`}
@@ -387,7 +388,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : localProxyCoherenceLost ? "LOCAL PROXY COHERENCE LOST / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : localProxyCoherenceLost ? "LOSING LOCAL PROXY COHERENCE / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

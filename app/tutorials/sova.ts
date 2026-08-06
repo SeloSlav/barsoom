@@ -19,7 +19,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-quantum-telescope.mp3",
     autoPlayDelayMs: 0,
     body: [
-      "SOVA online. From our clandestine Cauchy Array site on Earth, you are reconstructing Mars from real photons that departed minutes ago—not watching a live feed. Quantum-enhanced clocks and interferometry sharpen the solution without sending information faster than light. Use the wheel to zoom through the solved light field; the telescope never moves. Your task is to find a landing zone before our autonomous colonization swarm launches.",
+      "SOVA online. From our clandestine Cauchy Array site on Earth, you are reconstructing Mars from real photons that departed minutes ago—not watching a live feed. Quantum-enhanced interferometry sharpens the solution without sending information faster than light. Scroll to zoom through the solved light field; the telescope never moves. Find our autonomous colonization swarm a landing zone before launch.",
     ],
   },
   surface: {
@@ -29,7 +29,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-surface-selection.mp3",
     autoPlayDelayMs: 1_300,
     body: [
-      "Click Mars to phase-lock the reconstruction to a candidate landing site, then scroll to descend and inspect it; right-click releases the lock. Judge elevation, slope, light, and approach geometry—low, gentle ground gives the swarm more atmosphere for entry and a safer first foothold. The array cannot see buried ice or soil strength, so this coordinate is a hypothesis our orbital radar and robotic scouts must test.",
+      "Click Mars to phase-lock a candidate landing site, then scroll to descend and inspect it; right-click releases the lock. Judge elevation, slope, light, and approach geometry—low, gentle ground gives the swarm more atmosphere for entry and a safer foothold. The array cannot see buried ice or soil strength, so orbital radar and robotic scouts must test your hypothesis.",
     ],
   },
   spaceman: {
@@ -39,7 +39,7 @@ export const SOVA_TUTORIALS: Record<SovaTutorialId, SovaTutorialDefinition> = {
     audioSrc: "/audio/sova-spaceman.mp3",
     autoPlayDelayMs: 2_300,
     body: [
-      "No human was teleported to Mars. This spaceman is a scale proxy inside the reconstructed field. Use WASD to move, Shift to run, Space to jump, and the mouse to inspect terrain at human scale under Martian gravity. Read every ridge as a construction problem: our autonomous scouts, excavators, and builders must find water, make power, and raise shielded habitats before any human follows.",
+      "No human was teleported to Mars. This spaceman is a scale proxy inside the reconstruction. Use WASD to move, Shift to run, Space to jump, and the mouse to inspect terrain at human scale under Martian gravity. Read each ridge as a construction problem: our scouts, excavators, and builders must find water, make power, and raise habitats before humans follow.",
     ],
   },
 };
