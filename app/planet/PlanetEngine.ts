@@ -58,7 +58,7 @@ declare global {
   }
 }
 
-const LOCAL_PROXY_COHERENCE_GRACE_S = 3;
+const LOCAL_PROXY_COHERENCE_GRACE_S = 10;
 const MOON_CAMERA_STANDOFF_RADII = 3.1;
 
 export class PlanetEngine {
