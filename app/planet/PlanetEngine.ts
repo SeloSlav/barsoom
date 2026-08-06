@@ -58,7 +58,6 @@ declare global {
   }
 }
 
-const LOCAL_PROXY_COHERENCE_GRACE_S = 10;
 const MOON_CAMERA_STANDOFF_RADII = 3.1;
 
 export class PlanetEngine {
@@ -123,7 +122,6 @@ export class PlanetEngine {
   private paused = false;
   private disposed = false;
   private surfaceEntryRevision = 0;
-  private localProxyCoherenceLossSeconds = 0;
   private observedBody: ObservedBody = "Mars";
   private moonOrbitYawRad = 0;
   private moonOrbitPitchRad = 0;
@@ -463,14 +461,6 @@ export class PlanetEngine {
     this.audio.update(deltaSeconds);
     this.smoothedFrameMs += (frameMs - this.smoothedFrameMs) * 0.06;
     this.framesSinceQualityChange += 1;
-    if (this.surfaceTraverse.active && !this.surfaceTraverse.localProxyCoherent) {
-      this.localProxyCoherenceLossSeconds += deltaSeconds;
-      if (this.localProxyCoherenceLossSeconds >= LOCAL_PROXY_COHERENCE_GRACE_S) {
-        this.exitSurfaceTraverse();
-      }
-    } else {
-      this.localProxyCoherenceLossSeconds = 0;
-    }
     const marsControlState = this.surfaceTraverse.active
       ? this.surfaceTraverse.update(deltaSeconds)
       : this.controls.update(deltaSeconds);
@@ -634,10 +624,6 @@ export class PlanetEngine {
       simulationUtc: simulationUtc.toISOString(),
       controlMode: this.surfaceTraverse.active ? "surface" : "survey",
       surfaceReady: this.surfaceTraverse.surfaceReady,
-      localProxyCoherent: this.surfaceTraverse.localProxyCoherent,
-      localProxyCoherenceRemainingS: this.surfaceTraverse.active && !this.surfaceTraverse.localProxyCoherent
-        ? Math.max(0, LOCAL_PROXY_COHERENCE_GRACE_S - this.localProxyCoherenceLossSeconds)
-        : null,
     };
     this.onTelemetry(this.telemetry);
   }
@@ -654,7 +640,7 @@ export class PlanetEngine {
 
     const extentM = directionalShadowExtentM(
       altitudeM,
-      this.surfaceTraverse.active && this.surfaceTraverse.localProxyCoherent,
+      this.surfaceTraverse.active,
       this.controlState.cameraDistanceM,
     );
     this.surfaceShadowExtentM = extentM;
@@ -969,7 +955,6 @@ export class PlanetEngine {
   private exitSurfaceTraverse() {
     this.surfaceEntryRevision += 1;
     if (!this.surfaceTraverse.active) return;
-    this.localProxyCoherenceLossSeconds = 0;
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);
     this.surfaceTraverse.deactivate();

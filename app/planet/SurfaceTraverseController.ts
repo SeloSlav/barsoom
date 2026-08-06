@@ -20,10 +20,6 @@ const CAMERA_DEFAULT_DISTANCE_M = 7;
 const CAMERA_FIRST_PERSON_DISTANCE_M = 0;
 const CAMERA_FIRST_PERSON_ENTER_DISTANCE_M = 0.85;
 const CAMERA_FIRST_PERSON_EXIT_DISTANCE_M = 2.2;
-// Keep the local proxy stable well beyond ordinary third-person framing. Past
-// this distance the human-scale solution enters its recoverable coherence-loss
-// state; the planetary zoom path itself remains unrestricted.
-export const LOCAL_PROXY_COHERENCE_DISTANCE_M = 200;
 const CAMERA_MAX_DISTANCE_M = MAX_CAMERA_ALTITUDE_M;
 const CAMERA_TARGET_HEIGHT_M = 1.38;
 const CAMERA_FIRST_PERSON_HEIGHT_M = 1.68;
@@ -185,10 +181,6 @@ export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: nu
     return CAMERA_FIRST_PERSON_DISTANCE_M;
   }
   return nextDistanceM;
-}
-
-export function isLocalProxyCoherenceLost(cameraDistanceM: number) {
-  return Number.isFinite(cameraDistanceM) && cameraDistanceM > LOCAL_PROXY_COHERENCE_DISTANCE_M;
 }
 
 export function rebaseCameraAnchorForTerrainChange(
@@ -475,10 +467,6 @@ export class SurfaceTraverseController {
 
   get surfaceReady() {
     return !this.active || this.entryReady;
-  }
-
-  get localProxyCoherent() {
-    return !this.active || !isLocalProxyCoherenceLost(this.cameraDistanceM);
   }
 
   private setLocalBasis() {
@@ -1004,12 +992,7 @@ export class SurfaceTraverseController {
     event.preventDefault();
     if (this.entryWheelLockSeconds > 0) return;
     const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
-    const coherenceWasLost = isLocalProxyCoherenceLost(this.cameraDistanceM);
     this.cameraDistanceM = applyWowCameraZoom(this.cameraDistanceM, event.deltaY * modeScale);
-    const coherenceIsLost = isLocalProxyCoherenceLost(this.cameraDistanceM);
-    if (coherenceIsLost !== coherenceWasLost) {
-      this.onAudioEvent({ type: "coherence", lost: coherenceIsLost });
-    }
   };
 
   dispose() {

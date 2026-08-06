@@ -60,8 +60,6 @@ export type PlanetTelemetry = {
   simulationUtc: string;
   controlMode: "survey" | "surface";
   surfaceReady: boolean;
-  localProxyCoherent: boolean;
-  localProxyCoherenceRemainingS: number | null;
 };
 
 export type DebugFlags = {

@@ -358,10 +358,10 @@ export type DirectionalShadowSnap = {
  */
 export function directionalShadowExtentM(
   altitudeM: number,
-  localProxyCoherent: boolean,
+  spacemanMode: boolean,
   cameraDistanceM = 0,
 ) {
-  if (localProxyCoherent) {
+  if (spacemanMode) {
     // A fixed 800 m half-extent gave a third-person astronaut only two or
     // three shadow texels. Bone animation then made the contact shadow blink
     // between texels, most visibly directly beneath the boots. Keep the local

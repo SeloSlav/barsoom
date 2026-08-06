@@ -17,8 +17,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
-    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true, localProxyCoherent: true,
-    localProxyCoherenceRemainingS: null,
+    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true,
   };
 }
 
@@ -108,11 +107,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [hoveredLandmark, setHoveredLandmark] = useState<PresentedLandmark | null>(null);
   const [landmarkMarkers, setLandmarkMarkers] = useState<readonly MarsLandmarkMarker[]>([]);
-  const [recoherenceVisible, setRecoherenceVisible] = useState(false);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
-  const coherenceWasLostRef = useRef(false);
   const shareStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -196,39 +193,25 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const moonMode = observedBody !== "Mars";
   const surfaceMode = !moonMode && telemetry.controlMode === "surface";
   const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
-  const localProxyCoherenceLost = surfaceMode && !telemetry.localProxyCoherent;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   useEffect(() => {
-    const coherenceWasLost = coherenceWasLostRef.current;
-    coherenceWasLostRef.current = localProxyCoherenceLost;
-    if (localProxyCoherenceLost || !surfaceMode || !coherenceWasLost) return;
-    const showTimeout = window.setTimeout(() => setRecoherenceVisible(true), 0);
-    const hideTimeout = window.setTimeout(() => setRecoherenceVisible(false), 2_000);
-    return () => {
-      window.clearTimeout(showTimeout);
-      window.clearTimeout(hideTimeout);
-    };
-  }, [localProxyCoherenceLost, surfaceMode]);
+    if (surfaceMode) setBodyMenuVisible(false);
+  }, [surfaceMode]);
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
       <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features and click one to select its landing point, or click any terrain coordinate to phase-lock it."} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
-      {localProxyCoherenceLost && <div className="coherence-loss-field" aria-hidden="true" />}
       {surfaceSettling && <div className="surface-entry-screen" role="status" aria-live="polite">
         <i aria-hidden="true" />
         <span>RESOLVING LOCAL FIELD</span>
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
-      {localProxyCoherenceLost && <aside className="coherence-warning" role="status" aria-live="polite">
-        <strong>LOSING LOCAL PROXY COHERENCE</strong>
-        <span className="coherence-countdown">Planetary aperture fallback in <b>{(telemetry.localProxyCoherenceRemainingS ?? 0).toFixed(1)} s</b> · move inward to recover</span>
-      </aside>}
-      {recoherenceVisible && !localProxyCoherenceLost && surfaceMode && <aside className="coherence-warning coherence-restored" role="status" aria-live="polite">
-        <strong>LOCAL PROXY RECOHERENCE RESTORED</strong>
-        <span>Local field reacquired · human-scale solution stable</span>
+      {surfaceMode && <aside className="surface-exit-hint" aria-label="Spaceman mode remains active at every zoom level. Press Escape to exit.">
+        <span>SPACEMAN MODE LOCKED</span>
+        <strong><kbd>ESC</kbd> TO EXIT</strong>
       </aside>}
       <header className="mission-header">
         <div className="mission-identity">
@@ -242,6 +225,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                 aria-expanded={bodyMenuVisible}
                 aria-haspopup="listbox"
                 aria-controls="observation-target-menu"
+                disabled={surfaceMode}
+                title={surfaceMode ? "Press Escape to exit spaceman mode before changing targets" : "Select celestial body"}
               >
                 <span className="wordmark-barsoom">{observedBody.toUpperCase()}</span>
                 <span className="wordmark-divider" aria-hidden="true">|</span>
@@ -249,7 +234,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                 <i className="wordmark-chevron" aria-hidden="true" />
               </button>
             </h1>
-            {bodyMenuVisible && <ul id="observation-target-menu" className="body-menu" role="listbox" aria-label="Select celestial body">
+            {bodyMenuVisible && !surfaceMode && <ul id="observation-target-menu" className="body-menu" role="listbox" aria-label="Select celestial body">
               {OBSERVATION_TARGETS.map((body) => <li key={body}>
                 <button
                   type="button"
@@ -268,7 +253,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <small>CAUSAL DELAY EMBEDDED · MODEL RATE 60×</small>
         </div>
         <div className="header-actions">
-          <span className={`array-state${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {localProxyCoherenceLost ? "LOCAL PROXY / LOSING COHERENCE" : "ARRAY 07 / COHERENT"}</span>
+          <span className="array-state"><i /> ARRAY 07 / COHERENT</span>
           <div className="header-buttons">
             <button
               className={`audio-button${audioMuted ? " muted" : ""}`}
@@ -380,15 +365,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
         {moonMode ? <dl><div><dt>Rotate around moon</dt><dd>Left / middle drag</dd></div><div><dt>Pan across moon</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget body</dt><dd>Identity menu</dd></div></dl> : (surfaceMode ? <>
-          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
-          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom can exceed the human-scale coherence envelope briefly; if the local proxy cannot recover, the instrument releases it and resumes planetary observation.</p>
+          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
+          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Spaceman mode stays locked to the figure at every wheel-zoom distance and exits only when you press <kbd>Esc</kbd>.</p>
         </> : <>
           <dl><div><dt>Named landmark</dt><dd>Hover + click</dd></div><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Left / middle drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock other terrain</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
           <p>Move the pointer over significant terrain to identify it, then click the named feature to lock that exact landing point. Choose <strong>Instantiate here</strong> in the confirmation card—or press <kbd>~</kbd>—to enter the surface. Unnamed terrain uses the same phase-lock flow.</p>
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className={`footer-center${localProxyCoherenceLost ? " coherence-lost" : ""}`}><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : localProxyCoherenceLost ? "LOSING LOCAL PROXY COHERENCE / ORBITAL LOCK HELD" : surfaceMode ? "LOCAL FIELD SOLUTION CONVERGED" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : surfaceMode ? "SPACEMAN TRACK LOCKED · ESC TO EXIT" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );
