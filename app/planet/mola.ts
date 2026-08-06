@@ -1,5 +1,5 @@
 import { TERRAIN_CONFIG } from "./constants";
-import { bilinearSample, clamp, directionToFaceUv, tileKeyToString } from "./math";
+import { bicubicSample, clamp, directionToFaceUv, tileKeyToString } from "./math";
 import type { CubeFace, TileKey, Vec3 } from "./types";
 
 const FACE_INDEX: Record<CubeFace, number> = {
@@ -123,8 +123,8 @@ export function sampleMolaTile(tile: MolaTileData, direction: Vec3) {
   const x = clamp(tileU, 0, 1) * (tile.gridSize - 1);
   const y = clamp(tileV, 0, 1) * (tile.gridSize - 1);
   return {
-    radiusHeightM: bilinearSample(tile.heightsM, tile.gridSize, tile.gridSize, x, y),
-    areoidHeightM: bilinearSample(tile.areoidM, tile.gridSize, tile.gridSize, x, y),
+    radiusHeightM: bicubicSample(tile.heightsM, tile.gridSize, tile.gridSize, x, y),
+    areoidHeightM: bicubicSample(tile.areoidM, tile.gridSize, tile.gridSize, x, y),
   };
 }
 

@@ -277,6 +277,32 @@ export function bilinearSample(
   return a * (1 - ty) + b * ty;
 }
 
+/** Catmull-Rom reconstruction for smooth height gradients between MOLA posts. */
+export function bicubicSample(
+  values: ArrayLike<number>,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+) {
+  const cubic = (a: number, b: number, c: number, d: number, t: number) =>
+    b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
+  const x1 = Math.floor(x);
+  const y1 = Math.floor(y);
+  const tx = clamp(x - x1, 0, 1);
+  const ty = clamp(y - y1, 0, 1);
+  const rowSamples = new Array<number>(4);
+  for (let rowOffset = -1; rowOffset <= 2; rowOffset += 1) {
+    const row = clamp(y1 + rowOffset, 0, height - 1);
+    const a = values[row * width + clamp(x1 - 1, 0, width - 1)];
+    const b = values[row * width + clamp(x1, 0, width - 1)];
+    const c = values[row * width + clamp(x1 + 1, 0, width - 1)];
+    const d = values[row * width + clamp(x1 + 2, 0, width - 1)];
+    rowSamples[rowOffset + 1] = cubic(a, b, c, d, tx);
+  }
+  return cubic(rowSamples[0], rowSamples[1], rowSamples[2], rowSamples[3], ty);
+}
+
 export function cameraAltitudeAboveGround(
   cameraAbsolute: Vec3,
   terrainHeightM: (direction: Vec3) => number,

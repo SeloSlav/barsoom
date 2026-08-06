@@ -39,6 +39,32 @@ export type RenderedTerrainSurface = {
 
 type GridSurfaceSample = Omit<RenderedTerrainSurface, "lod">;
 
+const EDGE_MORPH_BAND_CELLS = 2;
+
+function smoothstep01(value: number) {
+  const clamped = clamp(value, 0, 1);
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+/**
+ * Blends a fine tile into a coarser neighbour across two cells. Keeping the
+ * exact parent position only on the outside row closes the crack, but it also
+ * bends that row into a narrow trench which exposes the quadtree as a grid.
+ */
+export function terrainEdgeMorphWeight(
+  column: number,
+  row: number,
+  segments: number,
+  edgeMorph: readonly [west: number, east: number, north: number, south: number],
+) {
+  const band = Math.max(1, EDGE_MORPH_BAND_CELLS);
+  const west = (1 - smoothstep01(column / band)) * edgeMorph[0];
+  const east = (1 - smoothstep01((segments - column) / band)) * edgeMorph[1];
+  const north = (1 - smoothstep01(row / band)) * edgeMorph[2];
+  const south = (1 - smoothstep01((segments - row) / band)) * edgeMorph[3];
+  return Math.max(west, east, north, south);
+}
+
 /**
  * Intersects a radial ray with the same morphed triangle rendered by the
  * terrain vertex shader. Sampling the analytic height function is not enough:
@@ -77,11 +103,12 @@ export function sampleMorphedTerrainGrid(
   const morph = clamp(morphInput, 0, 1);
 
   const vertex = ([index, vertexColumn, vertexRow]: typeof triangle[number]) => {
-    let stitchedEdgeMorph = 0;
-    if (vertexColumn === 0) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[0]);
-    if (vertexColumn === segments) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[1]);
-    if (vertexRow === 0) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[2]);
-    if (vertexRow === segments) stitchedEdgeMorph = Math.max(stitchedEdgeMorph, edgeMorph[3]);
+    const stitchedEdgeMorph = terrainEdgeMorphWeight(
+      vertexColumn,
+      vertexRow,
+      segments,
+      edgeMorph,
+    );
     const morphWeight = Math.max(1 - morph, stitchedEdgeMorph);
     const offset = index * 3;
     return {
@@ -143,6 +170,27 @@ export function terrainNodeNeedsRefinement(screenError: number, wasRefined: bool
   return screenError > threshold;
 }
 
+const MARS_TERRAIN_OCCLUSION_RADIUS_M = MARS_REFERENCE_RADIUS_M - 9_000;
+
+/**
+ * Conservative relief-aware horizon limit. Both the camera and a raised
+ * target can see beyond the datum-sphere horizon; omitting the target term
+ * made distant canyon walls and massifs vanish during the final approach.
+ */
+export function terrainHorizonLimitRadians(
+  cameraRadiusM: number,
+  targetMaximumRadiusM: number,
+  tileAngularRadius: number,
+) {
+  const horizonFromRadius = (radiusM: number) => radiusM > MARS_TERRAIN_OCCLUSION_RADIUS_M
+    ? Math.acos(clamp(MARS_TERRAIN_OCCLUSION_RADIUS_M / radiusM, -1, 1))
+    : 0;
+  return horizonFromRadius(cameraRadiusM) +
+    horizonFromRadius(targetMaximumRadiusM) +
+    tileAngularRadius * 1.28 +
+    0.003;
+}
+
 export function neighbourBalanceAncestors(tile: TileKey, edge: TileEdge) {
   const neighbour = neighbourTile(tile, edge);
   const ancestors: TileKey[] = [];
@@ -190,6 +238,7 @@ class PlanetTileNode {
   geometryBytes = 0;
   failureCount = 0;
   refined = false;
+  maximumRadiusM = MARS_REFERENCE_RADIUS_M + 24_000;
 
   constructor(readonly key: TileKey, parent: PlanetTileNode | null) {
     this.id = tileKeyToString(key);
@@ -408,11 +457,13 @@ export class PlanetTerrain {
     const angularRadius = Math.min(Math.PI * 0.45, 1.42 / 2 ** node.key.lod);
     const cameraRadius = length3(this.cameraAbsolute);
     const cameraDirection = normalize3(this.cameraAbsolute);
-    const horizonAngle = cameraRadius > MARS_REFERENCE_RADIUS_M
-      ? Math.acos(Math.min(1, MARS_REFERENCE_RADIUS_M / cameraRadius))
-      : 0;
     const separation = Math.acos(Math.max(-1, Math.min(1, dot3(centerDirection, cameraDirection))));
-    if (!this.debugDisableHorizonCulling && separation > horizonAngle + angularRadius * 1.28 + 0.025) {
+    const horizonLimit = terrainHorizonLimitRadians(
+      cameraRadius,
+      node.maximumRadiusM,
+      angularRadius,
+    );
+    if (!this.debugDisableHorizonCulling && separation > horizonLimit) {
       return { visible: false, horizon: true, screenError: 0, priority: 0, focusProximity: Infinity };
     }
 
@@ -496,6 +547,7 @@ export class PlanetTerrain {
     geometry.setAttribute("elevation", new THREE.BufferAttribute(generated.elevations, 1));
     geometry.setAttribute("areoidElevation", new THREE.BufferAttribute(generated.areoidElevations, 1));
     geometry.setAttribute("morphDelta", new THREE.BufferAttribute(generated.morphDelta, 3));
+    geometry.setAttribute("normalMorphDelta", new THREE.BufferAttribute(generated.normalMorphDelta, 3));
     geometry.setAttribute("tileUv", new THREE.BufferAttribute(generated.tileUv, 2));
     geometry.setAttribute("surfaceMask", new THREE.BufferAttribute(generated.surface, 1));
     geometry.setIndex(new THREE.BufferAttribute(generated.indices, 1));
@@ -545,9 +597,15 @@ export class PlanetTerrain {
     node.mesh = mesh;
     node.center = generated.center;
     node.triangleCount = generated.triangleCount;
+    const surfaceVertexCount = (TERRAIN_CONFIG.meshSegments + 1) ** 2;
+    let maximumHeightM = -Infinity;
+    for (let index = 0; index < surfaceVertexCount; index += 1) {
+      maximumHeightM = Math.max(maximumHeightM, generated.elevations[index]);
+    }
+    node.maximumRadiusM = MARS_REFERENCE_RADIUS_M + maximumHeightM;
     node.geometryBytes = generated.positions.byteLength + generated.normals.byteLength +
       generated.planetDirections.byteLength + generated.elevations.byteLength +
-      generated.areoidElevations.byteLength + generated.morphDelta.byteLength +
+      generated.areoidElevations.byteLength + generated.morphDelta.byteLength + generated.normalMorphDelta.byteLength +
       generated.tileUv.byteLength + generated.surface.byteLength + generated.indices.byteLength;
     this.geometryBytes += node.geometryBytes;
     node.state = "ready";
@@ -660,6 +718,7 @@ export class PlanetTerrain {
     node.center = null;
     this.geometryBytes = Math.max(0, this.geometryBytes - node.geometryBytes);
     node.geometryBytes = 0;
+    node.maximumRadiusM = MARS_REFERENCE_RADIUS_M + 24_000;
     node.state = "idle";
     this.readyNodes.delete(node);
   }

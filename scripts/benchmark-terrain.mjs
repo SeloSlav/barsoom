@@ -45,6 +45,7 @@ for (let index = 0; index < 120; index += 1) {
     outputBytes = generated.positions.byteLength + generated.normals.byteLength +
       generated.planetDirections.byteLength + generated.elevations.byteLength +
       generated.areoidElevations.byteLength + generated.morphDelta.byteLength +
+      generated.normalMorphDelta.byteLength +
       generated.tileUv.byteLength + generated.surface.byteLength + generated.indices.byteLength;
   }
 }

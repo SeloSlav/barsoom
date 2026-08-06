@@ -42,7 +42,10 @@ export function automaticApproachPitchDegrees(altitudeM: number) {
   // At eye height an 80-degree offset from the surface normal looks only ten
   // degrees down. The horizon therefore remains inside the 42-degree frame,
   // while the ground focus stays roughly twelve metres in front of the player.
-  return 52 * orbitalApproach + 28 * surfaceApproach;
+  // A stronger regional oblique angle makes canyon walls, scarps and massifs
+  // readable during descent. The surface term still converges to the same
+  // 80-degree eye-height composition.
+  return 62 * orbitalApproach + 18 * surfaceApproach;
 }
 
 /**
@@ -339,8 +342,8 @@ export class PlanetControls {
 
     // Preserve a nadir view at planetary scale, ease into an oblique survey
     // composition, then lower the sightline again for a genuine surface view.
-    // This second stage is essential: a 48-degree orbit offset points 42
-    // degrees down and places the horizon completely outside a 42-degree FOV.
+    // This second stage is essential: the regional oblique composition must
+    // ease toward the stable 80-degree eye-height surface view.
     const targetPitchRad = THREE.MathUtils.degToRad(automaticApproachPitchDegrees(this.altitudeM));
     const smoothing = 1 - Math.exp(-Math.max(0, deltaSeconds) * 7.5);
     const nextPitchRad = THREE.MathUtils.lerp(

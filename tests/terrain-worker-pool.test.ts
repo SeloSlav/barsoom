@@ -28,6 +28,7 @@ class FakeWorker {
       elevations: new Float32Array(),
       areoidElevations: new Float32Array(),
       morphDelta: new Float32Array(),
+      normalMorphDelta: new Float32Array(),
       tileUv: new Float32Array(),
       surface: new Float32Array(),
       indices: new Uint32Array(),

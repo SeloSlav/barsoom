@@ -10,6 +10,7 @@ export type GeneratedTileGeometry = {
   elevations: Float32Array;
   areoidElevations: Float32Array;
   morphDelta: Float32Array;
+  normalMorphDelta: Float32Array;
   tileUv: Float32Array;
   surface: Float32Array;
   indices: Uint32Array;
@@ -34,7 +35,7 @@ type WorkerSlot = {
 // Public workers are not fingerprinted by Vite. Keep this in lockstep with
 // public/workers/terrain-worker.js so a new geometry algorithm always gets a
 // new browser cache key and an old cached worker can never masquerade as new.
-export const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v8";
+export const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v14";
 
 export class TerrainWorkerPool {
   private nextJobId = 1;
@@ -154,6 +155,7 @@ export class TerrainWorkerPool {
         elevations: data.elevations,
         areoidElevations: data.areoidElevations,
         morphDelta: data.morphDelta,
+        normalMorphDelta: data.normalMorphDelta,
         tileUv: data.tileUv,
         surface: data.surface,
         indices: data.indices,

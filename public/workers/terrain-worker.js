@@ -1,6 +1,6 @@
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 const PLANET_SEED = 0x4d415253;
-const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v8";
+const TERRAIN_WORKER_REVISION = "barsoom-terrain-geometry-v14";
 const DETAIL_OCTAVES = [
   [38, 310],
   [91, 142],
@@ -191,6 +191,53 @@ function terrainDetailHeightForLod(direction, lod) {
     craterHeight(direction, resolvedCraterScalesForLod(lod));
 }
 
+function bicubic(values, size, x, y) {
+  const cubic = (a, b, c, d, t) =>
+    b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
+  const x1 = Math.floor(x);
+  const y1 = Math.floor(y);
+  const tx = Math.max(0, Math.min(1, x - x1));
+  const ty = Math.max(0, Math.min(1, y - y1));
+  const rows = new Array(4);
+  for (let rowOffset = -1; rowOffset <= 2; rowOffset += 1) {
+    const row = Math.max(0, Math.min(size - 1, y1 + rowOffset));
+    const a = values[row * size + Math.max(0, Math.min(size - 1, x1 - 1))];
+    const b = values[row * size + Math.max(0, Math.min(size - 1, x1))];
+    const c = values[row * size + Math.max(0, Math.min(size - 1, x1 + 1))];
+    const d = values[row * size + Math.max(0, Math.min(size - 1, x1 + 2))];
+    rows[rowOffset + 1] = cubic(a, b, c, d, tx);
+  }
+  return cubic(rows[0], rows[1], rows[2], rows[3], ty);
+}
+
+function bicubicWithGradient(values, size, x, y) {
+  const coefficients = (a, b, c, d) => [c - a, 2 * a - 5 * b + 4 * c - d, 3 * (b - c) + d - a];
+  const cubic = (b, polynomial, t) =>
+    b + 0.5 * t * (polynomial[0] + t * (polynomial[1] + t * polynomial[2]));
+  const derivative = (polynomial, t) =>
+    0.5 * (polynomial[0] + 2 * polynomial[1] * t + 3 * polynomial[2] * t * t);
+  const x1 = Math.floor(x);
+  const y1 = Math.floor(y);
+  const tx = Math.max(0, Math.min(1, x - x1));
+  const ty = Math.max(0, Math.min(1, y - y1));
+  const rows = new Array(4);
+  const rowDx = new Array(4);
+  for (let rowOffset = -1; rowOffset <= 2; rowOffset += 1) {
+    const row = Math.max(0, Math.min(size - 1, y1 + rowOffset));
+    const a = values[row * size + Math.max(0, Math.min(size - 1, x1 - 1))];
+    const b = values[row * size + Math.max(0, Math.min(size - 1, x1))];
+    const c = values[row * size + Math.max(0, Math.min(size - 1, x1 + 1))];
+    const d = values[row * size + Math.max(0, Math.min(size - 1, x1 + 2))];
+    const polynomial = coefficients(a, b, c, d);
+    rows[rowOffset + 1] = cubic(b, polynomial, tx);
+    rowDx[rowOffset + 1] = derivative(polynomial, tx);
+  }
+  const yPolynomial = coefficients(rows[0], rows[1], rows[2], rows[3]);
+  const value = cubic(rows[1], yPolynomial, ty);
+  const dxPolynomial = coefficients(rowDx[0], rowDx[1], rowDx[2], rowDx[3]);
+  return [value, cubic(rowDx[1], dxPolynomial, ty), derivative(yPolynomial, ty)];
+}
+
 function bilinear(values, size, x, y) {
   const x0 = Math.max(0, Math.min(size - 1, Math.floor(x)));
   const y0 = Math.max(0, Math.min(size - 1, Math.floor(y)));
@@ -208,8 +255,29 @@ function sampleBase(base, u, v) {
   const tileU = Math.max(0, Math.min(1, ((u + 1) * 0.5) * count - base.key.x));
   const tileV = Math.max(0, Math.min(1, ((v + 1) * 0.5) * count - base.key.y));
   return {
-    height: bilinear(base.heightsM, base.gridSize, tileU * (base.gridSize - 1), tileV * (base.gridSize - 1)),
+    height: bicubic(base.heightsM, base.gridSize, tileU * (base.gridSize - 1), tileV * (base.gridSize - 1)),
     areoid: bilinear(base.areoidM, base.gridSize, tileU * (base.gridSize - 1), tileV * (base.gridSize - 1)),
+  };
+}
+
+function sampleBaseHeightWithGradient(base, u, v) {
+  const count = 2 ** base.key.lod;
+  const unclampedTileU = ((u + 1) * 0.5) * count - base.key.x;
+  const unclampedTileV = ((v + 1) * 0.5) * count - base.key.y;
+  const tileU = Math.max(0, Math.min(1, unclampedTileU));
+  const tileV = Math.max(0, Math.min(1, unclampedTileV));
+  const gridScale = base.gridSize - 1;
+  const [height, dx, dy] = bicubicWithGradient(
+    base.heightsM,
+    base.gridSize,
+    tileU * gridScale,
+    tileV * gridScale,
+  );
+  const coordinateScale = count * 0.5 * gridScale;
+  return {
+    height,
+    du: unclampedTileU === tileU ? dx * coordinateScale : 0,
+    dv: unclampedTileV === tileV ? dy * coordinateScale : 0,
   };
 }
 
@@ -225,6 +293,7 @@ function generate(message) {
   const elevations = new Float32Array(vertexCount);
   const areoidElevations = new Float32Array(vertexCount);
   const morphDelta = new Float32Array(vertexCount * 3);
+  const normalMorphDelta = new Float32Array(vertexCount * 3);
   const tileUv = new Float32Array(vertexCount * 2);
   const surface = new Float32Array(vertexCount);
   const count = 2 ** key.lod;
@@ -241,12 +310,36 @@ function generate(message) {
   const centerHeight = centerBase.height + terrainDetailHeightForLod(centerDirection, key.lod);
   const center = centerDirection.map((component) => component * (MARS_REFERENCE_RADIUS_M + centerHeight));
 
+  const shadingNormalAt = (u, v) => {
+    const direction = faceDirection(key.face, u, v);
+    const sample = sampleBaseHeightWithGradient(base, u, v);
+    const radius = MARS_REFERENCE_RADIUS_M + sample.height;
+    const directionStep = 1e-5;
+    const directionWest = faceDirection(key.face, u - directionStep, v);
+    const directionEast = faceDirection(key.face, u + directionStep, v);
+    const directionNorth = faceDirection(key.face, u, v - directionStep);
+    const directionSouth = faceDirection(key.face, u, v + directionStep);
+    const du = directionEast.map((component, axis) =>
+      (component - directionWest[axis]) / (2 * directionStep) * radius + direction[axis] * sample.du);
+    const dv = directionSouth.map((component, axis) =>
+      (component - directionNorth[axis]) / (2 * directionStep) * radius + direction[axis] * sample.dv);
+    let nx = du[1] * dv[2] - du[2] * dv[1];
+    let ny = du[2] * dv[0] - du[0] * dv[2];
+    let nz = du[0] * dv[1] - du[1] * dv[0];
+    if (nx * direction[0] + ny * direction[1] + nz * direction[2] < 0) {
+      nx = -nx; ny = -ny; nz = -nz;
+    }
+    const normalLength = Math.hypot(nx, ny, nz) || 1;
+    return [nx / normalLength, ny / normalLength, nz / normalLength];
+  };
+
   // Build the exact parent mesh under this child. A radial height delta is not
   // enough to join a tessellated cube-sphere: the odd child-edge vertices must
   // land on the parent's straight triangles, not merely sample its height
   // function at the same direction. This interpolation is the crack-free
   // geomorph target used both during transitions and along steady LOD edges.
   let parentGrid = null;
+  let parentNormalGrid = null;
   let parentU0 = 0;
   let parentV0 = 0;
   let parentSize = 0;
@@ -259,8 +352,15 @@ function generate(message) {
     parentV0 = -1 + 2 * parentY / parentCount;
     parentSize = 2 / parentCount;
     parentGrid = new Float64Array(gridSize * gridSize * 3);
-    for (let parentRow = 0; parentRow < gridSize; parentRow += 1) {
-      for (let parentColumn = 0; parentColumn < gridSize; parentColumn += 1) {
+    // A child occupies only one quadrant of its parent. Generate the 13x13
+    // parent sub-grid that this child can sample rather than all 625 vertices.
+    const parentHalfSegments = segments / 2;
+    const parentColumnStart = (key.x % 2) * parentHalfSegments;
+    const parentRowStart = (key.y % 2) * parentHalfSegments;
+    const parentColumnEnd = parentColumnStart + parentHalfSegments;
+    const parentRowEnd = parentRowStart + parentHalfSegments;
+    for (let parentRow = parentRowStart; parentRow <= parentRowEnd; parentRow += 1) {
+      for (let parentColumn = parentColumnStart; parentColumn <= parentColumnEnd; parentColumn += 1) {
         const parentIndex = parentRow * gridSize + parentColumn;
         const parentU = parentU0 + parentSize * (parentColumn / segments);
         const parentV = parentV0 + parentSize * (parentRow / segments);
@@ -271,6 +371,16 @@ function generate(message) {
         for (let axis = 0; axis < 3; axis += 1) {
           parentGrid[parentIndex * 3 + axis] = parentDirection[axis] * parentRadius;
         }
+      }
+    }
+
+    parentNormalGrid = new Float64Array(gridSize * gridSize * 3);
+    for (let row = parentRowStart; row <= parentRowEnd; row += 1) {
+      for (let column = parentColumnStart; column <= parentColumnEnd; column += 1) {
+        const index = row * gridSize + column;
+        const parentU = parentU0 + parentSize * (column / segments);
+        const parentV = parentV0 + parentSize * (row / segments);
+        parentNormalGrid.set(shadingNormalAt(parentU, parentV), index * 3);
       }
     }
   }
@@ -330,29 +440,48 @@ function generate(message) {
   for (let row = 0; row < gridSize; row += 1) {
     for (let column = 0; column < gridSize; column += 1) {
       const index = row * gridSize + column;
-      const left = row * gridSize + Math.max(0, column - 1);
-      const right = row * gridSize + Math.min(gridSize - 1, column + 1);
-      const top = Math.max(0, row - 1) * gridSize + column;
-      const bottom = Math.min(gridSize - 1, row + 1) * gridSize + column;
-      const ax = positions[right * 3] - positions[left * 3];
-      const ay = positions[right * 3 + 1] - positions[left * 3 + 1];
-      const az = positions[right * 3 + 2] - positions[left * 3 + 2];
-      const bx = positions[bottom * 3] - positions[top * 3];
-      const by = positions[bottom * 3 + 1] - positions[top * 3 + 1];
-      const bz = positions[bottom * 3 + 2] - positions[top * 3 + 2];
-      let nx = ay * bz - az * by;
-      let ny = az * bx - ax * bz;
-      let nz = ax * by - ay * bx;
-      const radialX = planetDirections[index * 3];
-      const radialY = planetDirections[index * 3 + 1];
-      const radialZ = planetDirections[index * 3 + 2];
-      if (nx * radialX + ny * radialY + nz * radialZ < 0) {
-        nx = -nx; ny = -ny; nz = -nz;
+      const u = u0 + size * (column / segments);
+      const v = v0 + size * (row / segments);
+      normals.set(shadingNormalAt(u, v), index * 3);
+    }
+  }
+
+  if (parentNormalGrid) {
+    for (let row = 0; row < gridSize; row += 1) {
+      for (let column = 0; column < gridSize; column += 1) {
+        const index = row * gridSize + column;
+        const u = u0 + size * (column / segments);
+        const v = v0 + size * (row / segments);
+        const parentGridX = Math.max(0, Math.min(segments, (u - parentU0) / parentSize * segments));
+        const parentGridY = Math.max(0, Math.min(segments, (v - parentV0) / parentSize * segments));
+        const parentColumn = Math.min(segments - 1, Math.floor(parentGridX));
+        const parentRow = Math.min(segments - 1, Math.floor(parentGridY));
+        const tx = parentGridX - parentColumn;
+        const ty = parentGridY - parentRow;
+        const a = parentRow * gridSize + parentColumn;
+        const b = a + 1;
+        const c = a + gridSize;
+        const d = c + 1;
+        const parentNormal = [0, 0, 0];
+        for (let axis = 0; axis < 3; axis += 1) {
+          if (tx + ty <= 1) {
+            const av = parentNormalGrid[a * 3 + axis];
+            parentNormal[axis] = av +
+              (parentNormalGrid[b * 3 + axis] - av) * tx +
+              (parentNormalGrid[c * 3 + axis] - av) * ty;
+          } else {
+            const dv = parentNormalGrid[d * 3 + axis];
+            parentNormal[axis] = dv +
+              (parentNormalGrid[c * 3 + axis] - dv) * (1 - tx) +
+              (parentNormalGrid[b * 3 + axis] - dv) * (1 - ty);
+          }
+        }
+        const parentNormalLength = Math.hypot(...parentNormal) || 1;
+        for (let axis = 0; axis < 3; axis += 1) {
+          normalMorphDelta[index * 3 + axis] = normals[index * 3 + axis] -
+            parentNormal[axis] / parentNormalLength;
+        }
       }
-      const normalLength = Math.hypot(nx, ny, nz) || 1;
-      normals[index * 3] = nx / normalLength;
-      normals[index * 3 + 1] = ny / normalLength;
-      normals[index * 3 + 2] = nz / normalLength;
     }
   }
 
@@ -372,6 +501,7 @@ function generate(message) {
       normals[index * 3 + axis] = normals[sourceIndex * 3 + axis];
       planetDirections[index * 3 + axis] = direction;
       morphDelta[index * 3 + axis] = morphDelta[sourceIndex * 3 + axis];
+      normalMorphDelta[index * 3 + axis] = normalMorphDelta[sourceIndex * 3 + axis];
     }
     elevations[index] = elevations[sourceIndex] - dynamicSkirt;
     areoidElevations[index] = areoidElevations[sourceIndex];
@@ -420,6 +550,7 @@ function generate(message) {
     elevations,
     areoidElevations,
     morphDelta,
+    normalMorphDelta,
     tileUv,
     surface,
     indices,
@@ -440,6 +571,7 @@ if (typeof self !== "undefined") self.onmessage = (event) => {
       result.elevations.buffer,
       result.areoidElevations.buffer,
       result.morphDelta.buffer,
+      result.normalMorphDelta.buffer,
       result.tileUv.buffer,
       result.surface.buffer,
       result.indices.buffer,

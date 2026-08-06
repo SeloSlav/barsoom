@@ -79,6 +79,7 @@ const terrainVertex = /* glsl */ `
   attribute float elevation;
   attribute float areoidElevation;
   attribute vec3 morphDelta;
+  attribute vec3 normalMorphDelta;
   attribute vec2 tileUv;
   attribute float surfaceMask;
 
@@ -96,22 +97,24 @@ const terrainVertex = /* glsl */ `
   varying vec3 vStableMetres;
 
   void main() {
-    float westEdge = 1.0 - step(0.00001, tileUv.x);
-    float eastEdge = 1.0 - step(0.00001, 1.0 - tileUv.x);
-    float northEdge = 1.0 - step(0.00001, tileUv.y);
-    float southEdge = 1.0 - step(0.00001, 1.0 - tileUv.y);
+    const float edgeMorphBand = ${ (2 / 24).toFixed(12) };
+    float westEdge = 1.0 - smoothstep(0.0, edgeMorphBand, tileUv.x);
+    float eastEdge = 1.0 - smoothstep(0.0, edgeMorphBand, 1.0 - tileUv.x);
+    float northEdge = 1.0 - smoothstep(0.0, edgeMorphBand, tileUv.y);
+    float southEdge = 1.0 - smoothstep(0.0, edgeMorphBand, 1.0 - tileUv.y);
     float stitchedEdgeMorph = max(
       max(westEdge * uEdgeMorph.x, eastEdge * uEdgeMorph.y),
       max(northEdge * uEdgeMorph.z, southEdge * uEdgeMorph.w)
     );
-    // Only edges touching a visible coarser neighbour resolve to the parent
-    // mesh. Pulling every edge down permanently makes the quadtree itself
-    // visible as a grid of shadowed trenches at playable altitudes.
+    // Only edges touching a visible coarser neighbour resolve to the parent.
+    // Spread that correction over two cells so the exact stitched edge cannot
+    // turn into a one-row trench under grazing light.
     float morphWeight = max(1.0 - uMorph, stitchedEdgeMorph);
     vec3 morphed = position - morphDelta * morphWeight;
+    vec3 morphedNormal = normalize(normal - normalMorphDelta * morphWeight);
     vec4 world = modelMatrix * vec4(morphed, 1.0);
     vWorldPosition = world.xyz;
-    vNormal = normalize(mat3(modelMatrix) * normal);
+    vNormal = normalize(mat3(modelMatrix) * morphedNormal);
     vPlanetDirection = normalize(planetDirection);
     vElevation = elevation;
     vAreoidElevation = areoidElevation;
@@ -119,7 +122,7 @@ const terrainVertex = /* glsl */ `
     vSurfaceMask = surfaceMask;
     vStableMetres = uTileOriginModulo + morphed;
     #if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
-      vec3 shadowNormal = normalize(mat3(modelMatrix) * normal);
+      vec3 shadowNormal = normalize(mat3(modelMatrix) * morphedNormal);
       #pragma unroll_loop_start
       for (int i = 0; i < NUM_DIR_LIGHT_SHADOWS; i++) {
         vec4 shadowWorld = world;
@@ -179,6 +182,16 @@ const terrainFragment = /* glsl */ `
     // the camera moves. Screen-pixel noise made LOD fades and the final grade
     // crawl independently over the ground.
     return hash31(floor(mod(metres, 4096.0) * 50.0));
+  }
+
+  vec3 sampleOrbitalGeography(vec2 uv) {
+    const vec2 texel = vec2(0.0001220703125, 0.000244140625);
+    vec3 centre = texture2D(uOrbitalTexture, uv).rgb * 0.40;
+    vec3 cross = texture2D(uOrbitalTexture, uv + vec2(texel.x, 0.0)).rgb;
+    cross += texture2D(uOrbitalTexture, uv - vec2(texel.x, 0.0)).rgb;
+    cross += texture2D(uOrbitalTexture, uv + vec2(0.0, texel.y)).rgb;
+    cross += texture2D(uOrbitalTexture, uv - vec2(0.0, texel.y)).rgb;
+    return centre + cross * 0.15;
   }
 
   vec2 hash22(vec2 p) {
@@ -374,15 +387,23 @@ const terrainFragment = /* glsl */ `
     float latitude = abs(radial.y);
     float macro = valueNoise(radial * 17.0 + vec3(4.1, -8.2, 2.7));
     float regional = valueNoise(radial * 92.0 + vec3(-7.0, 2.0, 11.0));
-    float grain = valueNoise(radial * mix(900.0, 18000.0, clamp(uTileLod / 18.0, 0.0, 1.0)));
-    float closeDetail = smoothstep(10.0, 16.0, uTileLod);
+    float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
+    float fineRegionalVisibility = 1.0 - smoothstep(90.0, 700.0, pixelFootprintM);
+    float grain = mix(
+      valueNoise(radial * 900.0 + vec3(1.7, -2.3, 4.1)),
+      valueNoise(radial * 18000.0 + vec3(-3.1, 7.2, 0.8)),
+      fineRegionalVisibility
+    );
+    // Camera and derivative metrics are continuous across a tile handoff.
+    // A streamed-LOD gate made parent and child fragments visibly disagree
+    // inside the complementary dither mask.
+    float closeDetail = 1.0 - smoothstep(900.0, 6000.0, uCameraAltitude);
     float metreVisibility = 0.0;
     float grainVisibility = 0.0;
     float metreVariation = 0.5;
     float fineGrain = 0.5;
     float pebbles = 0.0;
-    if (uTileLod > 9.0) {
-      float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
+    if (closeDetail > 0.001) {
       metreVisibility = closeDetail * (1.0 - smoothstep(1.2, 18.0, pixelFootprintM));
       grainVisibility = closeDetail * (1.0 - smoothstep(0.28, 3.2, pixelFootprintM));
       metreVariation = periodicNoiseMetres(vStableMetres, 64.0) * 0.58 +
@@ -415,14 +436,12 @@ const terrainFragment = /* glsl */ `
     albedo *= mix(1.0, 0.90 + metreVariation * 0.16, metreVisibility);
     albedo = mix(albedo, albedo * vec3(0.48, 0.40, 0.37), pebbles * grainVisibility * 0.42);
     albedo += vec3((fineGrain - 0.5) * 0.035 * grainVisibility);
-    albedo *= mix(0.63, 1.0, vSurfaceMask);
 
     float surfacePbrBlend = 0.0;
     float surfaceMaterialResponse = 0.0;
     float mappedRoughness = 0.94;
     vec3 mappedNormal = normal;
     if (uCameraAltitude < 68.0) {
-      float pixelFootprintM = max(0.01, length(fwidth(vStableMetres)));
       // Material visibility depends on continuous camera/fragment metrics,
       // never streamed LOD. This prevents a close PBR field from pulsing as
       // geometry refines beneath it.
@@ -452,12 +471,19 @@ const terrainFragment = /* glsl */ `
     float longitude = atan(radial.z, radial.x);
     float latitudeRadians = asin(clamp(radial.y, -1.0, 1.0));
     vec2 orbitalUv = vec2(fract(longitude / 6.28318530718 + 0.5), latitudeRadians / 3.14159265359 + 0.5);
-    vec3 orbitalAlbedo = texture2D(uOrbitalTexture, orbitalUv).rgb;
-    // Retain the actual Viking geography deep into the regional descent, then
-    // hand it to procedural/PBR detail over the final kilometre. The former
-    // 14 km cutoff discarded the real crater image exactly where users were
-    // trying to recognise and enter it.
-    float orbitalBlend = smoothstep(600.0, 13500.0, uCameraAltitude);
+    // An 8K global map has roughly 2.6 km texels at the equator. Carrying it
+    // unchanged into a regional field magnifies those texels into a false
+    // grid. Complete the handoff before 180 km; below that point geographic
+    // form comes from MOLA geometry rather than enlarged albedo pixels.
+    float orbitalBlend = smoothstep(180000.0, 800000.0, uCameraAltitude);
+    vec3 orbitalAlbedo = albedo;
+    if (orbitalBlend > 0.001) {
+      orbitalAlbedo = texture2D(uOrbitalTexture, orbitalUv).rgb;
+      if (uCameraAltitude < 450000.0) {
+        float orbitalSmoothing = 1.0 - smoothstep(180000.0, 450000.0, uCameraAltitude);
+        orbitalAlbedo = mix(orbitalAlbedo, sampleOrbitalGeography(orbitalUv), orbitalSmoothing);
+      }
+    }
     vec3 orbitalDetailed = orbitalAlbedo * 0.94 * (0.90 + regional * 0.16 + grain * 0.05);
     albedo = mix(albedo, orbitalDetailed, orbitalBlend);
 
@@ -471,7 +497,7 @@ const terrainFragment = /* glsl */ `
       valueNoise(radial * 6200.0 + vec3(0,0,0.23))
     ) - 0.5;
     vec3 metreMicro = vec3(0.0);
-    if (uTileLod > 9.0) {
+    if (closeDetail > 0.001) {
       metreMicro = vec3(
         periodicNoiseMetres(vStableMetres + vec3(0.0, 1.3, 2.7), 2.0),
         periodicNoiseMetres(vStableMetres + vec3(3.1, 0.0, 1.1), 2.0),
@@ -640,10 +666,11 @@ const terrainShadowVertex = /* glsl */ `
   varying float vSurfaceMask;
   varying vec3 vStableMetres;
   void main() {
-    float westEdge = 1.0 - step(0.00001, tileUv.x);
-    float eastEdge = 1.0 - step(0.00001, 1.0 - tileUv.x);
-    float northEdge = 1.0 - step(0.00001, tileUv.y);
-    float southEdge = 1.0 - step(0.00001, 1.0 - tileUv.y);
+    const float edgeMorphBand = ${ (2 / 24).toFixed(12) };
+    float westEdge = 1.0 - smoothstep(0.0, edgeMorphBand, tileUv.x);
+    float eastEdge = 1.0 - smoothstep(0.0, edgeMorphBand, 1.0 - tileUv.x);
+    float northEdge = 1.0 - smoothstep(0.0, edgeMorphBand, tileUv.y);
+    float southEdge = 1.0 - smoothstep(0.0, edgeMorphBand, 1.0 - tileUv.y);
     float stitchedEdgeMorph = max(
       max(westEdge * uEdgeMorph.x, eastEdge * uEdgeMorph.y),
       max(northEdge * uEdgeMorph.z, southEdge * uEdgeMorph.w)

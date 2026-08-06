@@ -51,7 +51,11 @@ const VISTA_TARGETS: ReadonlyArray<{
   // its roughly eight-kilometre relief forms the horizon instead.
   { label: "Olympus Mons scarp", lat: 23.35, lon: -135.95, headingRad: Math.PI },
   { label: "Ius Chasma", lat: -7.29, lon: -84.39 },
-  { label: "Noctis Labyrinthus", lat: -6.36, lon: -101.19 },
+  // Stand low on a resolved western wall and face back toward its adjacent
+  // two-kilometre MOLA rise. The old point sat on a locally flat high block,
+  // so the maze of chasmata was outside a human-height view even when visible
+  // during the approach.
+  { label: "Noctis Labyrinthus", lat: -6.735, lon: -100.0025, headingRad: -2.35962 },
   { label: "Korolev ice crater", lat: 72.77, lon: 164.58 },
 ];
 

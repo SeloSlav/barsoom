@@ -12,6 +12,8 @@ import {
   lodTransitionVisible,
   neighbourBalanceAncestors,
   sampleMorphedTerrainGrid,
+  terrainEdgeMorphWeight,
+  terrainHorizonLimitRadians,
   terrainNodeNeedsRefinement,
 } from "../app/planet/terrain/PlanetTerrain";
 import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
@@ -210,6 +212,34 @@ describe("terrain worker geometry", () => {
     expect(terrainNodeNeedsRefinement(3.5, false)).toBe(true);
   });
 
+  it("eases a stitched edge over two cells instead of making a one-row trench", () => {
+    const west = [1, 0, 0, 0] as const;
+    expect(terrainEdgeMorphWeight(0, 12, 24, west)).toBe(1);
+    expect(terrainEdgeMorphWeight(1, 12, 24, west)).toBeCloseTo(0.5, 12);
+    expect(terrainEdgeMorphWeight(2, 12, 24, west)).toBe(0);
+    expect(terrainEdgeMorphWeight(12, 12, 24, west)).toBe(0);
+    expect(terrainEdgeMorphWeight(24, 12, 24, [0, 1, 0, 0])).toBe(1);
+  });
+
+  it("keeps raised structures beyond the flat-datum horizon eligible for rendering", () => {
+    const lowCameraRadiusM = MARS_REFERENCE_RADIUS_M - 4_000;
+    const raisedTargetRadiusM = MARS_REFERENCE_RADIUS_M + 15_000;
+    const flatTargetRadiusM = MARS_REFERENCE_RADIUS_M - 4_000;
+    const tileAngularRadius = 0.002;
+    const raisedLimit = terrainHorizonLimitRadians(
+      lowCameraRadiusM,
+      raisedTargetRadiusM,
+      tileAngularRadius,
+    );
+    const flatLimit = terrainHorizonLimitRadians(
+      lowCameraRadiusM,
+      flatTargetRadiusM,
+      tileAngularRadius,
+    );
+    expect(raisedLimit).toBeGreaterThan(flatLimit);
+    expect(raisedLimit).toBeGreaterThan(0.12);
+  });
+
   it("forces every neighbour ancestor needed for a global 2:1 LOD balance", () => {
     const splitTile = { face: "px" as const, lod: 6, x: 63, y: 31 };
     for (const edge of ["north", "east", "south", "west"] as const) {
@@ -267,6 +297,9 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).not.toContain("surfaceAntiTile");
     expect(material.fragmentShader).toContain("surfaceAlbedoVisibility");
     expect(material.fragmentShader).toContain("surfaceMaterialResponse");
+    expect(material.fragmentShader).toContain("sampleOrbitalGeography");
+    expect(material.fragmentShader).toContain("fineRegionalVisibility");
+    expect(material.fragmentShader).not.toContain("uTileLod >");
     expect(material.fragmentShader).toContain("sampleSurfaceNormal");
     expect(material.fragmentShader).toContain("sampleSurfaceRoughness");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse(uIceSurfaceDiffuse");
@@ -281,6 +314,8 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("colorspace_fragment");
     expect(depth.vertexShader).toContain("morphDelta");
     expect(material.vertexShader).toContain("uEdgeMorph");
+    expect(material.vertexShader).toContain("edgeMorphBand");
+    expect(material.vertexShader).toContain("normalMorphDelta");
     expect(depth.vertexShader).toContain("uEdgeMorph");
     expect(depth.vertexShader).toContain("uTileOriginModulo");
     expect(material.vertexShader).not.toContain("boundaryMorph");
@@ -362,6 +397,47 @@ describe("terrain worker geometry", () => {
       ) * 0.5;
       expect(Math.abs(morphedChild - expectedParent)).toBeLessThan(0.15);
     }
+    const childCorner = 0;
+    const parentCorner = 12 * gridSize;
+    for (let axis = 0; axis < 3; axis += 1) {
+      const morphedChildNormal = child.normals[childCorner * 3 + axis] -
+        child.normalMorphDelta[childCorner * 3 + axis];
+      expect(Math.abs(morphedChildNormal - parent.normals[parentCorner * 3 + axis]))
+        .toBeLessThan(2e-6);
+    }
+  });
+
+  it("uses a terrain halo to keep normals continuous across equal-LOD tile edges", () => {
+    const segments = 24;
+    const base = {
+      key: { face: "px" as const, lod: 0, x: 0, y: 0 },
+      gridSize: 2,
+      heightsM: new Int16Array(4),
+      areoidM: new Int16Array(4),
+    };
+    const west = generateTerrainTile({
+      jobId: 33,
+      key: { face: "px", lod: 5, x: 14, y: 19 },
+      base,
+      segments,
+      skirtM: 140,
+    });
+    const east = generateTerrainTile({
+      jobId: 34,
+      key: { face: "px", lod: 5, x: 15, y: 19 },
+      base,
+      segments,
+      skirtM: 140,
+    });
+    const gridSize = segments + 1;
+    for (let row = 0; row < gridSize; row += 1) {
+      const westOffset = (row * gridSize + segments) * 3;
+      const eastOffset = row * gridSize * 3;
+      for (let axis = 0; axis < 3; axis += 1) {
+        expect(Math.abs(west.normals[westOffset + axis] - east.normals[eastOffset + axis]))
+          .toBeLessThan(2e-6);
+      }
+    }
   });
 
   it("keeps playable-LOD skirts below one metre instead of forming 140 m walls", () => {
@@ -407,7 +483,7 @@ describe("terrain worker geometry", () => {
     const restored = generateTerrainTile({ ...request, jobId: 12 });
     for (const field of [
       "positions", "normals", "planetDirections", "elevations", "areoidElevations",
-      "morphDelta", "tileUv", "surface", "indices",
+      "morphDelta", "normalMorphDelta", "tileUv", "surface", "indices",
     ] as const) {
       expect(Buffer.from(restored[field].buffer)).toEqual(Buffer.from(first[field].buffer));
     }

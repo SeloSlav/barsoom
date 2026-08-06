@@ -16,15 +16,15 @@ Measured on the production build in this repository:
 | MOLA files requested for a typical orbital view | small visible-face subset, not all 2,046 |
 | Terrain mesh topology | 24×24 cells plus four skirts |
 | Triangle count per tile | 1,344 |
-| Ready geometry cache cap | 280 tiles |
+| Ready geometry cache cap | 520 tiles |
 | MOLA decoded cache cap | 96 tiles |
-| Terrain workers | 2 |
+| Terrain workers | 4 |
 | Maximum active tile budget | 220 |
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
 | Near-surface solar shadow map | 2,048² below 80 km on the illuminated side |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 63 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, the automatic RTS approach/manual-control handoff, deterministic playable-scale relief, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 103 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, the automatic RTS approach/manual-control handoff, deterministic playable-scale relief, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
@@ -32,12 +32,12 @@ Measured on the production build in this repository:
 
 | Metric | Result |
 |---|---:|
-| Generated payload per tile | 65,428 bytes |
-| Mean generation time | 3.71 ms |
-| Median generation time | 3.71 ms |
-| 95th percentile | 4.95 ms |
-| Maximum | 5.49 ms |
-| Two-worker P95 throughput estimate | 404 tiles/s |
+| Generated payload per tile | 74,128 bytes |
+| Mean generation time | 5.02 ms |
+| Median generation time | 4.73 ms |
+| 95th percentile | 7.59 ms |
+| Maximum | 9.71 ms |
+| Two-worker P95 throughput estimate | 263 tiles/s |
 
 This is a repeatable CPU throughput measurement, not a substitute for live browser GPU/frame-time profiling. The pre-implementation repository had no renderer or terrain job to benchmark, so its corresponding throughput and frame-time measurements are not applicable rather than zero.
 
