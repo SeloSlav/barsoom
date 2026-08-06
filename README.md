@@ -1,5 +1,11 @@
 # Barsoom
 
+![Barsoom — seamless Mars planetary survey](public/og.png)
+
+| Planetary survey | Spaceman traverse at sunset |
+|:---:|:---:|
+| ![Mars viewed from far orbit in Barsoom](docs/images/barsoom-orbit.png) | ![A spaceman overlooking the Martian terrain at sunset in Barsoom](docs/images/barsoom-spaceman-sunset.png) |
+
 Barsoom is a fully client-side Three.js Mars renderer that keeps one continuous camera and one geographic reference frame from a 30,000 km orbit to 0 m above local terrain. Its interface presents that continuity as the Cauchy Array: a causally limited, entanglement-enhanced interferometer that reconstructs the outgoing Martian light field at a chosen virtual focal volume. The planet is a camera-relative cube-sphere quadtree driven by NASA MOLA planetary-radius data, with deterministic procedural detail, ray-marched single-scattering atmosphere, a real bright-star catalogue, and Mars-centred ephemerides.
 
 ## Run
