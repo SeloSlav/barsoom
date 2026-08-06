@@ -356,9 +356,38 @@ export type DirectionalShadowSnap = {
  * that value into the orthographic extent continuously changes its texel size
  * and defeats light-plane snapping. Survey mode still expands with altitude.
  */
-export function directionalShadowExtentM(altitudeM: number, localProxyCoherent: boolean) {
-  if (localProxyCoherent) return 800;
+export function directionalShadowExtentM(
+  altitudeM: number,
+  localProxyCoherent: boolean,
+  cameraDistanceM = 0,
+) {
+  if (localProxyCoherent) {
+    // A fixed 800 m half-extent gave a third-person astronaut only two or
+    // three shadow texels. Bone animation then made the contact shadow blink
+    // between texels, most visibly directly beneath the boots. Keep the local
+    // projection independent of terrain-relative altitude, but fit it to the
+    // camera boom so ordinary traverse views retain roughly decimetre texels.
+    return clamp(Math.max(96, Math.max(0, cameraDistanceM) * 1.25), 96, 800);
+  }
   return clamp(800 + Math.max(0, altitudeM) * 2.2, 800, 120_000);
+}
+
+/**
+ * Chooses the next drawing-buffer scale without performing the resize.
+ * Surface traverse passes `allowChange = false`: reallocating the WebGL
+ * drawing buffer can present its freshly cleared black storage before the
+ * next frame, which reads as a periodic full-screen flash.
+ */
+export function nextAdaptiveResolutionScale(
+  currentScale: number,
+  smoothedFrameMs: number,
+  allowChange: boolean,
+) {
+  const current = clamp(Number.isFinite(currentScale) ? currentScale : 1, 0.72, 1);
+  if (!allowChange || !Number.isFinite(smoothedFrameMs)) return current;
+  if (smoothedFrameMs > 22 && current > 0.72) return Math.max(0.72, current - 0.1);
+  if (smoothedFrameMs < 15.2 && current < 1) return Math.min(1, current + 0.05);
+  return current;
 }
 
 export function snappedDirectionalShadowCenter(

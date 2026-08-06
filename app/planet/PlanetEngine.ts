@@ -4,7 +4,7 @@ import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsMoonState, type MarsSkyState } from "./ephemeris";
 import { findMarsLandmarkAtDirection, landmarkDirection, MARS_LANDMARKS, type MarsLandmark } from "./landmarks";
-import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
+import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, nextAdaptiveResolutionScale, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
@@ -206,7 +206,7 @@ export class PlanetEngine {
     this.sunShadowLight.castShadow = false;
     this.sunShadowLight.shadow.mapSize.set(RENDER_CONFIG.surfaceShadowMapSize, RENDER_CONFIG.surfaceShadowMapSize);
     this.sunShadowLight.shadow.bias = -0.00012;
-    this.sunShadowLight.shadow.normalBias = 0.8;
+    this.sunShadowLight.shadow.normalBias = 0.12;
     this.sunShadowLight.shadow.radius = 1.35;
     this.sunShadowLight.shadow.intensity = 0.88;
     this.scene.add(this.sunShadowTarget, this.sunShadowLight);
@@ -655,6 +655,7 @@ export class PlanetEngine {
     const extentM = directionalShadowExtentM(
       altitudeM,
       this.surfaceTraverse.active && this.surfaceTraverse.localProxyCoherent,
+      this.controlState.cameraDistanceM,
     );
     this.surfaceShadowExtentM = extentM;
     const snap = snappedDirectionalShadowCenter(
@@ -664,6 +665,10 @@ export class PlanetEngine {
       RENDER_CONFIG.surfaceShadowMapSize,
       this.shadowSnap,
     );
+    // Match the receiver offset to the world-space texel size. A constant
+    // 0.8 m offset detached the close astronaut shadow from the boots, while
+    // a tiny constant is insufficient for kilometre-scale survey shadows.
+    this.sunShadowLight.shadow.normalBias = clamp(snap.texelWorldM * 0.18, 0.12, 2);
     this.shadowSun.set(snap.sun.x, snap.sun.y, snap.sun.z);
     this.sunShadowTarget.position.set(snap.centerRelative.x, snap.centerRelative.y, snap.centerRelative.z);
     const lightDistanceM = extentM * 2.5 + 60_000;
@@ -682,10 +687,16 @@ export class PlanetEngine {
   }
 
   private adjustQuality() {
-    if (!RENDER_CONFIG.adaptiveResolution || this.framesSinceQualityChange < 240) return;
-    let next = this.qualityScale;
-    if (this.smoothedFrameMs > 22 && next > 0.72) next = Math.max(0.72, next - 0.1);
-    else if (this.smoothedFrameMs < 15.2 && next < 1) next = Math.min(1, next + 0.05);
+    if (!RENDER_CONFIG.adaptiveResolution) return;
+    if (this.surfaceTraverse.active) {
+      // Resizing a live WebGL drawing buffer can expose its cleared backing
+      // store for one presentation. Keep a single allocation throughout each
+      // spaceman session; survey mode may resume adapting after a fresh dwell.
+      this.framesSinceQualityChange = 0;
+      return;
+    }
+    if (this.framesSinceQualityChange < 240) return;
+    const next = nextAdaptiveResolutionScale(this.qualityScale, this.smoothedFrameMs, true);
     if (next !== this.qualityScale) {
       this.qualityScale = next;
       this.framesSinceQualityChange = 0;

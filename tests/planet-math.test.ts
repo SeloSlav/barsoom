@@ -13,6 +13,7 @@ import {
   length3,
   localEnuBasis,
   neighbourTile,
+  nextAdaptiveResolutionScale,
   nonlinearZoomAltitude,
   parentTile,
   raySphereIntersection,
@@ -233,10 +234,18 @@ describe("continuous detail, zoom, and floating origin", () => {
   });
 
   it("keeps the coherent spaceman shadow projection rigid while terrain height changes", () => {
-    expect(directionalShadowExtentM(0.35, true)).toBe(800);
-    expect(directionalShadowExtentM(8, true)).toBe(800);
-    expect(directionalShadowExtentM(38, true)).toBe(800);
+    expect(directionalShadowExtentM(0.35, true, 7)).toBe(96);
+    expect(directionalShadowExtentM(8, true, 7)).toBe(96);
+    expect(directionalShadowExtentM(38, true, 7)).toBe(96);
+    expect(directionalShadowExtentM(1.6, true, 200)).toBe(250);
     expect(directionalShadowExtentM(1_000, false)).toBe(3_000);
     expect(directionalShadowExtentM(100_000, false)).toBe(120_000);
+  });
+
+  it("holds drawing-buffer resolution throughout a spaceman session", () => {
+    expect(nextAdaptiveResolutionScale(1, 28, false)).toBe(1);
+    expect(nextAdaptiveResolutionScale(0.8, 12, false)).toBe(0.8);
+    expect(nextAdaptiveResolutionScale(1, 28, true)).toBe(0.9);
+    expect(nextAdaptiveResolutionScale(0.8, 12, true)).toBeCloseTo(0.85, 12);
   });
 });
