@@ -3,6 +3,7 @@ import { BarsoomAudio } from "../audio/BarsoomAudio";
 import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
 import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsMoonState, type MarsSkyState } from "./ephemeris";
+import { findMarsLandmarkAtDirection, landmarkDirection, MARS_LANDMARKS, type MarsLandmark } from "./landmarks";
 import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
@@ -15,6 +16,11 @@ import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
 export type ObservedBody = "Mars" | MarsMoonState["name"];
+
+export type MarsLandmarkHover = Pick<
+  MarsLandmark,
+  "id" | "name" | "featureType" | "latitudeDeg" | "longitudeDeg"
+> & { x: number; y: number };
 
 export type PlanetEngineApi = {
   getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody };
@@ -72,6 +78,12 @@ export class PlanetEngine {
   private readonly selection: THREE.Group;
   private readonly viewportSize = new THREE.Vector2();
   private readonly selectionReferenceNormal = new THREE.Vector3(0, 0, 1);
+  private readonly landmarkDirections = new Map(
+    MARS_LANDMARKS.map((landmark) => {
+      const direction = landmarkDirection(landmark);
+      return [landmark.id, new THREE.Vector3(direction.x, direction.y, direction.z)] as const;
+    }),
+  );
   private readonly moonCameraAbsolute = new THREE.Vector3();
   private readonly moonFocusDirection = new THREE.Vector3();
   private readonly moonFocusAbsolute = new THREE.Vector3();
@@ -83,6 +95,8 @@ export class PlanetEngine {
   private readonly moonViewUp = new THREE.Vector3();
   private selectionDirection: THREE.Vector3 | null = null;
   private pointerDown: { x: number; y: number } | null = null;
+  private landmarkPointerDownId: string | null = null;
+  private hoveredLandmarkId: string | null = null;
   private controlState!: PlanetControlState;
   private skyState: MarsSkyState;
   private simulationStartUtc: Date;
@@ -122,6 +136,7 @@ export class PlanetEngine {
     private readonly onError: (message: string | null) => void,
     initialSimulationUtc: string | Date = new Date(),
     private readonly onSelectionChange: (position: { x: number; y: number } | null) => void = () => {},
+    private readonly onLandmarkHoverChange: (landmark: MarsLandmarkHover | null) => void = () => {},
     simulationRate = 60,
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
@@ -249,6 +264,8 @@ export class PlanetEngine {
     this.resizeObserver.observe(canvas.parentElement ?? canvas);
     this.resize();
     canvas.addEventListener("pointerdown", this.onSelectionPointerDown);
+    canvas.addEventListener("pointermove", this.onLandmarkPointerMove);
+    canvas.addEventListener("pointerleave", this.onLandmarkPointerLeave);
     canvas.addEventListener("pointerup", this.onSelectionPointerUp);
     canvas.addEventListener("pointerdown", this.onMoonPointerDown);
     canvas.addEventListener("pointermove", this.onMoonPointerMove);
@@ -664,6 +681,7 @@ export class PlanetEngine {
     if (this.surfaceTraverse.active || this.observedBody !== "Mars") return;
     if (event.button === 0) {
       this.pointerDown = { x: event.clientX, y: event.clientY };
+      this.landmarkPointerDownId = this.findLandmarkHit(event.clientX, event.clientY)?.landmark.id ?? null;
     } else if (event.button === 2) {
       this.clearSelection();
     }
@@ -674,7 +692,24 @@ export class PlanetEngine {
     if (event.button !== 0 || !this.pointerDown) return;
     const moved = Math.hypot(event.clientX - this.pointerDown.x, event.clientY - this.pointerDown.y);
     this.pointerDown = null;
+    const landmarkHit = moved <= 5 ? this.findLandmarkHit(event.clientX, event.clientY) : null;
+    const landmarkClicked = landmarkHit && landmarkHit.landmark.id === this.landmarkPointerDownId
+      ? landmarkHit
+      : null;
+    this.landmarkPointerDownId = null;
     if (moved > 5) return;
+    if (landmarkClicked) {
+      const { landmark } = landmarkClicked;
+      const landing = latLonElevationToCartesian(
+        landmark.landingLatitudeDeg ?? landmark.latitudeDeg,
+        landmark.landingLongitudeDeg ?? landmark.longitudeDeg,
+        0,
+        1,
+      );
+      this.clearLandmarkHover();
+      void this.enterSurfaceTraverse(new THREE.Vector3(landing.x, landing.y, landing.z), landmark.headingRad);
+      return;
+    }
     if (this.selectionDirection) {
       this.clearSelection();
       return;
@@ -695,6 +730,85 @@ export class PlanetEngine {
     emitSovaTutorial("surface");
     void this.terrain.prefetch(this.selectionDirection);
   };
+
+  private onLandmarkPointerMove = (event: PointerEvent) => {
+    if (event.pointerType === "touch") return;
+    const hit = this.findLandmarkHit(event.clientX, event.clientY);
+    if (!hit) {
+      this.clearLandmarkHover();
+      return;
+    }
+    const { landmark } = hit;
+    this.hoveredLandmarkId = landmark.id;
+    this.onLandmarkHoverChange({
+      id: landmark.id,
+      name: landmark.name,
+      featureType: landmark.featureType,
+      latitudeDeg: landmark.latitudeDeg,
+      longitudeDeg: landmark.longitudeDeg,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  };
+
+  private onLandmarkPointerLeave = () => {
+    this.clearLandmarkHover();
+  };
+
+  private findLandmarkHit(clientX: number, clientY: number) {
+    if (!this.controlState || this.surfaceTraverse.active || this.observedBody !== "Mars") return null;
+    const bounds = this.canvas.getBoundingClientRect();
+    if (
+      clientX < bounds.left || clientX > bounds.right ||
+      clientY < bounds.top || clientY > bounds.bottom
+    ) return null;
+
+    const ndc = new THREE.Vector2(
+      ((clientX - bounds.left) / Math.max(1, bounds.width)) * 2 - 1,
+      -((clientY - bounds.top) / Math.max(1, bounds.height)) * 2 + 1,
+    );
+    const ray = new THREE.Vector3(ndc.x, ndc.y, 0.4).unproject(this.camera).normalize();
+    const surfaceHit = rayTerrainIntersection(
+      this.controlState.cameraAbsolute,
+      ray,
+      (sampleDirection) => this.terrain.sampleHeight(sampleDirection),
+    );
+    if (!surfaceHit) return null;
+
+    const geographicHit = findMarsLandmarkAtDirection(surfaceHit.direction);
+    let closest = geographicHit
+      ? { landmark: geographicHit.landmark, score: geographicHit.angularDistanceRad / geographicHit.radiusRad }
+      : null;
+
+    // Small craters would be nearly impossible to discover at planetary scale
+    // using their physical footprint alone. Give every visible named feature a
+    // modest screen-space acquisition radius while retaining geographic hit
+    // regions for broad provinces and basins.
+    const pointerX = clientX - bounds.left;
+    const pointerY = clientY - bounds.top;
+    const pixelRadius = 34;
+    for (const landmark of MARS_LANDMARKS) {
+      const direction = this.landmarkDirections.get(landmark.id);
+      if (!direction) continue;
+      const radius = MARS_REFERENCE_RADIUS_M + this.terrain.sampleHeight(direction);
+      const absolute = direction.clone().multiplyScalar(radius);
+      const toCamera = new THREE.Vector3().copy(this.controlState.cameraAbsolute).sub(absolute);
+      if (direction.dot(toCamera) <= 0) continue;
+      const projected = absolute.sub(this.controlState.cameraAbsolute).project(this.camera);
+      if (projected.z < -1 || projected.z > 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) continue;
+      const x = (projected.x * 0.5 + 0.5) * bounds.width;
+      const y = (-projected.y * 0.5 + 0.5) * bounds.height;
+      const score = Math.hypot(pointerX - x, pointerY - y) / pixelRadius;
+      if (score <= 1 && (!closest || score < closest.score)) closest = { landmark, score };
+    }
+    return closest;
+  }
+
+  private clearLandmarkHover() {
+    if (this.hoveredLandmarkId === null) return;
+    this.hoveredLandmarkId = null;
+    this.onLandmarkHoverChange(null);
+  }
 
   private updateSelection() {
     if (this.surfaceTraverse.active || this.observedBody !== "Mars") {
@@ -721,6 +835,7 @@ export class PlanetEngine {
 
   private clearSelection() {
     this.pointerDown = null;
+    this.landmarkPointerDownId = null;
     this.selectionDirection = null;
     this.controls.setZoomAnchor(null);
     this.onSelectionChange(null);
@@ -817,6 +932,8 @@ export class PlanetEngine {
     this.sunShadowLight.shadow.dispose();
     this.renderer.dispose();
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
+    this.canvas.removeEventListener("pointermove", this.onLandmarkPointerMove);
+    this.canvas.removeEventListener("pointerleave", this.onLandmarkPointerLeave);
     this.canvas.removeEventListener("pointerup", this.onSelectionPointerUp);
     this.canvas.removeEventListener("pointerdown", this.onMoonPointerDown);
     this.canvas.removeEventListener("pointermove", this.onMoonPointerMove);

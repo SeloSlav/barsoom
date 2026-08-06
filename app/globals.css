@@ -29,6 +29,7 @@ button { font: inherit; }
 .mars-shell { position: fixed; inset: 0; overflow: hidden; isolation: isolate; background: radial-gradient(circle at 50% 45%, #0d0909 0, #010102 68%); }
 
 .mars-canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; outline: none; }
+.landmark-hover .mars-canvas { cursor: pointer; }
 
 .hud-vignette { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: radial-gradient(circle at center, transparent 44%, rgba(0,0,0,.06) 74%, rgba(0,0,0,.25) 116%), linear-gradient(180deg, rgba(0,0,0,.24), transparent 17%, transparent 81%, rgba(0,0,0,.3)); }
 
@@ -121,16 +122,23 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
 .scale-bar i { position: relative; width: 124px; height: 7px; border: 1px solid rgba(255,232,216,.58); border-top: 0; }
 .scale-bar i::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 1px; height: 4px; background: rgba(255,232,216,.58); }
 
-.observer-action-card { position: absolute; z-index: 6; width: min(360px, calc(100vw - 24px)); padding: 8px; border: 1px solid rgba(255,155,99,.34); border-left: 2px solid var(--rust-bright); background: rgba(9,9,12,.92); backdrop-filter: blur(12px); box-shadow: 0 14px 38px rgba(0,0,0,.46), 0 0 18px rgba(255,113,57,.08); }
+.planet-feature-reticle { position: absolute; z-index: 6; width: 30px; height: 30px; transform: translate(-50%, -50%); pointer-events: none; border: 1px solid rgba(255,180,126,.72); border-radius: 50%; box-shadow: 0 0 16px rgba(255,122,64,.35), inset 0 0 10px rgba(255,122,64,.12); animation: feature-acquire 1.2s ease-in-out infinite; }
+.planet-feature-reticle::before, .planet-feature-reticle::after { content: ""; position: absolute; left: 50%; top: 50%; background: rgba(255,209,173,.88); box-shadow: 0 0 7px rgba(255,137,77,.65); }
+.planet-feature-reticle::before { width: 42px; height: 1px; transform: translate(-50%, -50%); }
+.planet-feature-reticle::after { width: 1px; height: 42px; transform: translate(-50%, -50%); }
+.planet-feature-label { position: absolute; z-index: 6; width: min(286px, calc(100vw - 24px)); min-height: 91px; padding: 11px 13px 10px 15px; display: grid; align-content: center; pointer-events: none; border: 1px solid rgba(255,155,99,.42); border-left: 2px solid var(--rust-bright); background: linear-gradient(108deg, rgba(14,10,10,.95), rgba(9,9,12,.88)); box-shadow: 0 16px 42px rgba(0,0,0,.48), 0 0 22px rgba(255,113,57,.1); backdrop-filter: blur(12px); }
+.planet-feature-label > span { color: rgba(255,178,126,.72); font: 600 7px/1 var(--font-geist-mono), monospace; letter-spacing: .17em; text-transform: uppercase; }
+.planet-feature-label > strong { margin-top: 5px; color: #fff7f1; font: 480 17px/1.08 var(--font-geist-sans), sans-serif; letter-spacing: .035em; }
+.planet-feature-label > small { margin-top: 5px; color: rgba(239,225,214,.48); font: 500 7px/1 var(--font-geist-mono), monospace; letter-spacing: .1em; }
+.planet-feature-label > b { margin-top: 8px; color: rgba(177,240,211,.82); font: 600 7px/1 var(--font-geist-mono), monospace; letter-spacing: .13em; }
+@keyframes feature-acquire { 0%, 100% { opacity: .65; transform: translate(-50%, -50%) scale(.92); } 50% { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+
+.observer-action-card { position: absolute; z-index: 6; width: min(264px, calc(100vw - 24px)); padding: 8px; border: 1px solid rgba(255,155,99,.34); border-left: 2px solid var(--rust-bright); background: rgba(9,9,12,.92); backdrop-filter: blur(12px); box-shadow: 0 14px 38px rgba(0,0,0,.46), 0 0 18px rgba(255,113,57,.08); }
 .observer-action-card > span { display: block; margin: 1px 3px 6px; color: rgba(239,225,214,.48); font: 600 6.5px/1 var(--font-geist-mono), monospace; letter-spacing: .13em; white-space: nowrap; }
 .observer-action-card button { width: 100%; display: flex; align-items: center; gap: 8px; padding: 9px 10px; color: rgba(255,232,218,.92); border: 1px solid rgba(255,153,101,.2); background: rgba(119,48,23,.24); text-align: left; font: 600 9px/1 var(--font-geist-mono), monospace; letter-spacing: .09em; text-transform: uppercase; cursor: pointer; }
 .observer-action-card button i { width: 6px; height: 6px; flex: 0 0 auto; border: 1px solid #ffc09b; border-radius: 50%; box-shadow: 0 0 7px rgba(255,155,99,.68); }
 .observer-action-card button:hover, .observer-action-card button:focus-visible { color: #fff; border-color: rgba(255,144,86,.62); outline: none; background: rgba(143,58,25,.46); }
 .observer-action-primary { white-space: nowrap; }
-.observer-vistas { margin-top: 8px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,.08); }
-.observer-vistas > span { display: block; margin: 0 3px 6px; color: rgba(255,155,99,.68); font: 600 6.5px/1 var(--font-geist-mono), monospace; letter-spacing: .14em; white-space: nowrap; }
-.observer-vistas > div { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-.observer-action-card .observer-vistas button { min-width: 0; padding: 9px 10px; color: rgba(242,217,203,.78); background: rgba(255,255,255,.025); font-size: 10px; line-height: 1.15; letter-spacing: .045em; white-space: nowrap; }
 
 .help-panel { position: absolute; z-index: 5; top: 119px; right: 28px; width: 305px; padding: 18px; border: 1px solid var(--hud-border); background: rgba(9,9,12,.9); backdrop-filter: blur(14px); box-shadow: 0 24px 70px rgba(0,0,0,.42); }
 .help-panel { width: min(480px, calc(100vw - 56px)); max-height: calc(100vh - 167px); max-height: calc(100dvh - 167px); padding: 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
@@ -236,4 +244,4 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
   .tutorial-library-reset { align-items: stretch; flex-direction: column; }
 }
 
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .surface-entry-screen i, .sova-vocalizer.speaking span, .coherence-loss-field, .coherence-warning.coherence-restored { animation: none; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; } .surface-entry-screen i, .sova-vocalizer.speaking span, .coherence-loss-field, .coherence-warning.coherence-restored, .planet-feature-reticle { animation: none; } }

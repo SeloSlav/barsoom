@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
-import { PlanetEngine, type ObservedBody } from "../planet/PlanetEngine";
+import { PlanetEngine, type MarsLandmarkHover, type ObservedBody } from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
@@ -40,36 +40,36 @@ function formatCoordinate(value: number, positive: string, negative: string) {
   return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? positive : negative}`;
 }
 
-const VISTA_TARGETS: ReadonlyArray<{
-  label: string;
-  lat: number;
-  lon: number;
-  headingRad?: number;
-}> = [
-  // The summit is hundreds of kilometres wide and reads as a plain at human
-  // scale. Spawn below the steep northern basal scarp and face the volcano so
-  // its roughly eight-kilometre relief forms the horizon instead.
-  { label: "Olympus Mons scarp", lat: 23.35, lon: -135.95, headingRad: Math.PI },
-  { label: "Ius Chasma", lat: -7.29, lon: -84.39 },
-  // Stand low on a resolved western wall and face back toward its adjacent
-  // two-kilometre MOLA rise. The old point sat on a locally flat high block,
-  // so the maze of chasmata was outside a human-height view even when visible
-  // during the approach.
-  { label: "Noctis Labyrinthus", lat: -6.735, lon: -100.0025, headingRad: -2.35962 },
-  { label: "Korolev ice crater", lat: 72.77, lon: 164.58 },
-];
-
 type ObserverActionPosition = { x: number; y: number };
+type PresentedLandmark = MarsLandmarkHover & { labelX: number; labelY: number };
 
 function positionObserverAction(x: number, y: number): ObserverActionPosition {
   const edgeGap = 12;
-  const cardWidth = Math.min(360, window.innerWidth - edgeGap * 2);
-  const cardHeight = 152;
+  const cardWidth = Math.min(264, window.innerWidth - edgeGap * 2);
+  const cardHeight = 74;
   const targetGap = 20;
   const fitsToRight = x + targetGap + cardWidth <= window.innerWidth - edgeGap;
   return {
     x: fitsToRight ? x + targetGap : Math.max(edgeGap, x - targetGap - cardWidth),
     y: Math.min(Math.max(edgeGap, y - 18), window.innerHeight - cardHeight - edgeGap),
+  };
+}
+
+function positionLandmarkLabel(landmark: MarsLandmarkHover): PresentedLandmark {
+  const edgeGap = 12;
+  const labelGap = 22;
+  const labelWidth = Math.min(286, window.innerWidth - edgeGap * 2);
+  const labelHeight = 91;
+  const fitsToRight = landmark.x + labelGap + labelWidth <= window.innerWidth - edgeGap;
+  return {
+    ...landmark,
+    labelX: fitsToRight
+      ? landmark.x + labelGap
+      : Math.max(edgeGap, landmark.x - labelGap - labelWidth),
+    labelY: Math.min(
+      Math.max(edgeGap, landmark.y - labelHeight / 2),
+      window.innerHeight - labelHeight - edgeGap,
+    ),
   };
 }
 
@@ -104,6 +104,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [tutorialLibraryVisible, setTutorialLibraryVisible] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
+  const [hoveredLandmark, setHoveredLandmark] = useState<PresentedLandmark | null>(null);
   const [recoherenceVisible, setRecoherenceVisible] = useState(false);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
@@ -121,6 +122,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         setError,
         initialSimulationUtc,
         (position) => setObserverAction(position ? positionObserverAction(position.x, position.y) : null),
+        (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);
@@ -170,6 +172,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     setHelpVisible(false);
     setTutorialLibraryVisible(false);
     setObserverAction(null);
+    setHoveredLandmark(null);
     window.__BARSOOM__?.focusBody(body);
     canvasRef.current?.focus();
   };
@@ -204,8 +207,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [localProxyCoherenceLost, surfaceMode]);
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}`}>
-      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars"} />
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features and click one to instantiate the spaceman, or click any terrain coordinate to phase-lock it."} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
       {localProxyCoherenceLost && <div className="coherence-loss-field" aria-hidden="true" />}
@@ -321,21 +324,30 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>}
       {!moonMode && <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>}
+      {hoveredLandmark && !surfaceMode && !moonMode && <>
+        <i
+          className="planet-feature-reticle"
+          style={{ left: hoveredLandmark.x, top: hoveredLandmark.y }}
+          aria-hidden="true"
+        />
+        <aside
+          className="planet-feature-label"
+          style={{ left: hoveredLandmark.labelX, top: hoveredLandmark.labelY }}
+          aria-label={`${hoveredLandmark.name}, ${hoveredLandmark.featureType}. Click to instantiate the spaceman.`}
+        >
+          <span>{hoveredLandmark.featureType}</span>
+          <strong>{hoveredLandmark.name}</strong>
+          <small>{formatCoordinate(hoveredLandmark.latitudeDeg, "N", "S")} · {formatCoordinate(hoveredLandmark.longitudeDeg, "E", "W")}</small>
+          <b>CLICK TO INSTANTIATE SPACEMAN</b>
+        </aside>
+      </>}
       {observerAction && !surfaceMode && <aside
         className="observer-action-card"
         style={{ left: observerAction.x, top: observerAction.y }}
         aria-label="Selected surface observer action"
       >
-        <span>COORDINATE PHASE LOCKED</span>
-        <button className="observer-action-primary" type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate observer</button>
-        <div className="observer-vistas">
-          <span>HIGH-CONTRAST RELIEF FIELDS</span>
-          <div>{VISTA_TARGETS.map((target) => <button
-            key={target.label}
-            type="button"
-            onClick={() => window.__BARSOOM__?.instantiateObserverAt(target.lat, target.lon, target.headingRad)}
-          >{target.label}</button>)}</div>
-        </div>
+        <span>TERRAIN COORDINATE LOCKED</span>
+        <button className="observer-action-primary" type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate spaceman here</button>
       </aside>}
       {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
@@ -352,8 +364,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit surface</dt><dd>Escape</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom can exceed the human-scale coherence envelope briefly; if the local proxy cannot recover, the instrument releases it and resumes planetary observation.</p>
         </> : <>
-          <dl><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Left / middle drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock coordinate</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
-          <p>Left-click a surface point to phase-lock wheel focus to the surface reticle. With a lock active, the next left click—or a right click—only releases it; the following left click creates a new lock. Press <kbd>~</kbd> to instantiate the observer at the locked coordinate.</p>
+          <dl><div><dt>Named landmark</dt><dd>Hover + click</dd></div><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Left / middle drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock other terrain</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
+          <p>Move the pointer over significant terrain to identify it, then click the named feature to instantiate the spaceman there immediately. Unnamed terrain keeps the coordinate phase-lock flow: left-click a point, then use its action or press <kbd>~</kbd>.</p>
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
