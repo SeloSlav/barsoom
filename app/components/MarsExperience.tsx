@@ -40,10 +40,10 @@ function formatCoordinate(value: number, positive: string, negative: string) {
   return `${Math.abs(value).toFixed(4)}° ${value >= 0 ? positive : negative}`;
 }
 
-type ObserverActionPosition = { x: number; y: number };
+type ObserverActionPosition = { x: number; y: number; landmarkName?: string };
 type PresentedLandmark = MarsLandmarkHover & { labelX: number; labelY: number };
 
-function positionObserverAction(x: number, y: number): ObserverActionPosition {
+function positionObserverAction(x: number, y: number, landmarkName?: string): ObserverActionPosition {
   const edgeGap = 12;
   const cardWidth = Math.min(264, window.innerWidth - edgeGap * 2);
   const cardHeight = 74;
@@ -52,6 +52,7 @@ function positionObserverAction(x: number, y: number): ObserverActionPosition {
   return {
     x: fitsToRight ? x + targetGap : Math.max(edgeGap, x - targetGap - cardWidth),
     y: Math.min(Math.max(edgeGap, y - 18), window.innerHeight - cardHeight - edgeGap),
+    landmarkName,
   };
 }
 
@@ -122,7 +123,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         setTelemetry,
         setError,
         initialSimulationUtc,
-        (position) => setObserverAction(position ? positionObserverAction(position.x, position.y) : null),
+        (position) => setObserverAction(position ? positionObserverAction(position.x, position.y, position.landmarkName) : null),
         (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
         setLandmarkMarkers,
       );
@@ -211,7 +212,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
 
   return (
     <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${localProxyCoherenceLost ? " coherence-loss" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
-      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features and click one to instantiate the spaceman, or click any terrain coordinate to phase-lock it."} />
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features and click one to select its landing point, or click any terrain coordinate to phase-lock it."} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
       {localProxyCoherenceLost && <div className="coherence-loss-field" aria-hidden="true" />}
@@ -350,12 +351,12 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <aside
           className="planet-feature-label"
           style={{ left: hoveredLandmark.labelX, top: hoveredLandmark.labelY }}
-          aria-label={`${hoveredLandmark.name}, ${hoveredLandmark.featureType}. Click to instantiate the spaceman.`}
+          aria-label={`${hoveredLandmark.name}, ${hoveredLandmark.featureType}. Click to select this landing point.`}
         >
           <span>{hoveredLandmark.featureType}</span>
           <strong>{hoveredLandmark.name}</strong>
           <small>{formatCoordinate(hoveredLandmark.latitudeDeg, "N", "S")} · {formatCoordinate(hoveredLandmark.longitudeDeg, "E", "W")}</small>
-          <b>CLICK TO INSTANTIATE SPACEMAN</b>
+          <b>CLICK TO SELECT LANDING POINT</b>
         </aside>
       </>}
       {observerAction && !surfaceMode && <aside
@@ -363,8 +364,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         style={{ left: observerAction.x, top: observerAction.y }}
         aria-label="Selected surface observer action"
       >
-        <span>TERRAIN COORDINATE LOCKED</span>
-        <button className="observer-action-primary" type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate spaceman here</button>
+        <span>{observerAction.landmarkName ? `${observerAction.landmarkName.toUpperCase()} LOCKED` : "TERRAIN COORDINATE LOCKED"}</span>
+        <button className="observer-action-primary" type="button" onClick={() => window.__BARSOOM__?.instantiateObserver()}><i aria-hidden="true" />Instantiate here</button>
       </aside>}
       {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
@@ -382,7 +383,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Wheel zoom can exceed the human-scale coherence envelope briefly; if the local proxy cannot recover, the instrument releases it and resumes planetary observation.</p>
         </> : <>
           <dl><div><dt>Named landmark</dt><dd>Hover + click</dd></div><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Left / middle drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock other terrain</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
-          <p>Move the pointer over significant terrain to identify it, then click the named feature to instantiate the spaceman there immediately. Unnamed terrain keeps the coordinate phase-lock flow: left-click a point, then use its action or press <kbd>~</kbd>.</p>
+          <p>Move the pointer over significant terrain to identify it, then click the named feature to lock that exact landing point. Choose <strong>Instantiate here</strong> in the confirmation card—or press <kbd>~</kbd>—to enter the surface. Unnamed terrain uses the same phase-lock flow.</p>
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />

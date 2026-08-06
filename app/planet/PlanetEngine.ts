@@ -29,6 +29,8 @@ export type MarsLandmarkMarker = Pick<MarsLandmark, "id" | "name"> & {
   radiusPx: number;
 };
 
+type SurfaceSelectionPosition = { x: number; y: number; landmarkName?: string };
+
 export type PlanetEngineApi = {
   getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody };
   getSpacemanLocation: () => { latitudeDeg: number; longitudeDeg: number; headingRad: number } | null;
@@ -144,7 +146,7 @@ export class PlanetEngine {
     private readonly onTelemetry: (telemetry: PlanetTelemetry) => void,
     private readonly onError: (message: string | null) => void,
     initialSimulationUtc: string | Date = new Date(),
-    private readonly onSelectionChange: (position: { x: number; y: number } | null) => void = () => {},
+    private readonly onSelectionChange: (position: SurfaceSelectionPosition | null) => void = () => {},
     private readonly onLandmarkHoverChange: (landmark: MarsLandmarkHover | null) => void = () => {},
     private readonly onLandmarkMarkersChange: (markers: readonly MarsLandmarkMarker[]) => void = () => {},
     simulationRate = 60,
@@ -711,14 +713,17 @@ export class PlanetEngine {
     if (moved > 5) return;
     if (landmarkClicked) {
       const { landmark } = landmarkClicked;
-      const landing = latLonElevationToCartesian(
-        landmark.landingLatitudeDeg ?? landmark.latitudeDeg,
-        landmark.landingLongitudeDeg ?? landmark.longitudeDeg,
-        0,
-        1,
-      );
       this.clearLandmarkHover();
-      void this.enterSurfaceTraverse(new THREE.Vector3(landing.x, landing.y, landing.z), landmark.headingRad);
+      this.lockSurfaceSelection(
+        new THREE.Vector3(
+          landmarkClicked.surfaceDirection.x,
+          landmarkClicked.surfaceDirection.y,
+          landmarkClicked.surfaceDirection.z,
+        ),
+        event.clientX,
+        event.clientY,
+        landmark.name,
+      );
       return;
     }
     if (this.selectionDirection) {
@@ -734,16 +739,28 @@ export class PlanetEngine {
     const direction = new THREE.Vector3(ndc.x, ndc.y, 0.4).unproject(this.camera).normalize();
     const hit = rayTerrainIntersection(this.controlState.cameraAbsolute, direction, (sampleDirection) => this.terrain.sampleHeight(sampleDirection));
     if (!hit) return;
-    this.selectionDirection = new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z);
+    this.lockSurfaceSelection(
+      new THREE.Vector3(hit.direction.x, hit.direction.y, hit.direction.z),
+      event.clientX,
+      event.clientY,
+    );
+  };
+
+  private lockSurfaceSelection(direction: THREE.Vector3, x: number, y: number, landmarkName?: string) {
+    this.selectionDirection = direction.normalize();
     this.controls.setZoomAnchor(this.selectionDirection);
-    this.onSelectionChange({ x: event.clientX, y: event.clientY });
+    this.onSelectionChange({ x, y, landmarkName });
     this.audio.playPhaseLock();
     emitSovaTutorial("surface");
     void this.terrain.prefetch(this.selectionDirection);
-  };
+  }
 
   private onLandmarkPointerMove = (event: PointerEvent) => {
     if (event.pointerType === "touch") return;
+    if (this.selectionDirection) {
+      this.clearLandmarkHover();
+      return;
+    }
     const hit = this.findLandmarkHit(event.clientX, event.clientY);
     if (!hit) {
       this.clearLandmarkHover();
@@ -804,7 +821,7 @@ export class PlanetEngine {
       const score = Math.hypot(pointerX - projected.localX, pointerY - projected.localY) / pixelRadius;
       if (score <= 1 && (!closest || score < closest.score)) closest = { landmark, score };
     }
-    return closest;
+    return closest ? { ...closest, surfaceDirection: surfaceHit.direction } : null;
   }
 
   private projectLandmark(landmark: MarsLandmark, bounds: DOMRect) {
