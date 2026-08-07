@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { MARS_REFERENCE_RADIUS_M } from "../constants";
 import {
   RETIRED_ROVER_SITES,
@@ -21,6 +22,7 @@ type RoverMaterials = {
   structure: THREE.MeshStandardMaterial;
   warmMetal: THREE.MeshStandardMaterial;
   solar: THREE.MeshStandardMaterial;
+  solarGrid: THREE.MeshBasicMaterial;
   wheel: THREE.MeshStandardMaterial;
   lens: THREE.MeshStandardMaterial;
 };
@@ -29,6 +31,27 @@ type RoverVisual = {
   site: RetiredRoverSite;
   direction: THREE.Vector3;
   root: THREE.Group;
+  model: THREE.Group;
+  detailRequested: boolean;
+};
+
+type RoverAssetSpec = {
+  path: string;
+  physicalSizeM: { x: number; y: number; z: number };
+  sourceLabel: string;
+};
+
+export const RETIRED_ROVER_ASSET_SPECS: Readonly<Record<RetiredRoverModel, RoverAssetSpec>> = {
+  sojourner: {
+    path: "/models/sojourner-rover.glb?v=argonius-cc0-v1",
+    physicalSizeM: { x: 0.65, y: 0.81, z: 0.48 },
+    sourceLabel: "argonius CC0 Sojourner rover",
+  },
+  mer: {
+    path: "/models/mer-rover-web.glb?v=nasa-ames-v1",
+    physicalSizeM: { x: 2.3, y: 1.5, z: 1.6 },
+    sourceLabel: "NASA Ames Mars Exploration Rover",
+  },
 };
 
 function createMaterials(): RoverMaterials {
@@ -54,6 +77,7 @@ function createMaterials(): RoverMaterials {
       emissive: 0x07131b,
       emissiveIntensity: 0.25,
     }),
+    solarGrid: new THREE.MeshBasicMaterial({ color: 0x6d8790, transparent: true, opacity: 0.38 }),
     wheel: new THREE.MeshStandardMaterial({
       color: 0x4b4640,
       metalness: 0.72,
@@ -121,15 +145,14 @@ function addWheelSet(
   }
 }
 
-function addSolarGrid(panel: THREE.Mesh, widthM: number, lengthM: number, root: THREE.Group) {
-  const lineMaterial = new THREE.MeshBasicMaterial({ color: 0x6d8790, transparent: true, opacity: 0.38 });
+function addSolarGrid(panel: THREE.Mesh, widthM: number, lengthM: number, root: THREE.Group, material: THREE.Material) {
   for (let index = -2; index <= 2; index += 1) {
     addBox(
       root,
       "Solar-cell grid",
       [0.008, 0.006, lengthM * 0.92],
       [panel.position.x + index * widthM / 5.5, panel.position.y + 0.018, panel.position.z],
-      lineMaterial,
+      material,
     );
   }
 }
@@ -140,7 +163,7 @@ function buildSojourner(materials: RoverMaterials) {
   addWheelSet(root, [-0.23, 0, 0.23], 0.29, 0.07, 0.065, 0.055, materials);
   addBox(root, "Sojourner chassis", [0.42, 0.16, 0.6], [0, 0.2, 0], materials.warmMetal);
   const panel = addBox(root, "Sojourner solar deck", [0.48, 0.025, 0.66], [0, 0.31, 0], materials.solar);
-  addSolarGrid(panel, 0.48, 0.66, root);
+  addSolarGrid(panel, 0.48, 0.66, root, materials.solarGrid);
   addBox(root, "Sojourner front camera bar", [0.31, 0.07, 0.06], [0, 0.31, 0.33], materials.structure);
   addCylinder(root, "Sojourner left camera", 0.025, 0.045, [-0.095, 0.32, 0.37], materials.lens, "z", 10);
   addCylinder(root, "Sojourner right camera", 0.025, 0.045, [0.095, 0.32, 0.37], materials.lens, "z", 10);
@@ -158,8 +181,8 @@ function buildMer(materials: RoverMaterials) {
     const outer = addBox(root, "MER outer solar wing", [0.6, 0.045, 0.96], [side * 1.43, 0.96, -0.02], materials.solar);
     inner.rotation.z = side * -0.04;
     outer.rotation.z = side * -0.08;
-    addSolarGrid(inner, 0.74, 1.16, root);
-    addSolarGrid(outer, 0.6, 0.96, root);
+    addSolarGrid(inner, 0.74, 1.16, root, materials.solarGrid);
+    addSolarGrid(outer, 0.6, 0.96, root, materials.solarGrid);
   }
   addCylinder(root, "MER panoramic camera mast", 0.045, 1.05, [0, 1.48, 0.22], materials.structure, "y", 10);
   addBox(root, "MER Pancam head", [0.45, 0.18, 0.2], [0, 2.04, 0.22], materials.structure);
@@ -182,9 +205,41 @@ export function createRetiredRoverModel(model: RetiredRoverModel, materials = cr
   return root;
 }
 
+export function fitRoverAssetToPhysicalSize(
+  root: THREE.Group,
+  physicalSizeM: { x: number; y: number; z: number },
+) {
+  root.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(root);
+  const size = bounds.getSize(new THREE.Vector3());
+  if (size.x <= Number.EPSILON || size.y <= Number.EPSILON || size.z <= Number.EPSILON) {
+    throw new RangeError("Detailed rover model must have non-zero dimensions.");
+  }
+  root.scale.multiply(new THREE.Vector3(
+    physicalSizeM.x / size.x,
+    physicalSizeM.y / size.y,
+    physicalSizeM.z / size.z,
+  ));
+  root.updateMatrixWorld(true);
+  bounds.setFromObject(root);
+  const center = bounds.getCenter(new THREE.Vector3());
+  root.position.x -= center.x;
+  root.position.y -= bounds.min.y;
+  root.position.z -= center.z;
+  root.updateMatrixWorld(true);
+  return root;
+}
+
+function disposeGeometries(root: THREE.Object3D) {
+  root.traverse((object) => {
+    if (object instanceof THREE.Mesh) object.geometry.dispose();
+  });
+}
+
 export class RetiredRoverRenderer {
   private readonly materials = createMaterials();
   private readonly visuals: RoverVisual[];
+  private readonly detailedModels = new Map<RetiredRoverModel, Promise<THREE.Group>>();
   private readonly cameraAbsolute = new THREE.Vector3();
   private readonly cameraDirection = new THREE.Vector3();
   private readonly absolute = new THREE.Vector3();
@@ -192,6 +247,7 @@ export class RetiredRoverRenderer {
   private readonly up = new THREE.Vector3();
   private readonly forward = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
+  private disposed = false;
 
   constructor(
     scene: THREE.Scene,
@@ -199,15 +255,52 @@ export class RetiredRoverRenderer {
   ) {
     this.visuals = RETIRED_ROVER_SITES.map((site) => {
       const direction = roverSiteDirection(site);
-      const root = createRetiredRoverModel(site.model, this.materials);
+      const root = new THREE.Group();
+      const model = createRetiredRoverModel(site.model, this.materials);
       root.name = `${site.name} retired rover at ${site.finalSite}`;
       root.visible = false;
+      root.add(model);
       scene.add(root);
       return {
         site,
         direction: new THREE.Vector3(direction.x, direction.y, direction.z),
         root,
+        model,
+        detailRequested: false,
       };
+    });
+  }
+
+  private detailedModel(model: RetiredRoverModel) {
+    const cached = this.detailedModels.get(model);
+    if (cached) return cached;
+    const spec = RETIRED_ROVER_ASSET_SPECS[model];
+    const pending = new GLTFLoader().loadAsync(spec.path).then((gltf) => {
+      const root = fitRoverAssetToPhysicalSize(gltf.scene, spec.physicalSizeM);
+      root.name = spec.sourceLabel;
+      root.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        object.castShadow = true;
+        object.receiveShadow = true;
+      });
+      return root;
+    });
+    this.detailedModels.set(model, pending);
+    return pending;
+  }
+
+  private requestDetailedModel(visual: RoverVisual) {
+    if (visual.detailRequested) return;
+    visual.detailRequested = true;
+    void this.detailedModel(visual.site.model).then((template) => {
+      if (this.disposed) return;
+      const model = template.clone(true);
+      disposeGeometries(visual.model);
+      visual.model.removeFromParent();
+      visual.model = model;
+      visual.root.add(model);
+    }).catch((error) => {
+      console.error(`Unable to load the detailed ${visual.site.name} rover model`, error);
     });
   }
 
@@ -231,6 +324,7 @@ export class RetiredRoverRenderer {
         visual.root.visible = false;
         continue;
       }
+      this.requestDetailedModel(visual);
       const basis = roverModelBasis(visual.site, support.normal);
       this.right.set(basis.right.x, basis.right.y, basis.right.z);
       this.up.set(basis.up.x, basis.up.y, basis.up.z);
@@ -244,6 +338,7 @@ export class RetiredRoverRenderer {
   }
 
   dispose() {
+    this.disposed = true;
     const geometries = new Set<THREE.BufferGeometry>();
     const materials = new Set<THREE.Material>();
     for (const visual of this.visuals) {
@@ -257,5 +352,6 @@ export class RetiredRoverRenderer {
     }
     geometries.forEach((geometry) => geometry.dispose());
     materials.forEach((material) => material.dispose());
+    Object.values(this.materials).forEach((material) => material.dispose());
   }
 }

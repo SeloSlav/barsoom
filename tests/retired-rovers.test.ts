@@ -1,8 +1,14 @@
 import * as THREE from "three";
+import { readFileSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
 import { MARS_LANDMARKS } from "../app/planet/landmarks";
-import { createRetiredRoverModel } from "../app/planet/render/RetiredRoverRenderer";
+import {
+  createRetiredRoverModel,
+  fitRoverAssetToPhysicalSize,
+  RETIRED_ROVER_ASSET_SPECS,
+} from "../app/planet/render/RetiredRoverRenderer";
 import {
   RETIRED_ROVER_SITES,
   roverModelBasis,
@@ -21,6 +27,20 @@ function disposeModel(root: THREE.Group) {
   });
   geometries.forEach((geometry) => geometry.dispose());
   materials.forEach((material) => material.dispose());
+}
+
+function inspectGlb(publicPath: string) {
+  const filePath = fileURLToPath(new URL(`../public${publicPath.split("?")[0]}`, import.meta.url));
+  const file = readFileSync(filePath);
+  expect(file.subarray(0, 4).toString("ascii")).toBe("glTF");
+  const jsonLength = file.readUInt32LE(12);
+  const json = JSON.parse(file.subarray(20, 20 + jsonLength).toString("utf8").trim());
+  const primitives = json.meshes.flatMap((mesh: { primitives: unknown[] }) => mesh.primitives);
+  const triangles = primitives.reduce((total: number, primitive: { indices?: number }) => {
+    if (primitive.indices === undefined) return total;
+    return total + json.accessors[primitive.indices].count / 3;
+  }, 0);
+  return { bytes: statSync(filePath).size, primitives: primitives.length, triangles };
 }
 
 describe("retired Mars rover heritage sites", () => {
@@ -79,5 +99,28 @@ describe("retired Mars rover heritage sites", () => {
       }
       disposeModel(model);
     }
+  });
+
+  it("keeps the detailed rover assets inside a small lazy-load render budget", () => {
+    const summaries = Object.values(RETIRED_ROVER_ASSET_SPECS).map((spec) => inspectGlb(spec.path));
+    expect(summaries.reduce((total, summary) => total + summary.bytes, 0)).toBeLessThan(512 * 1024);
+    expect(summaries.reduce((total, summary) => total + summary.primitives, 0)).toBeLessThanOrEqual(20);
+    expect(summaries.reduce((total, summary) => total + summary.triangles, 0)).toBeLessThan(25_000);
+  });
+
+  it("normalizes source models to their physical dimensions and ground plane", () => {
+    const root = new THREE.Group();
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(2, 4, 8)));
+    fitRoverAssetToPhysicalSize(root, { x: 2.3, y: 1.5, z: 1.6 });
+    const bounds = new THREE.Box3().setFromObject(root);
+    const size = bounds.getSize(new THREE.Vector3());
+    const center = bounds.getCenter(new THREE.Vector3());
+    expect(size.x).toBeCloseTo(2.3, 8);
+    expect(size.y).toBeCloseTo(1.5, 8);
+    expect(size.z).toBeCloseTo(1.6, 8);
+    expect(bounds.min.y).toBeCloseTo(0, 8);
+    expect(center.x).toBeCloseTo(0, 8);
+    expect(center.z).toBeCloseTo(0, 8);
+    disposeModel(root);
   });
 });

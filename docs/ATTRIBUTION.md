@@ -34,6 +34,32 @@ The surface-traverse character is the rigged and animated **Astronaut** by Quate
 
 The included humanoid rig supplies the idle, walk and run animation clips used by the third-person controller.
 
+## Retired Mars rovers
+
+The surface heritage sites use two lightweight static rover assets. Both are loaded only when the observer reaches a nearby, terrain-resolved surface view; the globe uses highlight beacons without downloading or drawing the models.
+
+### Sojourner
+
+- Included asset: `public/models/sojourner-rover.glb`
+- Original model: **Mars Sojourner Rover** by argonius
+- License: Creative Commons Zero / Public Domain
+- Original source: https://blendswap.com/blend/15250
+- Public-domain mirror used for the source Blender file: https://www.printables.com/model/411486-mars-sojourner-rover
+- Adaptation: scene props removed, static rover hierarchy consolidated by material, exported as an uncompressed web GLB, and normalized to the rover's physical dimensions
+
+### Spirit and Opportunity
+
+Spirit and Opportunity were identical Mars Exploration Rover twins, so both sites share one official lightweight MER asset.
+
+- Included asset: `public/models/mer-rover-web.glb`
+- Original model: **Mars Exploration Rover Opportunity (MER-B)**
+- Author/origin: NASA Ames Research Center
+- Source: https://science.nasa.gov/3d-resources/
+- Source repository: https://github.com/nasa/NASA-3D-Resources
+- Usage: NASA content is generally not subject to copyright in the United States; NASA is acknowledged as the source and no endorsement is implied
+- Guidelines: https://www.nasa.gov/nasa-brand-center/images-and-media/
+- Adaptation: official Draco-compressed GLB decoded and re-exported as an uncompressed web GLB for decoder-free lazy loading, then normalized to MER's physical dimensions
+
 ## MOLA
 
 Mars macro terrain is derived from the Mars Global Surveyor Mars Orbiter Laser Altimeter Mission Experiment Gridded Data Record:
