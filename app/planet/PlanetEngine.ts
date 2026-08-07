@@ -540,6 +540,7 @@ export class PlanetEngine {
       this.controlState.altitudeM,
       renderSkyState.sunDirection,
       this.debug,
+      this.observedBody !== "Mars",
     );
     this.surfaceDetails.update(
       this.controlState.cameraAbsolute,

@@ -19,10 +19,10 @@ import { MolaTileLoader } from "../mola";
 import { proceduralTerrainHeightForLod } from "../noise";
 import type { DebugFlags, TileEdge, TileKey, Vec3 } from "../types";
 import {
-  createOrbitalCoherenceMaterial,
+  createOrbitalCoverageMaterial,
   createTerrainMaterial,
   createTerrainShadowMaterial,
-  type OrbitalCoherenceMaterial,
+  type OrbitalCoverageMaterial,
   type TerrainMaterial,
 } from "../render/materials";
 import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPool";
@@ -176,11 +176,24 @@ export function terrainNodeNeedsRefinement(screenError: number, wasRefined: bool
   return screenError > threshold;
 }
 
-const MARS_TERRAIN_OCCLUSION_RADIUS_M = MARS_REFERENCE_RADIUS_M - 9_000;
-const ORBITAL_COHERENCE_MIN_ALTITUDE_M = 180_000;
+export function terrainMaximumLod(stabilizeOrbitalTerrain: boolean) {
+  return stabilizeOrbitalTerrain ? TERRAIN_CONFIG.assetMaxLod : TERRAIN_CONFIG.maxRenderLod;
+}
 
-export function orbitalCoherenceSubstrateVisible(cameraAltitudeM: number) {
-  return cameraAltitudeM >= ORBITAL_COHERENCE_MIN_ALTITUDE_M;
+export function terrainTransitionProgress(
+  nowS: number,
+  childrenReadyAt: number,
+  stabilizeOrbitalTerrain: boolean,
+) {
+  if (stabilizeOrbitalTerrain) return 1;
+  return Math.min(1, Math.max(0, (nowS - childrenReadyAt) / TERRAIN_CONFIG.morphDurationS));
+}
+
+const MARS_TERRAIN_OCCLUSION_RADIUS_M = MARS_REFERENCE_RADIUS_M - 9_000;
+const ORBITAL_COVERAGE_MIN_ALTITUDE_M = 180_000;
+
+export function orbitalCoverageSubstrateVisible(cameraAltitudeM: number) {
+  return cameraAltitudeM >= ORBITAL_COVERAGE_MIN_ALTITUDE_M;
 }
 
 /**
@@ -286,15 +299,15 @@ export class PlanetTerrain {
   private readonly workers = new TerrainWorkerPool();
   private readonly material = createTerrainMaterial();
   private readonly shadowMaterial = createTerrainShadowMaterial();
-  private readonly coherenceMaterial: OrbitalCoherenceMaterial = createOrbitalCoherenceMaterial(
+  private readonly coverageMaterial: OrbitalCoverageMaterial = createOrbitalCoverageMaterial(
     this.material.uniforms.uOrbitalTexture.value,
   );
-  private readonly coherenceGeometry = new THREE.SphereGeometry(
+  private readonly coverageGeometry = new THREE.SphereGeometry(
     MARS_REFERENCE_RADIUS_M - 11_000,
     96,
     64,
   );
-  private readonly coherenceMesh = new THREE.Mesh(this.coherenceGeometry, this.coherenceMaterial);
+  private readonly coverageMesh = new THREE.Mesh(this.coverageGeometry, this.coverageMaterial);
   private readonly projectionScreen = new THREE.Matrix4();
   private readonly frustum = new THREE.Frustum();
   private readonly sphere = new THREE.Sphere();
@@ -308,6 +321,7 @@ export class PlanetTerrain {
   private fovRadians = Math.PI / 4;
   private debugDisableHorizonCulling = false;
   private surfaceShadowsEnabled = false;
+  private stabilizeOrbitalTerrain = false;
   private geometryBytes = 0;
   private stats: TerrainFrameStats = {
     activeTiles: 0,
@@ -324,13 +338,13 @@ export class PlanetTerrain {
   };
 
   constructor(private readonly scene: THREE.Scene) {
-    this.coherenceMesh.name = "Mars orbital coherence substrate";
-    this.coherenceMesh.frustumCulled = false;
+    this.coverageMesh.name = "Mars stable orbital coverage substrate";
+    this.coverageMesh.frustumCulled = false;
     // Draw after every opaque terrain tile so its depth test naturally limits
     // the substrate to genuine coverage voids.
-    this.coherenceMesh.renderOrder = 10_000;
-    this.coherenceMesh.visible = false;
-    this.scene.add(this.coherenceMesh);
+    this.coverageMesh.renderOrder = 10_000;
+    this.coverageMesh.visible = false;
+    this.scene.add(this.coverageMesh);
     this.roots = (["px", "nx", "py", "ny", "pz", "nz"] as const).map((face) => {
       const node = new PlanetTileNode({ face, lod: 0, x: 0, y: 0 }, null);
       this.allNodes.set(node.id, node);
@@ -347,6 +361,7 @@ export class PlanetTerrain {
     cameraAltitudeM: number,
     sunDirection: Vec3,
     debug: DebugFlags,
+    stabilizeOrbitalTerrain = false,
   ): TerrainFrameStats {
     this.frame += 1;
     this.nowS = nowS;
@@ -355,6 +370,7 @@ export class PlanetTerrain {
     this.viewportHeight = viewportHeight;
     this.fovRadians = THREE.MathUtils.degToRad(camera.fov);
     this.debugDisableHorizonCulling = debug.horizonCulling;
+    this.stabilizeOrbitalTerrain = stabilizeOrbitalTerrain;
     this.surfaceShadowsEnabled = cameraAltitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM &&
       dot3(normalize3(cameraAbsolute), sunDirection) > 0.01;
     this.projectionScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -379,14 +395,13 @@ export class PlanetTerrain {
     this.material.uniforms.uDebugLod.value = debug.lodColours ? 1 : 0;
     this.material.uniforms.uDebugNormals.value = debug.normals ? 1 : 0;
     this.material.uniforms.uDebugMolaOnly.value = debug.molaOnly ? 1 : 0;
-    this.coherenceMesh.visible = orbitalCoherenceSubstrateVisible(cameraAltitudeM);
-    this.coherenceMesh.position.set(-cameraAbsolute.x, -cameraAbsolute.y, -cameraAbsolute.z);
-    this.coherenceMaterial.uniforms.uSunDirection.value.set(
+    this.coverageMesh.visible = orbitalCoverageSubstrateVisible(cameraAltitudeM);
+    this.coverageMesh.position.set(-cameraAbsolute.x, -cameraAbsolute.y, -cameraAbsolute.z);
+    this.coverageMaterial.uniforms.uSunDirection.value.set(
       sunDirection.x,
       sunDirection.y,
       sunDirection.z,
     );
-    this.coherenceMaterial.uniforms.uTime.value = nowS;
 
     const rootsByPriority = [...this.roots].sort(
       (a, b) => this.visibility(b).priority - this.visibility(a).priority,
@@ -428,7 +443,7 @@ export class PlanetTerrain {
     const needsRefinement = terrainNodeNeedsRefinement(visibility.screenError, node.refined);
     const canSplit =
       needsRefinement &&
-      node.key.lod < TERRAIN_CONFIG.maxRenderLod &&
+      node.key.lod < terrainMaximumLod(this.stabilizeOrbitalTerrain) &&
       (isFocusBranch || isClipmapRing ||
         this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles);
     if (!canSplit) {
@@ -462,7 +477,15 @@ export class PlanetTerrain {
     }
 
     if (node.childrenReadyAt < 0) node.childrenReadyAt = this.nowS;
-    const transition = Math.min(1, Math.max(0, (this.nowS - node.childrenReadyAt) / TERRAIN_CONFIG.morphDurationS));
+    // A target-locked spacecraft translates hundreds of kilometres per real
+    // second at the 60x simulation rate. Keep its Mars backdrop at the native
+    // MOLA asset ceiling and swap only after a complete child quartet is ready;
+    // a time-based dither cannot remain visually stable under that translation.
+    const transition = terrainTransitionProgress(
+      this.nowS,
+      node.childrenReadyAt,
+      this.stabilizeOrbitalTerrain,
+    );
     if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1, fadeIn: false });
     for (const child of childrenByPriority) {
       if (transition < 1) {
@@ -854,9 +877,9 @@ export class PlanetTerrain {
   }
 
   dispose() {
-    this.coherenceMesh.removeFromParent();
-    this.coherenceGeometry.dispose();
-    this.coherenceMaterial.dispose();
+    this.coverageMesh.removeFromParent();
+    this.coverageGeometry.dispose();
+    this.coverageMaterial.dispose();
     for (const node of this.readyNodes) this.releaseNodeGeometry(node);
     for (const geometry of this.geometryPool) geometry.dispose();
     this.geometryPool.length = 0;

@@ -11,18 +11,20 @@ import {
   coarserNeighbourEdgeMorphs,
   lodTransitionVisible,
   neighbourBalanceAncestors,
-  orbitalCoherenceSubstrateVisible,
+  orbitalCoverageSubstrateVisible,
   sampleMorphedTerrainGrid,
   terrainEdgeMorphWeight,
   terrainHorizonLimitRadians,
+  terrainMaximumLod,
   terrainNodeNeedsRefinement,
+  terrainTransitionProgress,
 } from "../app/planet/terrain/PlanetTerrain";
 import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
 import { proceduralTerrainHeightForLod } from "../app/planet/noise";
 import {
   createAtmosphereMaterial,
-  createOrbitalCoherenceMaterial,
+  createOrbitalCoverageMaterial,
   createTerrainMaterial,
   createTerrainShadowMaterial,
 } from "../app/planet/render/materials";
@@ -285,7 +287,7 @@ describe("terrain worker geometry", () => {
   it("configures morph-aware directional cast shadows without skirt occluders", () => {
     const material = createTerrainMaterial();
     const depth = createTerrainShadowMaterial();
-    const coherence = createOrbitalCoherenceMaterial(material.uniforms.uOrbitalTexture.value);
+    const coverage = createOrbitalCoverageMaterial(material.uniforms.uOrbitalTexture.value);
     expect(material.lights).toBe(true);
     expect("directionalLightShadows" in material.uniforms).toBe(true);
     expect(material.uniforms.uOrbitalTexture.value.name).toContain("USGS Viking MDIM 2.1");
@@ -323,8 +325,8 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("shadowFinish");
     expect(material.fragmentShader).toContain("finishingDitherMask");
     expect(material.fragmentShader).toContain("stableSurfaceDither(vStableMetres)");
-    expect(material.fragmentShader).toContain("handoffEdge");
-    expect(material.fragmentShader).toContain("handoffColour");
+    expect(material.fragmentShader).not.toContain("handoffEdge");
+    expect(material.fragmentShader).not.toContain("handoffColour");
     expect(material.fragmentShader).not.toContain("gl_FragCoord");
     expect(material.fragmentShader).toContain("tonemapping_fragment");
     expect(material.fragmentShader).toContain("colorspace_fragment");
@@ -340,12 +342,15 @@ describe("terrain worker geometry", () => {
     expect(depth.fragmentShader).toContain("uFadeIn > 0.5");
     expect(depth.uniforms.uFade.value).toBe(1);
     expect(depth.uniforms.uFadeIn.value).toBe(1);
-    expect(coherence.name).toContain("quantum coherence substrate");
-    expect(coherence.fragmentShader).toContain("spectralEcho");
-    expect(coherence.fragmentShader).toContain("interference");
-    expect(coherence.fragmentShader).toContain("lattice");
-    expect(coherence.depthWrite).toBe(false);
-    expect(coherence.transparent).toBe(false);
+    expect(coverage.name).toContain("stable orbital coverage substrate");
+    expect(coverage.fragmentShader).toContain("orbitalAlbedo");
+    expect(coverage.fragmentShader).toContain("illumination");
+    expect(coverage.fragmentShader).not.toContain("uTime");
+    expect(coverage.fragmentShader).not.toContain("spectralEcho");
+    expect(coverage.fragmentShader).not.toContain("interference");
+    expect(coverage.fragmentShader).not.toContain("lattice");
+    expect(coverage.depthWrite).toBe(false);
+    expect(coverage.transparent).toBe(false);
     material.uniforms.uOrbitalTexture.value.dispose();
     material.uniforms.uSurfaceDiffuse.value.dispose();
     material.uniforms.uSurfaceNormal.value.dispose();
@@ -355,13 +360,21 @@ describe("terrain worker geometry", () => {
     material.uniforms.uIceSurfaceRoughness.value.dispose();
     material.dispose();
     depth.dispose();
-    coherence.dispose();
+    coverage.dispose();
   });
 
-  it("limits the coherence substrate to orbital imagery distances", () => {
-    expect(orbitalCoherenceSubstrateVisible(179_999)).toBe(false);
-    expect(orbitalCoherenceSubstrateVisible(180_000)).toBe(true);
-    expect(orbitalCoherenceSubstrateVisible(10_000_000)).toBe(true);
+  it("limits the stable coverage substrate to orbital imagery distances", () => {
+    expect(orbitalCoverageSubstrateVisible(179_999)).toBe(false);
+    expect(orbitalCoverageSubstrateVisible(180_000)).toBe(true);
+    expect(orbitalCoverageSubstrateVisible(10_000_000)).toBe(true);
+  });
+
+  it("holds accelerated orbital target locks to stable native terrain handoffs", () => {
+    expect(terrainMaximumLod(true)).toBe(4);
+    expect(terrainMaximumLod(false)).toBe(18);
+    expect(terrainTransitionProgress(10.05, 10, true)).toBe(1);
+    expect(terrainTransitionProgress(10.05, 10, false)).toBeGreaterThan(0);
+    expect(terrainTransitionProgress(10.05, 10, false)).toBeLessThan(1);
   });
 
   it("bakes sampled MOLA elevations into the radial vertex positions", () => {
