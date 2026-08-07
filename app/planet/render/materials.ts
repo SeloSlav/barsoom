@@ -378,6 +378,10 @@ const terrainFragment = /* glsl */ `
   }
 
   void main() {
+    // Edge skirts are geometry-only safety margins. Their upper half used to
+    // remain visible (and receive light) while neighbouring LODs loaded,
+    // presenting every temporary tile border as a long dark trench.
+    if (vSurfaceMask < 0.999) discard;
     float dither = stableSurfaceDither(vStableMetres);
 
     vec3 radial = normalize(vPlanetDirection);
@@ -749,7 +753,8 @@ const terrainShadowFragment = /* glsl */ `
   varying float vSurfaceMask;
 
   void main() {
-    if (vSurfaceMask < 0.5) discard;
+    // Do not let the interpolated upper half of a skirt enter the shadow map.
+    if (vSurfaceMask < 0.999) discard;
     gl_FragColor = vec4(1.0);
   }
 `;

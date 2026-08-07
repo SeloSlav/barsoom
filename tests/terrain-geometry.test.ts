@@ -337,7 +337,8 @@ describe("terrain worker geometry", () => {
     expect(material.vertexShader).toContain("normalMorphDelta");
     expect(depth.vertexShader).toContain("uEdgeMorph");
     expect(material.vertexShader).not.toContain("boundaryMorph");
-    expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
+    expect(material.fragmentShader).toContain("vSurfaceMask < 0.999");
+    expect(depth.fragmentShader).toContain("vSurfaceMask < 0.999");
     expect(material.fragmentShader).not.toContain("uFade");
     expect(depth.fragmentShader).not.toContain("stableSurfaceDither");
     expect(depth.fragmentShader).not.toContain("uFade");
