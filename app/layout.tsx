@@ -17,7 +17,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase: new URL(origin), title, description,
     icons: { icon: "/favicon.png", shortcut: "/favicon.png" },
-    openGraph: { type: "website", title, description, images: [{ url: image, width: 1731, height: 909, alt: "Barsoom retired Mars rover heritage exploration" }] },
+    openGraph: { type: "website", title, description, images: [{ url: image, width: 1727, height: 911, alt: "Barsoom planetary exploration of Mars from orbit to surface" }] },
     twitter: { card: "summary_large_image", title, description, images: [image] },
   };
 }
