@@ -60,6 +60,39 @@ Spirit and Opportunity were identical Mars Exploration Rover twins, so both site
 - Guidelines: https://www.nasa.gov/nasa-brand-center/images-and-media/
 - Adaptation: official Draco-compressed GLB decoded and re-exported as an uncompressed web GLB for decoder-free lazy loading, then normalized to MER's physical dimensions
 
+## Active Mars orbiters
+
+Barsoom tracks Mars Odyssey, Mars Reconnaissance Orbiter (MRO), and the ExoMars Trace Gas Orbiter (TGO) from Mars-centred NASA/JPL Horizons osculating elements at 2026-08-07 00:00 TDB. The propagated view is an educational visualization, not a navigation product. Spacecraft remain at physical orbital positions. Their detailed models download only after the player locks onto one, and are normalized to published deployed dimensions.
+
+### Mars Odyssey
+
+- Included asset: `public/models/mars-odyssey-web.glb`
+- Original model: NASA Mars Odyssey
+- Source: https://science.nasa.gov/3d-resources/mars-odyssey/
+- Source repository: https://github.com/nasa/NASA-3D-Resources
+- Adaptation: mesh quantization and WebP texture compression; 516,372 bytes and 8,642 triangles
+
+### Mars Reconnaissance Orbiter
+
+- Included asset: `public/models/mars-reconnaissance-orbiter-web.glb`
+- Original model: NASA Mars Reconnaissance Orbiter (MRO) (C)
+- Source: https://science.nasa.gov/3d-resources/mars-reconnaissance-orbiter-mro-c/
+- Source repository: https://github.com/nasa/NASA-3D-Resources
+- Adaptation: mesh quantization and WebP texture compression; 410,580 bytes and 14,753 triangles
+
+### Trace Gas Orbiter
+
+- Included asset: `public/models/trace-gas-orbiter-web.glb`
+- Original model: ExoMars Trace Gas Orbiter, distributed by NASA Science
+- Source: https://science.nasa.gov/resource/trace-gas-orbiter-3d-model/
+- Adaptation: mesh quantization with original texture encoding retained; 2,865,068 bytes and 10,179 triangles
+
+NASA is acknowledged as the source of these three downloadable model assets and no endorsement is implied. NASA states that its 3D polygon and texture content is generally not subject to copyright in the United States; NASA identifiers and logos are excluded from that general permission. Usage guidance: https://www.nasa.gov/nasa-brand-center/images-and-media/
+
+- Orbit source: https://ssd.jpl.nasa.gov/horizons/
+- Horizons targets: Mars Odyssey (-53), MRO (-74), TGO (-143)
+- Centre/frame: Mars-centred ICRF geometric elements transformed into Barsoom's Mars body-fixed frame
+
 ## MOLA
 
 Mars macro terrain is derived from the Mars Global Surveyor Mars Orbiter Laser Altimeter Mission Experiment Gridded Data Record:

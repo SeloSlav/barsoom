@@ -37,6 +37,8 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 - A data-driven procedural Mars PBR shader with dust, regolith, basalt, light rock, and polar frost blends.
 - Bounded single-scattering integration with Rayleigh and dust/Mie density profiles, view/sun optical depth, transmittance, planetary shadow, a thin limb, horizon haze, and terrain aerial perspective.
 - 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric planet vectors transformed into the IAU Mars body frame.
+- Clickable moving highlights for Phobos, Deimos, Mars Odyssey, MRO, and TGO, with Mars occlusion, dropdown fallback, target-lock cameras, and current orbital telemetry.
+- Optimized official spacecraft models lazy-loaded one at a time only during close inspection, while the globe view uses low-cost orbit tracks and DOM highlights.
 - Dedicated middle-orbit, right-pan, left-select, cursor-wheel zoom controls and a live orbital HUD.
 
 See [architecture](docs/ARCHITECTURE.md), [controls](docs/CONTROLS.md), [data pipelines](docs/DATA_PIPELINES.md), [attribution](docs/ATTRIBUTION.md), [performance notes](docs/PERFORMANCE.md), and the [acceptance verification matrix](docs/VERIFICATION.md).

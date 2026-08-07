@@ -23,8 +23,12 @@ Measured on the production build in this repository:
 | Device pixel ratio cap | 1.75 |
 | Adaptive render scale floor | 0.72 |
 | Near-surface solar shadow map | 2,048² below 80 km on the illuminated side |
+| Mars orbiter survey cost | 3 line draws; no spacecraft GLB loaded |
+| Odyssey inspection model | 516,372 bytes / 8,642 triangles |
+| MRO inspection model | 410,580 bytes / 14,753 triangles |
+| TGO inspection model | 2,865,068 bytes / 10,179 triangles |
 
-`npm run build` completes without compilation errors. `npm test` currently covers 103 maths, data, generated-geometry, worker-scheduling, celestial, navigation, material-configuration, and precision cases, including every required screenshot altitude, the automatic RTS approach/manual-control handoff, deterministic playable-scale relief, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
+`npm run build` completes without compilation errors. `npm test` currently covers 122 maths, data, generated-geometry, worker-scheduling, celestial, asset-budget, navigation, material-configuration, and precision cases, including physical moon and spacecraft propagation, decoder-free optimized orbiter GLBs, every required screenshot altitude, the automatic RTS approach/manual-control handoff, deterministic playable-scale relief, cross-face 2:1 neighbour balancing, morph-aware shadow depth, and absolute light-plane shadow snapping. The separate server-render check verifies production metadata and removal of the starter.
 
 ## Terrain generation benchmark
 
@@ -45,7 +49,7 @@ This is a repeatable CPU throughput measurement, not a substitute for live brows
 
 Runtime telemetry available through `window.__BARSOOM__.getState().telemetry` reports exponentially smoothed frame time/FPS, active/loading tiles, retained nodes, selected LOD range, horizon rejections, triangles, draw calls, decoded MOLA memory, GPU geometry memory, worker queue, active depth strategy, local shadow extent, near/far planes and camera-relative origin. The `setDebug("horizonCulling", true)` audit temporarily disables occlusion culling so its effect is directly measurable. In survey mode, resolution changes at most once per 240 frames: sustained frame time over 22 ms lowers scale in 0.1 steps; sustained time below 15.2 ms restores it slowly. Spaceman mode holds one drawing-buffer allocation for the entire session so a resize cannot present a cleared black frame between WebGL draws. This keeps the orbital view sharp while providing a bounded recovery path on slower GPUs without destabilizing local traverse.
 
-No geometry, material, texture or network request is constructed in the steady-state render loop. Tile-node arrays grow only on first subdivision. Mesh and geometry containers are reused. The asynchronous request queue rejects stale jobs after rapid movement, and every MOLA request uses browser HTTP caching.
+No geometry, material, texture or network request is constructed in the steady-state render loop. Tile-node arrays grow only on first subdivision. Mesh and geometry containers are reused. Orbiter acquisition markers use preallocated projection state, and orbit tracks reuse fixed typed arrays. The three official spacecraft GLBs are never requested in the globe view; target lock lazy-loads only one, and changing or releasing the lock disposes that model before another can become resident. The asynchronous request queue rejects stale jobs after rapid movement, and every MOLA request uses browser HTTP caching.
 
 ## Visual verification matrix
 

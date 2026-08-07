@@ -2,7 +2,14 @@ import * as THREE from "three";
 import { BarsoomAudio } from "../audio/BarsoomAudio";
 import { emitSovaTutorial } from "../tutorials/sova";
 import { MAX_CAMERA_ALTITUDE_M, MARS_REFERENCE_RADIUS_M, RENDER_CONFIG } from "./constants";
-import { calculateMarsSky, chooseOrbitalSurveyComposition, type MarsMoonState, type MarsSkyState } from "./ephemeris";
+import {
+  calculateMarsSky,
+  chooseOrbitalSurveyComposition,
+  isMarsOrbiterName,
+  type MarsMoonState,
+  type MarsOrbiterName,
+  type MarsSkyState,
+} from "./ephemeris";
 import { findMarsLandmarkAtDirection, landmarkDirection, MARS_LANDMARKS, type MarsLandmark } from "./landmarks";
 import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, nextAdaptiveResolutionScale, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
@@ -10,6 +17,7 @@ import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { LocalLightingPhaseLock } from "./render/LocalLightingPhaseLock";
 import { MoonRenderer } from "./render/MoonRenderer";
+import { OrbiterRenderer } from "./render/OrbiterRenderer";
 import { RetiredRoverRenderer } from "./render/RetiredRoverRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
@@ -17,7 +25,7 @@ import { randomMarsDaylightDirection, SurfaceTraverseController } from "./Surfac
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
-export type ObservedBody = "Mars" | MarsMoonState["name"];
+export type ObservedBody = "Mars" | MarsMoonState["name"] | MarsOrbiterName;
 
 export type MarsLandmarkHover = Pick<
   MarsLandmark,
@@ -26,6 +34,16 @@ export type MarsLandmarkHover = Pick<
 
 export type MarsLandmarkMarker = Pick<MarsLandmark, "id" | "name"> & {
   kind: MarsLandmark["kind"];
+  x: number;
+  y: number;
+  radiusPx: number;
+};
+
+export type MarsOrbitalMarker = {
+  id: ObservedBody;
+  name: string;
+  shortName: string;
+  kind: "moon" | "orbiter";
   x: number;
   y: number;
   radiusPx: number;
@@ -85,6 +103,7 @@ export class PlanetEngine {
   private readonly atmosphere: AtmosphereRenderer;
   private readonly celestial: CelestialRenderer;
   private readonly moons: MoonRenderer;
+  private readonly orbiters: OrbiterRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
   private readonly retiredRovers: RetiredRoverRenderer;
   private readonly localLightingPhaseLock = new LocalLightingPhaseLock();
@@ -109,6 +128,7 @@ export class PlanetEngine {
   private readonly moonTangent = new THREE.Vector3();
   private readonly moonTargetRelative = new THREE.Vector3();
   private readonly moonViewUp = new THREE.Vector3();
+  private readonly orbitalProjection = new THREE.Vector3();
   private selectionDirection: THREE.Vector3 | null = null;
   private selectionHeadingRad: number | undefined;
   private pointerDown: { x: number; y: number } | null = null;
@@ -116,6 +136,8 @@ export class PlanetEngine {
   private hoveredLandmarkId: string | null = null;
   private lastLandmarkMarkerTime = -Infinity;
   private landmarkMarkerSignature = "";
+  private lastOrbitalMarkerTime = -Infinity;
+  private orbitalMarkerSignature = "";
   private controlState!: PlanetControlState;
   private skyState: MarsSkyState;
   private simulationStartUtc: Date;
@@ -156,6 +178,7 @@ export class PlanetEngine {
     private readonly onSelectionChange: (position: SurfaceSelectionPosition | null) => void = () => {},
     private readonly onLandmarkHoverChange: (landmark: MarsLandmarkHover | null) => void = () => {},
     private readonly onLandmarkMarkersChange: (markers: readonly MarsLandmarkMarker[]) => void = () => {},
+    private readonly onOrbitalMarkersChange: (markers: readonly MarsOrbitalMarker[]) => void = () => {},
     simulationRate = 60,
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
@@ -252,6 +275,7 @@ export class PlanetEngine {
     this.atmosphere = new AtmosphereRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
     this.moons = new MoonRenderer(this.scene, this.camera, this.skyState.moons);
+    this.orbiters = new OrbiterRenderer(this.scene, this.camera, (message) => this.onError(message));
     // Submit both cameras under one outer render call. Besides avoiding an
     // unnecessary renderer-state teardown, this keeps the path ready for a
     // single output stage on future renderers without changing scene order.
@@ -392,6 +416,7 @@ export class PlanetEngine {
 
   private focusBody(body: ObservedBody) {
     this.observedBody = body;
+    this.orbiters.select(isMarsOrbiterName(body) ? body : null);
     if (body === "Mars") {
       this.releaseMoonDrag();
       this.controls.setEnabled(true);
@@ -407,16 +432,19 @@ export class PlanetEngine {
     this.moonStandoffRadii = MOON_CAMERA_STANDOFF_RADII;
   }
 
-  private updateMoonObservation(body: MarsMoonState["name"]): PlanetControlState {
-    const moon = this.skyState.moons.find((candidate) => candidate.name === body);
-    if (!moon) {
+  private updateOrbitalObservation(body: Exclude<ObservedBody, "Mars">): PlanetControlState {
+    const target = this.skyState.moons.find((candidate) => candidate.name === body)
+      ?? this.skyState.orbiters.find((candidate) => candidate.name === body);
+    if (!target) {
       this.focusBody("Mars");
       return this.controls.update(0);
     }
-    const radiusM = Math.max(...moon.semiAxesM);
+    const radiusM = "semiAxesM" in target
+      ? Math.max(...target.semiAxesM)
+      : target.modelMaxDimensionM * 0.5;
     const standoffM = radiusM * this.moonStandoffRadii;
-    this.moonFocusDirection.set(moon.positionM.x, moon.positionM.y, moon.positionM.z).normalize();
-    this.moonViewUp.set(moon.orbitNormal.x, moon.orbitNormal.y, moon.orbitNormal.z).normalize();
+    this.moonFocusDirection.set(target.positionM.x, target.positionM.y, target.positionM.z).normalize();
+    this.moonViewUp.set(target.orbitNormal.x, target.orbitNormal.y, target.orbitNormal.z).normalize();
     this.moonTangent.crossVectors(this.moonViewUp, this.moonFocusDirection).normalize();
     const cosPitch = Math.cos(this.moonOrbitPitchRad);
     this.moonOrbitDirection
@@ -428,7 +456,7 @@ export class PlanetEngine {
     this.moonFrameRight.crossVectors(this.moonViewUp, this.moonOrbitDirection).normalize();
     this.moonFrameUp.crossVectors(this.moonOrbitDirection, this.moonFrameRight).normalize();
     this.moonFocusAbsolute
-      .set(moon.positionM.x, moon.positionM.y, moon.positionM.z)
+      .set(target.positionM.x, target.positionM.y, target.positionM.z)
       .addScaledVector(this.moonFrameRight, this.moonPanX * radiusM)
       .addScaledVector(this.moonFrameUp, this.moonPanY * radiusM);
     this.moonCameraAbsolute
@@ -488,7 +516,7 @@ export class PlanetEngine {
     this.skyState = calculateMarsSky(simulationUtc);
     this.controlState = this.observedBody === "Mars"
       ? marsControlState
-      : this.updateMoonObservation(this.observedBody);
+      : this.updateOrbitalObservation(this.observedBody);
     const renderSkyState = this.localLightingPhaseLock.resolve(
       this.skyState,
       this.controlState.altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM,
@@ -521,8 +549,14 @@ export class PlanetEngine {
     this.retiredRovers.update(this.controlState.cameraAbsolute, this.controlState.altitudeM);
     this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
     this.moons.update(this.skyState, this.controlState.cameraAbsolute);
+    this.orbiters.update(
+      this.skyState,
+      this.controlState.cameraAbsolute,
+      this.observedBody === "Mars" && !this.surfaceTraverse.active,
+    );
     this.updateSelection();
     this.updateLandmarkMarkers(time);
+    this.updateOrbitalMarkers(time);
     this.skyCamera.quaternion.copy(this.camera.quaternion);
     this.skyCamera.updateMatrixWorld(true);
     this.celestial.update(
@@ -906,6 +940,79 @@ export class PlanetEngine {
     this.onLandmarkMarkersChange(markers);
   }
 
+  private orbitalTargetIsOcculted(positionM: MarsMoonState["positionM"]) {
+    const camera = this.controlState.cameraAbsolute;
+    const directionX = positionM.x - camera.x;
+    const directionY = positionM.y - camera.y;
+    const directionZ = positionM.z - camera.z;
+    const targetDistance = Math.hypot(directionX, directionY, directionZ);
+    if (targetDistance <= 1) return false;
+    const inverseDistance = 1 / targetDistance;
+    const rayX = directionX * inverseDistance;
+    const rayY = directionY * inverseDistance;
+    const rayZ = directionZ * inverseDistance;
+    const alongRay = camera.x * rayX + camera.y * rayY + camera.z * rayZ;
+    const discriminant = alongRay ** 2 - (
+      camera.x ** 2 + camera.y ** 2 + camera.z ** 2 - MARS_REFERENCE_RADIUS_M ** 2
+    );
+    if (discriminant <= 0) return false;
+    const nearestIntersection = -alongRay - Math.sqrt(discriminant);
+    return nearestIntersection > 0 && nearestIntersection < targetDistance - 1;
+  }
+
+  private projectOrbitalTarget(positionM: MarsMoonState["positionM"], bounds: DOMRect) {
+    if (this.orbitalTargetIsOcculted(positionM)) return null;
+    const projected = this.orbitalProjection.set(
+      positionM.x - this.controlState.cameraAbsolute.x,
+      positionM.y - this.controlState.cameraAbsolute.y,
+      positionM.z - this.controlState.cameraAbsolute.z,
+    ).project(this.camera);
+    if (projected.z < -1 || projected.z > 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) return null;
+    return {
+      x: bounds.left + (projected.x * 0.5 + 0.5) * bounds.width,
+      y: bounds.top + (-projected.y * 0.5 + 0.5) * bounds.height,
+    };
+  }
+
+  private updateOrbitalMarkers(time: number) {
+    if (time - this.lastOrbitalMarkerTime < 40) return;
+    this.lastOrbitalMarkerTime = time;
+    const markers: MarsOrbitalMarker[] = [];
+    if (!this.surfaceTraverse.active && this.observedBody === "Mars") {
+      const bounds = this.canvas.getBoundingClientRect();
+      for (const moon of this.skyState.moons) {
+        const projected = this.projectOrbitalTarget(moon.positionM, bounds);
+        if (!projected) continue;
+        markers.push({
+          id: moon.name,
+          name: moon.name,
+          shortName: moon.name.toUpperCase(),
+          kind: "moon",
+          ...projected,
+          radiusPx: 11,
+        });
+      }
+      for (const orbiter of this.skyState.orbiters) {
+        const projected = this.projectOrbitalTarget(orbiter.positionM, bounds);
+        if (!projected) continue;
+        markers.push({
+          id: orbiter.name,
+          name: orbiter.name,
+          shortName: orbiter.shortName,
+          kind: "orbiter",
+          ...projected,
+          radiusPx: 10,
+        });
+      }
+    }
+    const signature = markers
+      .map((marker) => `${marker.id}:${Math.round(marker.x)}:${Math.round(marker.y)}`)
+      .join("|");
+    if (signature === this.orbitalMarkerSignature) return;
+    this.orbitalMarkerSignature = signature;
+    this.onOrbitalMarkersChange(markers);
+  }
+
   private clearLandmarkHover() {
     if (this.hoveredLandmarkId === null) return;
     this.hoveredLandmarkId = null;
@@ -1024,6 +1131,7 @@ export class PlanetEngine {
     this.atmosphere.dispose();
     this.celestial.dispose();
     this.moons.dispose();
+    this.orbiters.dispose();
     this.scene.onBeforeRender = () => {};
     this.audio.dispose();
     this.selection.removeFromParent();
@@ -1040,6 +1148,7 @@ export class PlanetEngine {
     this.sunShadowLight.shadow.dispose();
     this.renderer.dispose();
     this.onLandmarkMarkersChange([]);
+    this.onOrbitalMarkersChange([]);
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
     this.canvas.removeEventListener("pointermove", this.onLandmarkPointerMove);
     this.canvas.removeEventListener("pointerleave", this.onLandmarkPointerLeave);

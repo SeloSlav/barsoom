@@ -21,6 +21,7 @@ export type MarsSkyState = {
   inertialToMarsFixed: number[];
   bodies: CelestialBodyState[];
   moons: MarsMoonState[];
+  orbiters: MarsOrbiterState[];
 };
 
 export type MarsMoonState = {
@@ -29,6 +30,37 @@ export type MarsMoonState = {
   orbitNormal: Vec3;
   semiAxesM: readonly [number, number, number];
   albedo: number;
+};
+
+export const MARS_ORBITER_NAMES = [
+  "Mars Odyssey",
+  "Mars Reconnaissance Orbiter",
+  "Trace Gas Orbiter",
+] as const;
+
+export type MarsOrbiterName = (typeof MARS_ORBITER_NAMES)[number];
+
+export type MarsOrbiterState = {
+  name: MarsOrbiterName;
+  shortName: "ODYSSEY" | "MRO" | "TGO";
+  agency: string;
+  status: string;
+  objective: string;
+  modelPath: string;
+  modelMaxDimensionM: number;
+  colour: number;
+  positionM: Vec3;
+  orbitNormal: Vec3;
+  semiMajorAxisM: number;
+  eccentricity: number;
+  inclinationDeg: number;
+  ascendingNodeDeg: number;
+  argumentOfPeriapsisDeg: number;
+  meanAnomalyDeg: number;
+  meanMotionDegPerSecond: number;
+  orbitPeriodS: number;
+  altitudeM: number;
+  speedMps: number;
 };
 
 export type OrbitalSurveyComposition = {
@@ -98,6 +130,78 @@ const MARS_MOON_ORBITS: readonly MarsMoonOrbit[] = [
     albedo: 0.068,
   },
 ] as const;
+
+type MarsOrbiterOrbit = Omit<
+  MarsOrbiterState,
+  "positionM" | "orbitNormal" | "altitudeM" | "speedMps"
+>;
+
+// NASA/JPL Horizons geometric osculating elements at 2026-08-07 00:00 TDB.
+// TDB was 69.184 seconds ahead of UTC at this epoch. The spacecraft remain at
+// physical Mars-centred positions; only their close inspection models are
+// normalized to the published deployed dimensions.
+const MARS_ORBITER_EPOCH_UTC_MS = Date.UTC(2026, 7, 6, 23, 58, 50, 816);
+const MARS_GM_M3_S2 = 4.282837485735625e13;
+export const MARS_ORBITER_CATALOG: readonly MarsOrbiterOrbit[] = [
+  {
+    name: "Mars Odyssey",
+    shortName: "ODYSSEY",
+    agency: "NASA / JPL-CALTECH",
+    status: "ACTIVE · IN MARS ORBIT SINCE 2001",
+    objective: "ELEMENTAL MAPPING · WEATHER · LANDING-SITE RECONNAISSANCE",
+    modelPath: "/models/mars-odyssey-web.glb?v=nasa-horizons-2026-08",
+    modelMaxDimensionM: 5.7,
+    colour: 0x72d9ff,
+    semiMajorAxisM: 3_788_203.213192191,
+    eccentricity: 0.005702580946831116,
+    inclinationDeg: 88.64883337062517,
+    ascendingNodeDeg: 144.3389574600275,
+    argumentOfPeriapsisDeg: 288.3166808949278,
+    meanAnomalyDeg: 36.34220739684598,
+    meanMotionDegPerSecond: 0.05085557017559292,
+    orbitPeriodS: 7_078.870588944346,
+  },
+  {
+    name: "Mars Reconnaissance Orbiter",
+    shortName: "MRO",
+    agency: "NASA / JPL-CALTECH",
+    status: "ACTIVE · IN MARS ORBIT SINCE 2006",
+    objective: "HIGH-RESOLUTION SURFACE MAPPING · ATMOSPHERIC MONITORING",
+    modelPath: "/models/mars-reconnaissance-orbiter-web.glb?v=nasa-horizons-2026-08",
+    modelMaxDimensionM: 12,
+    colour: 0xffb16f,
+    semiMajorAxisM: 3_666_579.753171639,
+    eccentricity: 0.008922192927566805,
+    inclinationDeg: 70.26918551635916,
+    ascendingNodeDeg: 284.018603412543,
+    argumentOfPeriapsisDeg: 244.2303496780784,
+    meanAnomalyDeg: 87.22039909748949,
+    meanMotionDegPerSecond: 0.05340682080436274,
+    orbitPeriodS: 6_740.712039736168,
+  },
+  {
+    name: "Trace Gas Orbiter",
+    shortName: "TGO",
+    agency: "ESA / ROSCOSMOS · NASA VTAD MODEL",
+    status: "ACTIVE · IN MARS ORBIT SINCE 2016",
+    objective: "TRACE-GAS SCIENCE · ATMOSPHERIC AND SURFACE IMAGING",
+    modelPath: "/models/trace-gas-orbiter-web.glb?v=nasa-horizons-2026-08",
+    modelMaxDimensionM: 17.5,
+    colour: 0x9fdc9d,
+    semiMajorAxisM: 3_773_608.652486882,
+    eccentricity: 0.004360606538876713,
+    inclinationDeg: 38.94595886183869,
+    ascendingNodeDeg: 234.6620441678081,
+    argumentOfPeriapsisDeg: 276.414531787838,
+    meanAnomalyDeg: 342.832047848431,
+    meanMotionDegPerSecond: 0.05115088373928082,
+    orbitPeriodS: 7_038.001568749857,
+  },
+] as const;
+
+export function isMarsOrbiterName(name: string): name is MarsOrbiterName {
+  return (MARS_ORBITER_NAMES as readonly string[]).includes(name);
+}
 
 function normalize(vector: Vec3): Vec3 {
   const length = Math.hypot(vector.x, vector.y, vector.z) || 1;
@@ -236,6 +340,75 @@ export function calculateMarsMoons(utc: Date, matrix = marsOrientationMatrix(utc
   });
 }
 
+export function calculateMarsOrbiters(utc: Date, matrix = marsOrientationMatrix(utc)): MarsOrbiterState[] {
+  const secondsFromEpoch = (utc.getTime() - MARS_ORBITER_EPOCH_UTC_MS) / 1_000;
+  const radians = Math.PI / 180;
+  return MARS_ORBITER_CATALOG.map((orbit) => {
+    const inclination = orbit.inclinationDeg * radians;
+    const ascendingNode = orbit.ascendingNodeDeg * radians;
+    const argumentOfPeriapsis = orbit.argumentOfPeriapsisDeg * radians;
+    const meanAnomaly = (
+      orbit.meanAnomalyDeg + orbit.meanMotionDegPerSecond * secondsFromEpoch
+    ) * radians;
+    const eccentricAnomaly = solveEccentricAnomaly(meanAnomaly, orbit.eccentricity);
+    const x = orbit.semiMajorAxisM * (Math.cos(eccentricAnomaly) - orbit.eccentricity);
+    const y = orbit.semiMajorAxisM * Math.sqrt(1 - orbit.eccentricity ** 2) * Math.sin(eccentricAnomaly);
+    const positionM = inertialToMarsFixedVector(
+      rotatePerifocalToInertial(x, y, inclination, ascendingNode, argumentOfPeriapsis),
+      matrix,
+    );
+    const orbitNormal = normalize(inertialToMarsFixedVector({
+      x: Math.sin(inclination) * Math.sin(ascendingNode),
+      y: -Math.sin(inclination) * Math.cos(ascendingNode),
+      z: Math.cos(inclination),
+    }, matrix));
+    const radiusM = Math.hypot(positionM.x, positionM.y, positionM.z);
+    return {
+      ...orbit,
+      positionM,
+      orbitNormal,
+      altitudeM: radiusM - 3_389_500,
+      speedMps: Math.sqrt(MARS_GM_M3_S2 * (2 / radiusM - 1 / orbit.semiMajorAxisM)),
+    };
+  });
+}
+
+export function writeMarsOrbiterOrbitPath(
+  orbit: MarsOrbiterState,
+  matrix: number[],
+  positions: Float32Array,
+) {
+  const count = Math.floor(positions.length / 3);
+  const inclination = orbit.inclinationDeg * Math.PI / 180;
+  const ascendingNode = orbit.ascendingNodeDeg * Math.PI / 180;
+  const argumentOfPeriapsis = orbit.argumentOfPeriapsisDeg * Math.PI / 180;
+  const cosNode = Math.cos(ascendingNode);
+  const sinNode = Math.sin(ascendingNode);
+  const cosPeriapsis = Math.cos(argumentOfPeriapsis);
+  const sinPeriapsis = Math.sin(argumentOfPeriapsis);
+  const cosInclination = Math.cos(inclination);
+  const sinInclination = Math.sin(inclination);
+  const xFromX = cosNode * cosPeriapsis - sinNode * sinPeriapsis * cosInclination;
+  const xFromY = -cosNode * sinPeriapsis - sinNode * cosPeriapsis * cosInclination;
+  const yFromX = sinNode * cosPeriapsis + cosNode * sinPeriapsis * cosInclination;
+  const yFromY = -sinNode * sinPeriapsis + cosNode * cosPeriapsis * cosInclination;
+  const zFromX = sinPeriapsis * sinInclination;
+  const zFromY = cosPeriapsis * sinInclination;
+  const yScale = orbit.semiMajorAxisM * Math.sqrt(1 - orbit.eccentricity ** 2);
+  for (let index = 0; index < count; index += 1) {
+    const eccentricAnomaly = count <= 1 ? 0 : index / (count - 1) * Math.PI * 2;
+    const x = orbit.semiMajorAxisM * (Math.cos(eccentricAnomaly) - orbit.eccentricity);
+    const y = yScale * Math.sin(eccentricAnomaly);
+    const inertialX = xFromX * x + xFromY * y;
+    const inertialY = yFromX * x + yFromY * y;
+    const inertialZ = zFromX * x + zFromY * y;
+    const offset = index * 3;
+    positions[offset] = inertialX * matrix[0] + inertialY * matrix[1] + inertialZ * matrix[2];
+    positions[offset + 1] = inertialX * matrix[3] + inertialY * matrix[4] + inertialZ * matrix[5];
+    positions[offset + 2] = inertialX * matrix[6] + inertialY * matrix[7] + inertialZ * matrix[8];
+  }
+}
+
 export function calculateMarsSky(utc: Date): MarsSkyState {
   const mars = HelioVector(Body.Mars, utc);
   const sunDistanceAu = Math.hypot(mars.x, mars.y, mars.z);
@@ -261,5 +434,6 @@ export function calculateMarsSky(utc: Date): MarsSkyState {
     inertialToMarsFixed: matrix,
     bodies,
     moons: calculateMarsMoons(utc, matrix),
+    orbiters: calculateMarsOrbiters(utc, matrix),
   };
 }

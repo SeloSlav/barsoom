@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { calculateMarsMoons, calculateMarsSky, chooseOrbitalSurveyComposition, inertialToMarsFixedVector, marsOrientationMatrix } from "../app/planet/ephemeris";
+import { calculateMarsMoons, calculateMarsOrbiters, calculateMarsSky, chooseOrbitalSurveyComposition, inertialToMarsFixedVector, marsOrientationMatrix, writeMarsOrbiterOrbitPath } from "../app/planet/ephemeris";
 import { dot3, length3 } from "../app/planet/math";
 
 describe("embedded astronomical data", () => {
@@ -64,6 +64,7 @@ describe("embedded astronomical data", () => {
       "Mercury", "Venus", "Earth", "Jupiter", "Saturn", "Uranus", "Neptune",
     ]);
     expect(sky.moons.map((moon) => moon.name)).toEqual(["Phobos", "Deimos"]);
+    expect(sky.orbiters.map((orbiter) => orbiter.shortName)).toEqual(["ODYSSEY", "MRO", "TGO"]);
     for (const body of sky.bodies) {
       expect(length3(body.direction)).toBeCloseTo(1, 10);
       expect(body.distanceAu).toBeGreaterThan(0);
@@ -80,6 +81,38 @@ describe("embedded astronomical data", () => {
       const viewCenter = { x: -composition.focusDirection.x, y: -composition.focusDirection.y, z: -composition.focusDirection.z };
       const offsetDegrees = Math.acos(dot3(body.direction, viewCenter)) * 180 / Math.PI;
       expect(offsetDegrees).toBeCloseTo(18, 8);
+    }
+  });
+
+  it("propagates current Mars spacecraft from NASA/JPL Horizons elements", () => {
+    const epoch = new Date("2026-08-06T23:58:50.816Z");
+    const identity = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    const initial = calculateMarsOrbiters(epoch, identity);
+    const later = calculateMarsOrbiters(new Date(epoch.getTime() + 600_000), identity);
+    expect(initial.map((orbiter) => orbiter.name)).toEqual([
+      "Mars Odyssey",
+      "Mars Reconnaissance Orbiter",
+      "Trace Gas Orbiter",
+    ]);
+    for (let index = 0; index < initial.length; index += 1) {
+      const orbiter = initial[index];
+      expect(length3(orbiter.orbitNormal)).toBeCloseTo(1, 12);
+      expect(Math.abs(dot3(orbiter.positionM, orbiter.orbitNormal))).toBeLessThan(2);
+      expect(orbiter.altitudeM).toBeGreaterThan(200_000);
+      expect(orbiter.altitudeM).toBeLessThan(500_000);
+      expect(orbiter.speedMps).toBeGreaterThan(3_200);
+      expect(orbiter.speedMps).toBeLessThan(3_600);
+      const motion = dot3(orbiter.positionM, later[index].positionM)
+        / (length3(orbiter.positionM) * length3(later[index].positionM));
+      expect(motion).toBeLessThan(0.9);
+
+      const orbitPath = new Float32Array(193 * 3);
+      writeMarsOrbiterOrbitPath(orbiter, identity, orbitPath);
+      expect(Math.hypot(
+        orbitPath[0] - orbitPath[orbitPath.length - 3],
+        orbitPath[1] - orbitPath[orbitPath.length - 2],
+        orbitPath[2] - orbitPath[orbitPath.length - 1],
+      )).toBeLessThan(1);
     }
   });
 

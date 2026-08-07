@@ -2,13 +2,28 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
-import { PlanetEngine, type MarsLandmarkHover, type MarsLandmarkMarker, type ObservedBody } from "../planet/PlanetEngine";
+import { calculateMarsOrbiters, isMarsOrbiterName, MARS_ORBITER_NAMES } from "../planet/ephemeris";
+import {
+  PlanetEngine,
+  type MarsLandmarkHover,
+  type MarsLandmarkMarker,
+  type MarsOrbitalMarker,
+  type ObservedBody,
+} from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
 
 const SIMULATION_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
-const OBSERVATION_TARGETS: readonly ObservedBody[] = ["Mars", "Phobos", "Deimos"];
+const OBSERVATION_TARGETS: readonly ObservedBody[] = ["Mars", "Phobos", "Deimos", ...MARS_ORBITER_NAMES];
+
+function targetShortName(body: ObservedBody) {
+  if (body === "Mars") return "BARSOOM";
+  if (body === "Mars Reconnaissance Orbiter") return "MRO";
+  if (body === "Mars Odyssey") return "ODYSSEY";
+  if (body === "Trace Gas Orbiter") return "TGO";
+  return body.toUpperCase();
+}
 
 function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
   return {
@@ -118,6 +133,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [observerAction, setObserverAction] = useState<ObserverActionPosition | null>(null);
   const [hoveredLandmark, setHoveredLandmark] = useState<PresentedLandmark | null>(null);
   const [landmarkMarkers, setLandmarkMarkers] = useState<readonly MarsLandmarkMarker[]>([]);
+  const [orbitalMarkers, setOrbitalMarkers] = useState<readonly MarsOrbitalMarker[]>([]);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
@@ -140,6 +156,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         ) : null),
         (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
         setLandmarkMarkers,
+        setOrbitalMarkers,
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);
@@ -191,6 +208,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     setObserverAction(null);
     setHoveredLandmark(null);
     setLandmarkMarkers([]);
+    setOrbitalMarkers([]);
     window.__BARSOOM__?.focusBody(body);
     canvasRef.current?.focus();
   };
@@ -206,14 +224,20 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   };
 
   const simulationLabel = useMemo(() => formatSimulationUtc(telemetry.simulationUtc), [telemetry.simulationUtc]);
-  const moonMode = observedBody !== "Mars";
-  const surfaceMode = !moonMode && telemetry.controlMode === "surface";
+  const orbitalMode = observedBody !== "Mars";
+  const moonMode = observedBody === "Phobos" || observedBody === "Deimos";
+  const selectedOrbiter = useMemo(() => {
+    if (!isMarsOrbiterName(observedBody)) return null;
+    return calculateMarsOrbiters(new Date(telemetry.simulationUtc))
+      .find((candidate) => candidate.name === observedBody) ?? null;
+  }, [observedBody, telemetry.simulationUtc]);
+  const surfaceMode = !orbitalMode && telemetry.controlMode === "surface";
   const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${moonMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
-      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : moonMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features and retired rover sites, then click one to select its visit point; or click any terrain coordinate to phase-lock it."} />
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${orbitalMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : orbitalMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features, retired rover sites, moons, and active orbiters; then click one to select it."} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
       {surfaceSettling && <div className="surface-entry-screen" role="status" aria-live="polite">
@@ -240,7 +264,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                 disabled={surfaceMode}
                 title={surfaceMode ? "Press Escape to exit spaceman mode before changing targets" : "Select celestial body"}
               >
-                <span className="wordmark-barsoom">{observedBody.toUpperCase()}</span>
+                <span className="wordmark-barsoom">{targetShortName(observedBody)}</span>
                 <span className="wordmark-divider" aria-hidden="true">|</span>
                 <span className="wordmark-mars">MARS</span>
                 <i className="wordmark-chevron" aria-hidden="true" />
@@ -253,11 +277,11 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                   role="option"
                   aria-selected={body === observedBody}
                   onClick={() => selectObservedBody(body)}
-                ><span>{body.toUpperCase()}</span><i aria-hidden="true">|</i><b>MARS</b></button>
+                ><span>{body.toUpperCase()}</span><i aria-hidden="true">|</i><b>{body === "Mars" ? "PLANET" : body === "Phobos" || body === "Deimos" ? "MOON" : "ORBITER"}</b></button>
               </li>)}
             </ul>}
           </div>
-          <span className="mission-mode"><i /> {moonMode ? "SATELLITE APERTURE / ORBITAL TRACK LOCKED" : `${surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED`}</span>
+          <span className="mission-mode"><i /> {orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} APERTURE / ORBITAL TRACK LOCKED` : `${surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED`}</span>
         </div>
         <div className="simulation-clock">
           <span>SOURCE EPOCH / UTC</span>
@@ -300,7 +324,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           </div>
         </div>
       </header>
-      {!moonMode && <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
+      {!orbitalMode && <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
         <div className="panel-index">SOLUTION / 01</div>
         <div className="eyebrow">VIRTUAL APERTURE SOLUTION</div>
         <div className="coordinate-grid">
@@ -320,13 +344,27 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           </span>
         </div>}
       </section>}
-      {!moonMode && <section className="altitude-gauge" aria-label="Reconstruction focal height">
+      {!orbitalMode && <section className="altitude-gauge" aria-label="Reconstruction focal height">
         <span className="gauge-label">FOCAL<br />STANDOFF</span>
         <div className="gauge-track"><i style={{ height: `${apertureFill}%` }} /><b style={{ bottom: `${apertureFill}%` }} /></div>
         <div className="gauge-copy"><span>FAR FIELD</span><strong>{formatDistance(telemetry.altitudeM)}</strong><span>LOCAL FIELD</span></div>
       </section>}
-      {!moonMode && <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>}
-      {!surfaceMode && !moonMode && landmarkMarkers.length > 0 && <div className="planet-landmark-layer" aria-hidden="true">
+      {!orbitalMode && <div className="scale-bar" aria-label={`Approximate scale ${formatDistance(telemetry.groundWidthM / 4)}`}><span>ANGULAR SOLUTION · {formatDistance(telemetry.groundWidthM / 4)}</span><i /></div>}
+      {selectedOrbiter && <section className="orbiter-telemetry" aria-label={`${selectedOrbiter.name} orbital telemetry`}>
+        <div className="panel-index">HORIZONS TRACK / 01</div>
+        <div className="eyebrow">ACTIVE MARS SPACECRAFT</div>
+        <strong className="orbiter-name">{selectedOrbiter.name}</strong>
+        <span className="orbiter-agency">{selectedOrbiter.agency}</span>
+        <dl>
+          <div><dt>ALTITUDE</dt><dd>{formatDistance(selectedOrbiter.altitudeM)}</dd></div>
+          <div><dt>ORBITAL SPEED</dt><dd>{(selectedOrbiter.speedMps / 1_000).toFixed(2)} km/s</dd></div>
+          <div><dt>ORBIT PERIOD</dt><dd>{(selectedOrbiter.orbitPeriodS / 60).toFixed(1)} min</dd></div>
+          <div><dt>MARS-EQUATOR INCL.</dt><dd>{(Math.acos(Math.max(-1, Math.min(1, selectedOrbiter.orbitNormal.y))) * 180 / Math.PI).toFixed(1)}°</dd></div>
+        </dl>
+        <p>{selectedOrbiter.status}</p>
+        <small>{selectedOrbiter.objective}</small>
+      </section>}
+      {!surfaceMode && !orbitalMode && landmarkMarkers.length > 0 && <div className="planet-landmark-layer" aria-hidden="true">
         {landmarkMarkers.map((marker, index) => <i
           key={marker.id}
           className={`planet-landmark-beacon${marker.kind === "retired-rover" ? " rover" : ""}${hoveredLandmark?.id === marker.id ? " active" : ""}`}
@@ -340,7 +378,24 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           title={marker.name}
         />)}
       </div>}
-      {hoveredLandmark && !surfaceMode && !moonMode && <>
+      {!surfaceMode && !orbitalMode && orbitalMarkers.length > 0 && <div className="orbital-target-layer" aria-label="Visible Mars orbital targets">
+        {orbitalMarkers.map((marker, index) => <button
+          key={marker.id}
+          className={`orbital-target-marker ${marker.kind}`}
+          type="button"
+          style={{
+            left: marker.x,
+            top: marker.y,
+            width: marker.radiusPx * 2,
+            height: marker.radiusPx * 2,
+            animationDelay: `${-(index % 5) * 0.42}s`,
+          }}
+          onClick={() => selectObservedBody(marker.id)}
+          aria-label={`Lock camera to ${marker.name}`}
+          title={`Lock camera to ${marker.name}`}
+        ><i aria-hidden="true" /><span>{marker.shortName}</span></button>)}
+      </div>}
+      {hoveredLandmark && !surfaceMode && !orbitalMode && <>
         <i
           className="planet-feature-reticle"
           style={{ left: hoveredLandmark.x, top: hoveredLandmark.y }}
@@ -368,15 +423,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>
-        <p className="eyebrow">{moonMode ? "SATELLITE TRACK" : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
-        {moonMode ? <div className="instrument-principle">
-          <strong>{observedBody.toUpperCase()} TRACK LOCKED.</strong>
-          <p>The aperture follows {observedBody} in real time while retaining direct camera control.</p>
+        <p className="eyebrow">{orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} TRACK` : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
+        {orbitalMode ? <div className="instrument-principle">
+          <strong>{targetShortName(observedBody)} TRACK LOCKED.</strong>
+          <p>The aperture follows {observedBody} on the simulation clock while retaining direct camera control. {moonMode ? "The moon remains at its physical size and Mars can occult it." : "The official model is shown only in close inspection, at its published deployed scale; the globe highlight remains screen-readable without enlarging the spacecraft."}</p>
         </div> : !surfaceMode && <div className="instrument-principle">
           <strong>YOU ARE NOT MOVING FASTER THAN LIGHT.</strong>
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
-        {moonMode ? <dl><div><dt>Rotate around moon</dt><dd>Left / middle drag</dd></div><div><dt>Pan across moon</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget body</dt><dd>Identity menu</dd></div></dl> : (surfaceMode ? <>
+        {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
           <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
           <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Spaceman mode stays locked to the figure at every wheel-zoom distance and exits only when you press <kbd>Esc</kbd>.</p>
         </> : <>
@@ -385,7 +440,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {moonMode ? `${observedBody.toUpperCase()} EPHEMERIS TRACK LOCKED` : surfaceMode ? "SPACEMAN TRACK LOCKED · ESC TO EXIT" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {orbitalMode ? `${targetShortName(observedBody)} EPHEMERIS TRACK LOCKED` : surfaceMode ? "SPACEMAN TRACK LOCKED · ESC TO EXIT" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

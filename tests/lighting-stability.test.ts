@@ -10,6 +10,7 @@ function skyAt(second: number): MarsSkyState {
     inertialToMarsFixed: [1, 0, 0, 0, 1, 0, 0, 0, 1],
     bodies: [],
     moons: [],
+    orbiters: [],
   };
 }
 
