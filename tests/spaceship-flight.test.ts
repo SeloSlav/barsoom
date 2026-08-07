@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   SurfaceSpaceship,
   SURFACE_SPACESHIP_MODEL_PATH,
+  spaceshipDampedInput,
   spaceshipDirectionalSteer,
   spaceshipSteerAmount,
   spaceshipTrailStyle,
@@ -49,6 +50,14 @@ describe("surface spaceship flight", () => {
     expect(spaceshipSteerAmount(1)).toBe(1);
     expect(spaceshipDirectionalSteer(-1, 1)).toBe(1);
     expect(spaceshipDirectionalSteer(1, -1)).toBe(-1);
+  });
+
+  it("damps control changes without undershoot or one-frame snapping", () => {
+    const firstFrame = spaceshipDampedInput(0, 1, 16, 1 / 60);
+    expect(firstFrame).toBeGreaterThan(0);
+    expect(firstFrame).toBeLessThan(1);
+    expect(spaceshipDampedInput(firstFrame, 1, 16, 1 / 60)).toBeGreaterThan(firstFrame);
+    expect(spaceshipDampedInput(1, 0, 16, 1 / 60)).toBeGreaterThan(0);
   });
 
   it("integrates thrust from real delta seconds without an ephemeris-rate input", () => {
@@ -97,6 +106,33 @@ describe("surface spaceship flight", () => {
     expect(turnedForward.dot(initialForward)).toBeLessThan(0.1);
     expect(turnedForward.dot(chaseViewRight)).toBeGreaterThan(0.9);
     expect(craft.getAbsolute(new THREE.Vector3()).length()).toBeGreaterThan(initialRadiusM + 25);
+    craft.dispose();
+  });
+
+  it("turns the nose toward the pointer's camera-relative screen direction", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    const screenRight = new THREE.Vector3(-1, 0, 0);
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, {
+        ...neutralFlightInput,
+        aimX: 1,
+        aimRight: screenRight,
+        aimUp: new THREE.Vector3(0, 1, 0),
+      });
+    }
+
+    expect(craft.getForward(new THREE.Vector3()).dot(screenRight)).toBeGreaterThan(0.9);
     craft.dispose();
   });
 

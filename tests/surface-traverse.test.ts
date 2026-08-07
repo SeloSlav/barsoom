@@ -19,6 +19,7 @@ import {
   randomMarsSurfaceDirection,
   rebaseCameraAnchorForTerrainChange,
   smoothCameraHeight,
+  spaceshipMouseForward,
   surfaceCameraRight,
   wowCameraOrbitDistances,
   wowMouseAutoRun,
@@ -170,6 +171,24 @@ describe("surface traverse physics", () => {
     const dragged = applySpaceshipCameraOrbitDrag(0, 0, 100, 50);
     expect(dragged.cameraYawRad).toBeLessThan(0);
     expect(dragged.cameraPitchRad).toBeLessThan(0);
+  });
+
+  it("lets spacecraft camera pitch orbit through either pole without a clamp", () => {
+    const firstLoop = applySpaceshipCameraOrbitDrag(0, 0, 0, 3_000);
+    const secondLoop = applySpaceshipCameraOrbitDrag(
+      firstLoop.cameraYawRad,
+      firstLoop.cameraPitchRad,
+      0,
+      3_000,
+    );
+    expect(firstLoop.cameraPitchRad).toBeLessThan(-Math.PI * 2);
+    expect(secondLoop.cameraPitchRad).toBeLessThan(firstLoop.cameraPitchRad - Math.PI * 2);
+  });
+
+  it("engages spacecraft forward thrust only for the two-button chord", () => {
+    expect(spaceshipMouseForward(true, true)).toBe(true);
+    expect(spaceshipMouseForward(true, false)).toBe(false);
+    expect(spaceshipMouseForward(false, true)).toBe(false);
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {

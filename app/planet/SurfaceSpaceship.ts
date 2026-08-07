@@ -20,6 +20,8 @@ const SHIP_SHARP_TURN_MULTIPLIER = 1.85;
 const SHIP_MAX_SPEED_M_S = 12_000;
 const SHIP_TRAIL_MAX_POINTS = 240;
 const SHIP_STEER_DEAD_ZONE = 0.055;
+const SHIP_ROTATION_RESPONSE_S = 16;
+const SHIP_TRANSLATION_RESPONSE_S = 16;
 const SHIP_MODEL_LENGTH_M = 9.2;
 
 export const SHIP_BOARD_DISTANCE_M = 5.5;
@@ -36,6 +38,8 @@ export type SpaceshipFlightInput = {
   brake: boolean;
   aimX: number;
   aimY: number;
+  aimRight?: Vec3;
+  aimUp?: Vec3;
 };
 
 type TrailPoint = {
@@ -72,12 +76,20 @@ export function spaceshipSteerAmount(value: number, deadZone = SHIP_STEER_DEAD_Z
   const magnitude = Math.abs(clamp(value, -1, 1));
   if (magnitude <= deadZone) return 0;
   const normalized = (magnitude - deadZone) / Math.max(Number.EPSILON, 1 - deadZone);
-  return Math.sign(value) * normalized * normalized;
+  // Preserve fine control around the centre without the old squared curve's
+  // large unresponsive patch. The result still eases in instead of stepping.
+  return Math.sign(value) * normalized * (0.45 + 0.55 * normalized);
 }
 
 export function spaceshipDirectionalSteer(pointerAim: number, keyboardInput: number) {
   const directInput = clamp(keyboardInput, -1, 1);
   return Math.abs(directInput) > 0.001 ? directInput : spaceshipSteerAmount(pointerAim);
+}
+
+export function spaceshipDampedInput(current: number, target: number, responsePerSecond: number, deltaSeconds: number) {
+  if (!Number.isFinite(current) || !Number.isFinite(target)) return 0;
+  const alpha = 1 - Math.exp(-Math.max(0, responsePerSecond) * Math.max(0, deltaSeconds));
+  return current + (target - current) * alpha;
 }
 
 /**
@@ -100,6 +112,10 @@ export class SurfaceSpaceship {
   private readonly previousRotation = new THREE.Quaternion();
   private readonly velocityRotation = new THREE.Quaternion();
   private readonly rotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
+  private readonly aimRight = new THREE.Vector3();
+  private readonly aimUp = new THREE.Vector3();
+  private readonly aimTangent = new THREE.Vector3();
+  private readonly aimAxis = new THREE.Vector3();
   private readonly engineLeft = new THREE.Vector3(-3.25, 0.05, -4.55);
   private readonly engineRight = new THREE.Vector3(3.25, 0.05, -4.55);
   private readonly leftTrailPositions = new Float32Array(SHIP_TRAIL_MAX_POINTS * 3);
@@ -116,6 +132,12 @@ export class SurfaceSpaceship {
   private stationKeeping = true;
   private active = false;
   private thrustVisible = false;
+  private smoothedThrottle = 0;
+  private smoothedStrafe = 0;
+  private smoothedLift = 0;
+  private smoothedYaw = 0;
+  private smoothedPitch = 0;
+  private smoothedRoll = 0;
   private model: THREE.Object3D | null = null;
   private disposed = false;
 
@@ -264,6 +286,7 @@ export class SurfaceSpaceship {
     this.stationKeeping = true;
     this.active = true;
     this.thrustVisible = false;
+    this.resetInputSmoothing();
     this.root.visible = true;
     this.trailRoot.visible = true;
     this.trailPoints = [];
@@ -288,6 +311,7 @@ export class SurfaceSpaceship {
     this.groundAnchored = false;
     this.stationKeeping = true;
     this.velocity.set(0, 0, 0);
+    this.resetInputSmoothing();
   }
 
   stopAndPark() {
@@ -297,6 +321,7 @@ export class SurfaceSpaceship {
     this.groundAnchored = false;
     this.stationKeeping = true;
     this.thrustVisible = false;
+    this.resetInputSmoothing();
     this.trailPoints = [];
     this.trailEmitCountdownS = 0;
     this.leftTrailGeometry.setDrawRange(0, 0);
@@ -318,17 +343,58 @@ export class SurfaceSpaceship {
     const turnMultiplier = input.boost ? SHIP_SHARP_TURN_MULTIPLIER : 1;
     // A pressed direction is authoritative on its axis. A stale pointer at the
     // opposite screen edge must never cancel or reverse a keyboard command.
-    const yawInput = spaceshipDirectionalSteer(input.aimX, input.yaw);
-    const pitchInput = spaceshipDirectionalSteer(input.aimY, input.pitch);
-    const rollInput = clamp(input.roll, -1, 1);
+    const keyboardYaw = clamp(input.yaw, -1, 1);
+    const keyboardPitch = clamp(input.pitch, -1, 1);
+    const yawInput = spaceshipDirectionalSteer(input.aimX, keyboardYaw);
+    const pitchInput = spaceshipDirectionalSteer(input.aimY, keyboardPitch);
+    this.smoothedYaw = spaceshipDampedInput(this.smoothedYaw, yawInput, SHIP_ROTATION_RESPONSE_S, delta);
+    this.smoothedPitch = spaceshipDampedInput(this.smoothedPitch, pitchInput, SHIP_ROTATION_RESPONSE_S, delta);
+    this.smoothedRoll = spaceshipDampedInput(
+      this.smoothedRoll,
+      clamp(input.roll, -1, 1),
+      SHIP_ROTATION_RESPONSE_S,
+      delta,
+    );
     this.previousRotation.copy(this.root.quaternion);
+    const pointerYaw = Math.abs(keyboardYaw) <= 0.001 && input.aimRight;
+    const pointerPitch = Math.abs(keyboardPitch) <= 0.001 && input.aimUp;
+    if (pointerYaw || pointerPitch) {
+      this.forward.set(0, 0, 1).applyQuaternion(this.root.quaternion).normalize();
+      this.aimTangent.set(0, 0, 0);
+      if (pointerYaw && input.aimRight) {
+        this.aimRight.set(input.aimRight.x, input.aimRight.y, input.aimRight.z).normalize();
+        this.aimTangent.addScaledVector(
+          this.aimRight,
+          this.smoothedYaw * SHIP_YAW_RATE_RAD_S,
+        );
+      }
+      if (pointerPitch && input.aimUp) {
+        this.aimUp.set(input.aimUp.x, input.aimUp.y, input.aimUp.z).normalize();
+        this.aimTangent.addScaledVector(
+          this.aimUp,
+          this.smoothedPitch * SHIP_PITCH_RATE_RAD_S,
+        );
+      }
+      this.aimTangent.addScaledVector(this.forward, -this.aimTangent.dot(this.forward));
+      const turnRateRadS = this.aimTangent.length();
+      if (turnRateRadS > 1e-7) {
+        this.aimTangent.multiplyScalar(1 / turnRateRadS);
+        this.aimAxis.crossVectors(this.forward, this.aimTangent).normalize();
+        this.rotationStep.setFromAxisAngle(
+          this.aimAxis,
+          turnRateRadS * turnMultiplier * delta,
+        );
+        this.root.quaternion.premultiply(this.rotationStep).normalize();
+      }
+    }
+
+    // Keyboard steering remains craft-relative and authoritative on its axis.
+    // Mouse steering above is camera-relative, so screen-right stays right even
+    // after the chase camera has orbited around or over the hull.
     this.rotationEuler.set(
-      -pitchInput * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
-      // The craft is authored facing local +Z, so chase-view right is local
-      // -X. Negating yaw makes D/right-arrow and a pointer on the right turn
-      // toward the side the player actually selected on screen.
-      -yawInput * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
-      rollInput * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
+      pointerPitch ? 0 : -this.smoothedPitch * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
+      pointerYaw ? 0 : -this.smoothedYaw * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
+      this.smoothedRoll * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
     );
     this.rotationStep.setFromEuler(this.rotationEuler);
     this.root.quaternion.multiply(this.rotationStep).normalize();
@@ -344,9 +410,33 @@ export class SurfaceSpaceship {
     this.forward.set(0, 0, 1).applyQuaternion(this.root.quaternion).normalize();
     this.right.set(1, 0, 0).applyQuaternion(this.root.quaternion).normalize();
     this.up.set(0, 1, 0).applyQuaternion(this.root.quaternion).normalize();
-    const thrust = clamp(input.throttle, -1, 1);
-    const strafe = clamp(input.strafe, -1, 1);
-    const lift = clamp(input.lift, -1, 1);
+    if (input.brake) {
+      this.smoothedThrottle = 0;
+      this.smoothedStrafe = 0;
+      this.smoothedLift = 0;
+    } else {
+      this.smoothedThrottle = spaceshipDampedInput(
+        this.smoothedThrottle,
+        clamp(input.throttle, -1, 1),
+        SHIP_TRANSLATION_RESPONSE_S,
+        delta,
+      );
+      this.smoothedStrafe = spaceshipDampedInput(
+        this.smoothedStrafe,
+        clamp(input.strafe, -1, 1),
+        SHIP_TRANSLATION_RESPONSE_S,
+        delta,
+      );
+      this.smoothedLift = spaceshipDampedInput(
+        this.smoothedLift,
+        clamp(input.lift, -1, 1),
+        SHIP_TRANSLATION_RESPONSE_S,
+        delta,
+      );
+    }
+    const thrust = this.smoothedThrottle;
+    const strafe = this.smoothedStrafe;
+    const lift = this.smoothedLift;
     const translationInput = Math.max(Math.abs(thrust), Math.abs(strafe), Math.abs(lift));
     if (input.brake) this.stationKeeping = true;
     else if (translationInput > 0.02) this.stationKeeping = false;
@@ -398,6 +488,15 @@ export class SurfaceSpaceship {
     } else {
       this.trailEmitCountdownS = 0;
     }
+  }
+
+  private resetInputSmoothing() {
+    this.smoothedThrottle = 0;
+    this.smoothedStrafe = 0;
+    this.smoothedLift = 0;
+    this.smoothedYaw = 0;
+    this.smoothedPitch = 0;
+    this.smoothedRoll = 0;
   }
 
   private emitTrailPoint(boosted: boolean) {
