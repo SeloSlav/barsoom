@@ -1,4 +1,5 @@
 import { MARS_REFERENCE_RADIUS_M } from "./constants";
+import { RETIRED_ROVER_SITES, roverVisitCoordinates } from "./roverSites";
 import type { Vec3 } from "./types";
 
 export type MarsLandmark = {
@@ -8,6 +9,7 @@ export type MarsLandmark = {
   latitudeDeg: number;
   longitudeDeg: number;
   hoverRadiusKm: number;
+  kind?: "terrain" | "retired-rover";
   landingLatitudeDeg?: number;
   landingLongitudeDeg?: number;
   headingRad?: number;
@@ -121,6 +123,21 @@ export const MARS_LANDMARKS: readonly MarsLandmark[] = [
     longitudeDeg: -42.0,
     hoverRadiusKm: 520,
   },
+  ...RETIRED_ROVER_SITES.map((site) => {
+    const visit = roverVisitCoordinates(site);
+    return {
+      id: site.id,
+      name: site.name,
+      featureType: `Retired rover · ${site.finalSite}`,
+      latitudeDeg: site.latitudeDeg,
+      longitudeDeg: site.longitudeDeg,
+      hoverRadiusKm: 14,
+      kind: "retired-rover" as const,
+      landingLatitudeDeg: visit.latitudeDeg,
+      landingLongitudeDeg: visit.longitudeDeg,
+      headingRad: visit.headingRad,
+    };
+  }),
 ];
 
 export function landmarkDirection(landmark: MarsLandmark): Vec3 {

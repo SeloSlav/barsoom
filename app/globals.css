@@ -115,6 +115,10 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
 .planet-landmark-beacon { position: absolute; min-width: 24px; min-height: 24px; transform: translate(-50%, -50%); border: 1px solid rgba(255,190,145,.36); border-radius: 50%; box-shadow: 0 0 10px rgba(255,126,67,.12), inset 0 0 9px rgba(255,177,116,.06); transition: opacity .16s ease, border-color .16s ease, box-shadow .16s ease; }
 .planet-landmark-beacon::before { content: ""; position: absolute; inset: -1px; border: 1px solid rgba(255,155,99,.48); border-radius: inherit; animation: landmark-ambient-pulse 2.7s cubic-bezier(.2,.62,.32,1) infinite; animation-delay: inherit; }
 .planet-landmark-beacon::after { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 3px; transform: translate(-50%, -50%); border-radius: 50%; background: rgba(255,217,185,.74); box-shadow: 0 0 7px rgba(255,139,78,.78); }
+.planet-landmark-beacon.rover { border-color: rgba(124,231,232,.62); box-shadow: 0 0 14px rgba(75,218,221,.2), inset 0 0 10px rgba(119,232,226,.1); }
+.planet-landmark-beacon.rover::before { border-color: rgba(115,234,230,.72); }
+.planet-landmark-beacon.rover::after { width: 5px; height: 5px; border-radius: 1px; background: rgba(196,255,246,.94); box-shadow: 0 0 9px rgba(77,239,229,.95); transform: translate(-50%, -50%) rotate(45deg); }
+.planet-landmark-beacon.rover.active { border-color: rgba(211,255,247,.96); box-shadow: 0 0 22px rgba(72,231,226,.5), inset 0 0 14px rgba(113,240,231,.18); }
 .planet-landmark-beacon.active { border-color: rgba(255,218,187,.88); box-shadow: 0 0 18px rgba(255,128,67,.38), inset 0 0 12px rgba(255,177,116,.14); }
 .planet-landmark-beacon.active::before { border-color: rgba(255,181,126,.8); }
 @keyframes landmark-ambient-pulse { 0% { opacity: 0; transform: scale(.72); } 26% { opacity: .72; } 100% { opacity: 0; transform: scale(1.72); } }

@@ -10,6 +10,7 @@ import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { LocalLightingPhaseLock } from "./render/LocalLightingPhaseLock";
 import { MoonRenderer } from "./render/MoonRenderer";
+import { RetiredRoverRenderer } from "./render/RetiredRoverRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
@@ -20,16 +21,22 @@ export type ObservedBody = "Mars" | MarsMoonState["name"];
 
 export type MarsLandmarkHover = Pick<
   MarsLandmark,
-  "id" | "name" | "featureType" | "latitudeDeg" | "longitudeDeg"
+  "id" | "name" | "featureType" | "latitudeDeg" | "longitudeDeg" | "kind"
 > & { x: number; y: number };
 
 export type MarsLandmarkMarker = Pick<MarsLandmark, "id" | "name"> & {
+  kind: MarsLandmark["kind"];
   x: number;
   y: number;
   radiusPx: number;
 };
 
-type SurfaceSelectionPosition = { x: number; y: number; landmarkName?: string };
+type SurfaceSelectionPosition = {
+  x: number;
+  y: number;
+  landmarkName?: string;
+  landmarkKind?: MarsLandmark["kind"];
+};
 
 export type PlanetEngineApi = {
   getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody };
@@ -79,6 +86,7 @@ export class PlanetEngine {
   private readonly celestial: CelestialRenderer;
   private readonly moons: MoonRenderer;
   private readonly surfaceDetails: SurfaceDetailRenderer;
+  private readonly retiredRovers: RetiredRoverRenderer;
   private readonly localLightingPhaseLock = new LocalLightingPhaseLock();
   private readonly surfaceTraverse: SurfaceTraverseController;
   private readonly audio: BarsoomAudio;
@@ -102,6 +110,7 @@ export class PlanetEngine {
   private readonly moonTargetRelative = new THREE.Vector3();
   private readonly moonViewUp = new THREE.Vector3();
   private selectionDirection: THREE.Vector3 | null = null;
+  private selectionHeadingRad: number | undefined;
   private pointerDown: { x: number; y: number } | null = null;
   private landmarkPointerDownId: string | null = null;
   private hoveredLandmarkId: string | null = null;
@@ -212,6 +221,10 @@ export class PlanetEngine {
     this.skyState = calculateMarsSky(this.simulationStartUtc);
     this.terrain = new PlanetTerrain(this.scene);
     this.surfaceDetails = new SurfaceDetailRenderer(
+      this.scene,
+      (direction) => this.terrain.sampleVisibleRenderedSurface(direction),
+    );
+    this.retiredRovers = new RetiredRoverRenderer(
       this.scene,
       (direction) => this.terrain.sampleVisibleRenderedSurface(direction),
     );
@@ -350,7 +363,9 @@ export class PlanetEngine {
         this.localLightingPhaseLock.reset();
       },
       instantiateObserver: () => {
-        if (!this.surfaceTraverse.active && this.selectionDirection) void this.enterSurfaceTraverse(this.selectionDirection);
+        if (!this.surfaceTraverse.active && this.selectionDirection) {
+          void this.enterSurfaceTraverse(this.selectionDirection, this.selectionHeadingRad);
+        }
       },
       instantiateObserverAt: (latitudeDeg, longitudeDeg, headingRad) => {
         if (this.surfaceTraverse.active) return;
@@ -503,6 +518,7 @@ export class PlanetEngine {
       this.controlState.cameraDirection,
       this.controlState.altitudeM,
     );
+    this.retiredRovers.update(this.controlState.cameraAbsolute, this.controlState.altitudeM);
     this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
     this.moons.update(this.skyState, this.controlState.cameraAbsolute);
     this.updateSelection();
@@ -714,15 +730,20 @@ export class PlanetEngine {
     if (landmarkClicked) {
       const { landmark } = landmarkClicked;
       this.clearLandmarkHover();
+      const landingDirection = landmark.landingLatitudeDeg !== undefined && landmark.landingLongitudeDeg !== undefined
+        ? latLonElevationToCartesian(landmark.landingLatitudeDeg, landmark.landingLongitudeDeg, 0, 1)
+        : landmarkDirection(landmark);
       this.lockSurfaceSelection(
         new THREE.Vector3(
-          landmarkClicked.surfaceDirection.x,
-          landmarkClicked.surfaceDirection.y,
-          landmarkClicked.surfaceDirection.z,
+          landingDirection.x,
+          landingDirection.y,
+          landingDirection.z,
         ),
         event.clientX,
         event.clientY,
         landmark.name,
+        landmark.kind,
+        landmark.headingRad,
       );
       return;
     }
@@ -746,10 +767,18 @@ export class PlanetEngine {
     );
   };
 
-  private lockSurfaceSelection(direction: THREE.Vector3, x: number, y: number, landmarkName?: string) {
+  private lockSurfaceSelection(
+    direction: THREE.Vector3,
+    x: number,
+    y: number,
+    landmarkName?: string,
+    landmarkKind?: MarsLandmark["kind"],
+    headingRad?: number,
+  ) {
     this.selectionDirection = direction.normalize();
+    this.selectionHeadingRad = headingRad;
     this.controls.setZoomAnchor(this.selectionDirection);
-    this.onSelectionChange({ x, y, landmarkName });
+    this.onSelectionChange({ x, y, landmarkName, landmarkKind });
     this.audio.playPhaseLock();
     emitSovaTutorial("surface");
     void this.terrain.prefetch(this.selectionDirection);
@@ -774,6 +803,7 @@ export class PlanetEngine {
       featureType: landmark.featureType,
       latitudeDeg: landmark.latitudeDeg,
       longitudeDeg: landmark.longitudeDeg,
+      kind: landmark.kind,
       x: event.clientX,
       y: event.clientY,
     });
@@ -861,6 +891,7 @@ export class PlanetEngine {
         markers.push({
           id: landmark.id,
           name: landmark.name,
+          kind: landmark.kind,
           x: projected.x,
           y: projected.y,
           radiusPx: projected.radiusPx,
@@ -913,6 +944,7 @@ export class PlanetEngine {
     this.pointerDown = null;
     this.landmarkPointerDownId = null;
     this.selectionDirection = null;
+    this.selectionHeadingRad = undefined;
     this.controls.setZoomAnchor(null);
     this.onSelectionChange(null);
   }
@@ -987,6 +1019,7 @@ export class PlanetEngine {
     this.controls.dispose();
     this.surfaceTraverse.dispose();
     this.surfaceDetails.dispose();
+    this.retiredRovers.dispose();
     this.terrain.dispose();
     this.atmosphere.dispose();
     this.celestial.dispose();
