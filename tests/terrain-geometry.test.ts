@@ -9,7 +9,6 @@ import {
 import { TERRAIN_WORKER_REVISION as CLIENT_REVISION } from "../app/planet/terrain/TerrainWorkerPool";
 import {
   coarserNeighbourEdgeMorphs,
-  lodTransitionVisible,
   neighbourBalanceAncestors,
   orbitalCoverageSubstrateVisible,
   sampleMorphedTerrainGrid,
@@ -18,6 +17,7 @@ import {
   terrainMaximumLod,
   terrainNodeNeedsRefinement,
   terrainTransitionProgress,
+  transitionAwareEdgeMorphs,
 } from "../app/planet/terrain/PlanetTerrain";
 import { faceUvToDirection, neighbourTile, parentTile, tileKeyToString } from "../app/planet/math";
 import { latLonElevationToCartesian } from "../app/planet/math";
@@ -208,17 +208,6 @@ describe("terrain worker geometry", () => {
     });
     expect(generated.revision).toBe(CLIENT_REVISION);
   });
-  it("uses complementary parent/child dither masks throughout an LOD transition", () => {
-    for (const transition of [0.01, 0.2, 0.5, 0.8, 0.99]) {
-      for (let sample = 0; sample < 1_000; sample += 1) {
-        const dither = (sample + 0.5) / 1_000;
-        const parent = lodTransitionVisible(dither, 1 - transition, false);
-        const child = lodTransitionVisible(dither, transition, true);
-        expect(Number(parent) + Number(child)).toBe(1);
-      }
-    }
-  });
-
   it("keeps a refined terrain node stable through small camera-motion error changes", () => {
     expect(terrainNodeNeedsRefinement(3.3, false)).toBe(false);
     expect(terrainNodeNeedsRefinement(3.3, true)).toBe(true);
@@ -284,6 +273,18 @@ describe("terrain worker geometry", () => {
     expect(coarserNeighbourEdgeMorphs(tile, new Set())).toEqual([0, 0, 0, 0]);
   });
 
+  it("welds asynchronously morphing same-LOD neighbours to the less-refined edge", () => {
+    const tile = { face: "px" as const, lod: 6, x: 31, y: 24 };
+    const east = neighbourBalanceAncestors(tile, "east").neighbour;
+    const visibleMorphs = new Map([
+      [tileKeyToString(tile), 0.8],
+      [tileKeyToString(east), 0.25],
+    ]);
+
+    expect(transitionAwareEdgeMorphs(tile, 0.8, visibleMorphs)).toEqual([0, 0.75, 0, 0]);
+    expect(transitionAwareEdgeMorphs(east, 0.25, visibleMorphs)[0]).toBe(0.75);
+  });
+
   it("configures morph-aware directional cast shadows without skirt occluders", () => {
     const material = createTerrainMaterial();
     const depth = createTerrainShadowMaterial();
@@ -335,13 +336,11 @@ describe("terrain worker geometry", () => {
     expect(material.vertexShader).toContain("edgeMorphBand");
     expect(material.vertexShader).toContain("normalMorphDelta");
     expect(depth.vertexShader).toContain("uEdgeMorph");
-    expect(depth.vertexShader).toContain("uTileOriginModulo");
     expect(material.vertexShader).not.toContain("boundaryMorph");
     expect(depth.fragmentShader).toContain("vSurfaceMask < 0.5");
-    expect(depth.fragmentShader).toContain("stableSurfaceDither(vStableMetres)");
-    expect(depth.fragmentShader).toContain("uFadeIn > 0.5");
-    expect(depth.uniforms.uFade.value).toBe(1);
-    expect(depth.uniforms.uFadeIn.value).toBe(1);
+    expect(material.fragmentShader).not.toContain("uFade");
+    expect(depth.fragmentShader).not.toContain("stableSurfaceDither");
+    expect(depth.fragmentShader).not.toContain("uFade");
     expect(coverage.name).toContain("stable orbital coverage substrate");
     expect(coverage.fragmentShader).toContain("orbitalAlbedo");
     expect(coverage.fragmentShader).toContain("illumination");

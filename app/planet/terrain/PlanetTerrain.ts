@@ -30,9 +30,7 @@ import { TerrainWorkerPool, type GeneratedTileGeometry } from "./TerrainWorkerPo
 type TileState = "idle" | "loading-data" | "queued" | "ready" | "failed";
 
 type TileRenderState = {
-  fade: number;
   morph: number;
-  fadeIn: boolean;
   edgeMorph?: readonly [west: number, east: number, north: number, south: number];
 };
 
@@ -159,11 +157,6 @@ export function sampleMorphedTerrainGrid(
   };
 }
 
-export function lodTransitionVisible(dither: number, fade: number, fadeIn: boolean) {
-  if (fade >= 0.999) return true;
-  return fadeIn ? dither <= fade : dither > 1 - fade;
-}
-
 const TERRAIN_LOD_MERGE_ERROR_RATIO = 0.75;
 
 /**
@@ -243,11 +236,29 @@ export function coarserNeighbourEdgeMorphs(
   tile: TileKey,
   visibleTileIds: ReadonlySet<string>,
 ): [west: number, east: number, north: number, south: number] {
+  const visibleMorphs = new Map([...visibleTileIds].map((id) => [id, 1]));
+  return transitionAwareEdgeMorphs(tile, 1, visibleMorphs);
+}
+
+/**
+ * Keeps an edge on the least-refined shape currently rendered on either side.
+ * Adjacent parent quartets finish worker generation at different times, so two
+ * same-LOD neighbours can otherwise traverse the same edge at different morph
+ * values and briefly expose their dark skirts between them.
+ */
+export function transitionAwareEdgeMorphs(
+  tile: TileKey,
+  tileMorph: number,
+  visibleMorphs: ReadonlyMap<string, number>,
+): [west: number, east: number, north: number, south: number] {
   return TILE_EDGES.map((edge) => {
     const { neighbour, ancestors } = neighbourBalanceAncestors(tile, edge);
-    if (visibleTileIds.has(tileKeyToString(neighbour))) return 0;
+    const neighbourMorph = visibleMorphs.get(tileKeyToString(neighbour));
+    if (neighbourMorph !== undefined) {
+      return 1 - Math.min(clamp(tileMorph, 0, 1), clamp(neighbourMorph, 0, 1));
+    }
     for (let index = ancestors.length - 1; index >= 0; index -= 1) {
-      if (visibleTileIds.has(tileKeyToString(ancestors[index]))) return 1;
+      if (visibleMorphs.has(tileKeyToString(ancestors[index]))) return 1;
     }
     return 0;
   }) as [number, number, number, number];
@@ -482,7 +493,7 @@ export class PlanetTerrain {
     if (!canSplit) {
       node.refined = false;
       node.childrenReadyAt = -1;
-      this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
+      this.addVisible(node, { morph: 1 });
       return;
     }
     node.refined = true;
@@ -505,7 +516,7 @@ export class PlanetTerrain {
     const allChildrenReady = children.every((child) => child.state === "ready");
     if (!allChildrenReady) {
       node.childrenReadyAt = -1;
-      this.addVisible(node, { fade: 1, morph: 1, fadeIn: false });
+      this.addVisible(node, { morph: 1 });
       return;
     }
 
@@ -519,11 +530,16 @@ export class PlanetTerrain {
       node.childrenReadyAt,
       this.stabilizeOrbitalTerrain,
     );
-    if (transition < 1) this.addVisible(node, { fade: 1 - transition, morph: 1, fadeIn: false });
     for (const child of childrenByPriority) {
       if (transition < 1) {
-        const childVisibility = this.visibility(child);
-        if (childVisibility.visible) this.addVisible(child, { fade: transition, morph: transition, fadeIn: true });
+        // The four child meshes at morph=0 reproduce the parent's triangles
+        // exactly, so they can replace it atomically and then deform smoothly
+        // to their detailed shape. Never dissolve overlapping LODs: parent and
+        // child fragments sit at different depths while morphing, which makes
+        // even complementary dither masks expose black pinholes and tile seams.
+        // Keeping the complete quartet visible also prevents a conservative
+        // child-frustum test from punching a hole along the parent's edge.
+        this.addVisible(child, { morph: transition });
       } else {
         this.visit(child, visibility.screenError);
       }
@@ -650,11 +666,9 @@ export class PlanetTerrain {
     mesh.frustumCulled = false;
     mesh.visible = false;
     mesh.userData.tileNode = node;
-    mesh.userData.renderState = { fade: 1, morph: 1, fadeIn: false } satisfies TileRenderState;
+    mesh.userData.renderState = { morph: 1 } satisfies TileRenderState;
     mesh.onBeforeRender = () => {
       const renderState = mesh.userData.renderState as TileRenderState;
-      this.material.uniforms.uFade.value = renderState.fade;
-      this.material.uniforms.uFadeIn.value = renderState.fadeIn ? 1 : 0;
       this.material.uniforms.uMorph.value = renderState.morph;
       this.material.uniforms.uEdgeMorph.value.fromArray(renderState.edgeMorph ?? [0, 0, 0, 0]);
       this.material.uniforms.uTileLod.value = node.key.lod;
@@ -675,13 +689,6 @@ export class PlanetTerrain {
       const renderState = mesh.userData.renderState as TileRenderState;
       this.shadowMaterial.uniforms.uMorph.value = renderState.morph;
       this.shadowMaterial.uniforms.uEdgeMorph.value.fromArray(renderState.edgeMorph ?? [0, 0, 0, 0]);
-      this.shadowMaterial.uniforms.uTileOriginModulo.value.set(
-        positiveModulo(node.center!.x, MATERIAL_PERIOD_M),
-        positiveModulo(node.center!.y, MATERIAL_PERIOD_M),
-        positiveModulo(node.center!.z, MATERIAL_PERIOD_M),
-      );
-      this.shadowMaterial.uniforms.uFade.value = renderState.fade;
-      this.shadowMaterial.uniforms.uFadeIn.value = renderState.fadeIn ? 1 : 0;
       this.shadowMaterial.uniformsNeedUpdate = true;
     };
     this.scene.add(mesh);
@@ -705,9 +712,8 @@ export class PlanetTerrain {
   }
 
   private addVisible(node: PlanetTileNode, renderState: TileRenderState) {
-    if (renderState.fade <= 0.001) return;
     if (!node.mesh || node.state !== "ready") {
-      if (node.parent) this.addVisible(node.parent, { fade: 1, morph: 1, fadeIn: false });
+      if (node.parent) this.addVisible(node.parent, { morph: 1 });
       return;
     }
     const wasVisible = this.visibleNodes.has(node);
@@ -719,7 +725,7 @@ export class PlanetTerrain {
       node.center!.z - this.cameraAbsolute.z,
     );
     const previousState = node.mesh.userData.renderState as TileRenderState | undefined;
-    node.mesh.userData.renderState = wasVisible && previousState && previousState.fade > renderState.fade
+    node.mesh.userData.renderState = wasVisible && previousState && previousState.morph > renderState.morph
       ? previousState
       : renderState;
     node.lastUsedFrame = this.frame;
@@ -732,11 +738,14 @@ export class PlanetTerrain {
   }
 
   private updateVisibleEdgeMorphs() {
-    const visibleTileIds = new Set([...this.visibleNodes].map((node) => node.id));
+    const visibleMorphs = new Map([...this.visibleNodes].map((node) => [
+      node.id,
+      (node.mesh?.userData.renderState as TileRenderState | undefined)?.morph ?? 1,
+    ]));
     for (const node of this.visibleNodes) {
       if (!node.mesh) continue;
       const renderState = node.mesh.userData.renderState as TileRenderState;
-      renderState.edgeMorph = coarserNeighbourEdgeMorphs(node.key, visibleTileIds);
+      renderState.edgeMorph = transitionAwareEdgeMorphs(node.key, renderState.morph, visibleMorphs);
     }
   }
 

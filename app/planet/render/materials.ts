@@ -13,8 +13,6 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
     uIceSurfaceNormal: { value: THREE.Texture };
     uIceSurfaceRoughness: { value: THREE.Texture };
     uTime: { value: number };
-    uFade: { value: number };
-    uFadeIn: { value: number };
     uMorph: { value: number };
     uEdgeMorph: { value: THREE.Vector4 };
     uTileLod: { value: number };
@@ -159,8 +157,6 @@ const terrainFragment = /* glsl */ `
   uniform sampler2D uIceSurfaceNormal;
   uniform sampler2D uIceSurfaceRoughness;
   uniform float uTime;
-  uniform float uFade;
-  uniform float uFadeIn;
   uniform float uTileLod;
   uniform float uFaceIndex;
   uniform float uDebugTileBoundaries;
@@ -383,10 +379,6 @@ const terrainFragment = /* glsl */ `
 
   void main() {
     float dither = stableSurfaceDither(vStableMetres);
-    if (uFade < 0.999) {
-      if (uFadeIn > 0.5 && dither > uFade) discard;
-      if (uFadeIn < 0.5 && dither <= 1.0 - uFade) discard;
-    }
 
     vec3 radial = normalize(vPlanetDirection);
     vec3 normal = normalize(vNormal);
@@ -640,8 +632,6 @@ export function createTerrainMaterial(): TerrainMaterial {
       uIceSurfaceNormal: { value: iceSurfaceNormal },
       uIceSurfaceRoughness: { value: iceSurfaceRoughness },
       uTime: { value: 0 },
-      uFade: { value: 1 },
-      uFadeIn: { value: 1 },
       uMorph: { value: 1 },
       uEdgeMorph: { value: new THREE.Vector4() },
       uTileLod: { value: 0 },
@@ -737,9 +727,7 @@ const terrainShadowVertex = /* glsl */ `
   attribute float surfaceMask;
   uniform float uMorph;
   uniform vec4 uEdgeMorph;
-  uniform vec3 uTileOriginModulo;
   varying float vSurfaceMask;
-  varying vec3 vStableMetres;
   void main() {
     const float edgeMorphBand = ${ (2 / 24).toFixed(12) };
     float westEdge = 1.0 - smoothstep(0.0, edgeMorphBand, tileUv.x);
@@ -752,35 +740,16 @@ const terrainShadowVertex = /* glsl */ `
     );
     vec3 morphed = position - morphDelta * max(1.0 - uMorph, stitchedEdgeMorph);
     vSurfaceMask = surfaceMask;
-    vStableMetres = uTileOriginModulo + morphed;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(morphed, 1.0);
   }
 `;
 
 const terrainShadowFragment = /* glsl */ `
   precision highp float;
-  uniform float uFade;
-  uniform float uFadeIn;
   varying float vSurfaceMask;
-  varying vec3 vStableMetres;
-
-  float hash31(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.yzx + 33.33);
-    return fract((p.x + p.y) * p.z);
-  }
-
-  float stableSurfaceDither(vec3 metres) {
-    return hash31(floor(mod(metres, 4096.0) * 50.0));
-  }
 
   void main() {
     if (vSurfaceMask < 0.5) discard;
-    if (uFade < 0.999) {
-      float dither = stableSurfaceDither(vStableMetres);
-      if (uFadeIn > 0.5 && dither > uFade) discard;
-      if (uFadeIn < 0.5 && dither <= 1.0 - uFade) discard;
-    }
     gl_FragColor = vec4(1.0);
   }
 `;
@@ -789,9 +758,6 @@ export type TerrainShadowMaterial = THREE.ShaderMaterial & {
   uniforms: {
     uMorph: { value: number };
     uEdgeMorph: { value: THREE.Vector4 };
-    uTileOriginModulo: { value: THREE.Vector3 };
-    uFade: { value: number };
-    uFadeIn: { value: number };
   };
 };
 
@@ -803,9 +769,6 @@ export function createTerrainShadowMaterial(): TerrainShadowMaterial {
     uniforms: {
       uMorph: { value: 1 },
       uEdgeMorph: { value: new THREE.Vector4() },
-      uTileOriginModulo: { value: new THREE.Vector3() },
-      uFade: { value: 1 },
-      uFadeIn: { value: 1 },
     },
     depthTest: true,
     depthWrite: true,
