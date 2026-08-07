@@ -10,6 +10,11 @@ import {
 } from "./constants";
 import { clamp, localEnuBasis } from "./math";
 import type { PlanetControlState } from "./PlanetControls";
+import {
+  SHIP_BOARD_DISTANCE_M,
+  SurfaceSpaceship,
+  type SpaceshipFlightInput,
+} from "./SurfaceSpaceship";
 import type { Vec3 } from "./types";
 import type { TraverseAudioEvent } from "../audio/BarsoomAudio";
 
@@ -41,6 +46,9 @@ const BOOT_SOLE_CLEARANCE_M = 0.025;
 export const MARS_JUMP_ANTICIPATION_DURATION_S = 0.22;
 const JUMP_LAUNCH_POSE_RELEASE_S = 0.3;
 const JUMP_LANDING_POSE_DURATION_S = 0.28;
+const SHIP_CAMERA_DEFAULT_DISTANCE_M = 24;
+const SHIP_CAMERA_MIN_DISTANCE_M = 10;
+const SHIP_CAMERA_MAX_DISTANCE_M = 140;
 
 type AnimationName = "idle" | "idle_neutral" | "jump_base" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
 
@@ -54,6 +62,8 @@ export type TraverseSurfaceSample = {
   normal: Vec3;
   lod?: number;
 };
+
+export type SurfaceTraverseMode = "spaceman" | "spaceship";
 
 export function randomMarsSurfaceDirection(random: () => number = Math.random): Vec3 {
   const y = clamp(random() * 2 - 1, -1, 1);
@@ -273,6 +283,7 @@ export function smoothCameraHeight(
 export class SurfaceTraverseController {
   private readonly root = new THREE.Group();
   private readonly localFill = new THREE.HemisphereLight(0xdce8ff, 0x40180d, 0.72);
+  private readonly spaceship: SurfaceSpaceship;
   private readonly direction = new THREE.Vector3(1, 0, 0);
   private readonly cameraAbsolute = new THREE.Vector3();
   private readonly desiredCameraAbsolute = new THREE.Vector3();
@@ -293,6 +304,10 @@ export class SurfaceTraverseController {
   private readonly scratch = new THREE.Vector3();
   private readonly cameraSurfaceDirection = new THREE.Vector3();
   private readonly relativeTarget = new THREE.Vector3();
+  private readonly shipAbsolute = new THREE.Vector3();
+  private readonly shipForward = new THREE.Vector3();
+  private readonly shipRight = new THREE.Vector3();
+  private readonly shipUp = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
   private readonly poseEuler = new THREE.Euler();
   private readonly poseQuaternion = new THREE.Quaternion();
@@ -339,6 +354,12 @@ export class SurfaceTraverseController {
   private entryStableSeconds = 0;
   private entryElapsedSeconds = 0;
   private entryPreviousGroundHeightM = Number.NaN;
+  private traverseMode: SurfaceTraverseMode = "spaceman";
+  private shipDistanceM: number | null = null;
+  private shipCanBoard = false;
+  private shipAimX = 0;
+  private shipAimY = 0;
+  private shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
   private disposed = false;
   active = false;
 
@@ -357,9 +378,11 @@ export class SurfaceTraverseController {
     this.localFill.name = "Astronaut suit fill";
     this.localFill.visible = false;
     scene.add(this.root, this.localFill);
+    this.spaceship = new SurfaceSpaceship(scene, terrainSurface, prefetch, onAssetError);
 
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("pointermove", this.onPointerMove);
+    canvas.addEventListener("pointerleave", this.onPointerLeave);
     canvas.addEventListener("pointerup", this.onPointerUp);
     canvas.addEventListener("pointercancel", this.onPointerUp);
     canvas.addEventListener("wheel", this.onWheel, { passive: false });
@@ -454,6 +477,12 @@ export class SurfaceTraverseController {
     this.entryStableSeconds = 0;
     this.entryElapsedSeconds = 0;
     this.entryPreviousGroundHeightM = Number.NaN;
+    this.traverseMode = "spaceman";
+    this.shipDistanceM = null;
+    this.shipCanBoard = false;
+    this.shipAimX = 0;
+    this.shipAimY = 0;
+    this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -461,6 +490,11 @@ export class SurfaceTraverseController {
     this.camera.fov = 50;
     this.camera.updateProjectionMatrix();
     this.groundHeightM = this.terrainSurface(this.direction).heightM;
+    this.setLocalBasis();
+    this.headingVector(this.headingRad, this.forward);
+    const spawnRight = surfaceCameraRight(this.forward, this.up);
+    this.right.set(spawnRight.x, spawnRight.y, spawnRight.z);
+    this.spaceship.spawnNear(this.direction, this.forward, this.right);
     this.prefetch(this.direction);
     this.canvas.focus({ preventScroll: true });
     this.playAnimation("idle");
@@ -471,6 +505,7 @@ export class SurfaceTraverseController {
     this.active = false;
     this.root.visible = false;
     this.localFill.visible = false;
+    this.spaceship.deactivate();
     this.keys.clear();
     this.mouseButtons.clear();
     this.autoMoveMode = "off";
@@ -484,6 +519,18 @@ export class SurfaceTraverseController {
 
   getHeadingRad() {
     return this.headingRad;
+  }
+
+  get mode(): SurfaceTraverseMode {
+    return this.traverseMode;
+  }
+
+  get spaceshipInteraction() {
+    return {
+      distanceM: this.shipDistanceM,
+      canBoard: this.shipCanBoard,
+      speedMps: this.traverseMode === "spaceship" ? this.spaceship.getSpeedMps() : 0,
+    };
   }
 
   get surfaceReady() {
@@ -748,9 +795,95 @@ export class SurfaceTraverseController {
     return 1;
   }
 
+  private boardSpaceship() {
+    if (this.traverseMode !== "spaceman" || !this.shipCanBoard) return;
+    this.traverseMode = "spaceship";
+    this.shipCanBoard = false;
+    this.shipDistanceM = 0;
+    this.shipAimX = 0;
+    this.shipAimY = 0;
+    this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
+    this.keys.clear();
+    this.mouseButtons.clear();
+    this.autoMoveMode = "off";
+    this.root.visible = false;
+    this.spaceship.board();
+    this.camera.fov = 58;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private updateSpaceship(delta: number): PlanetControlState {
+    const flightInput: SpaceshipFlightInput = {
+      throttle: Number(this.keys.has("KeyW") || this.keys.has("ArrowUp"))
+        - Number(this.keys.has("KeyS") || this.keys.has("ArrowDown")),
+      strafe: Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ")),
+      lift: Number(this.keys.has("Space"))
+        - Number(this.keys.has("ControlLeft") || this.keys.has("ControlRight")),
+      roll: Number(this.keys.has("KeyD") || this.keys.has("ArrowRight"))
+        - Number(this.keys.has("KeyA") || this.keys.has("ArrowLeft")),
+      boost: this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"),
+      aimX: this.shipAimX,
+      aimY: this.shipAimY,
+    };
+    this.spaceship.updateFlight(delta, flightInput);
+    this.spaceship.getAbsolute(this.shipAbsolute);
+    this.spaceship.getForward(this.shipForward);
+    this.spaceship.getRight(this.shipRight);
+    this.spaceship.getUp(this.shipUp);
+    this.direction.copy(this.shipAbsolute).normalize();
+    const surface = this.terrainSurface(this.direction);
+    this.groundHeightM = surface.heightM;
+
+    const cameraRiseM = 4.5 + this.shipCameraDistanceM * 0.14;
+    this.cameraAbsolute.copy(this.shipAbsolute)
+      .addScaledVector(this.shipForward, -this.shipCameraDistanceM)
+      .addScaledVector(this.shipUp, cameraRiseM);
+    this.cameraSurfaceDirection.copy(this.cameraAbsolute).normalize();
+    const cameraSurfaceHeightM = this.terrainSurface(this.cameraSurfaceDirection).heightM;
+    const minimumCameraRadiusM = MARS_REFERENCE_RADIUS_M + cameraSurfaceHeightM + CAMERA_COLLISION_CLEARANCE_M;
+    if (this.cameraAbsolute.length() < minimumCameraRadiusM) {
+      this.cameraAbsolute.copy(this.cameraSurfaceDirection).multiplyScalar(minimumCameraRadiusM);
+    }
+    this.cameraDirection.copy(this.cameraAbsolute).normalize();
+    const cameraAltitudeM = Math.max(
+      CAMERA_COLLISION_CLEARANCE_M,
+      this.cameraAbsolute.length() - MARS_REFERENCE_RADIUS_M - cameraSurfaceHeightM,
+    );
+    this.targetAbsolute.copy(this.shipAbsolute).addScaledVector(this.shipForward, 7);
+
+    this.root.visible = false;
+    this.camera.position.set(0, 0, 0);
+    this.camera.up.copy(this.shipUp);
+    this.relativeTarget.copy(this.targetAbsolute).sub(this.cameraAbsolute).normalize();
+    this.camera.lookAt(this.relativeTarget);
+    this.camera.near = 0.08;
+    this.camera.far = Math.max(
+      350_000,
+      Math.sqrt(2 * MARS_REFERENCE_RADIUS_M * (cameraAltitudeM + MARS_ATMOSPHERE_TOP_M)) * 3.2,
+      this.cameraAbsolute.length() + MARS_MOON_MAX_ORBIT_RADIUS_M + 50_000,
+    );
+    this.camera.updateProjectionMatrix();
+    this.camera.updateMatrixWorld(true);
+    this.spaceship.syncVisual(this.cameraAbsolute);
+
+    return {
+      cameraAbsolute: { x: this.cameraAbsolute.x, y: this.cameraAbsolute.y, z: this.cameraAbsolute.z },
+      cameraDirection: { x: this.cameraDirection.x, y: this.cameraDirection.y, z: this.cameraDirection.z },
+      focusDirection: { x: this.direction.x, y: this.direction.y, z: this.direction.z },
+      focusAbsolute: { x: this.shipAbsolute.x, y: this.shipAbsolute.y, z: this.shipAbsolute.z },
+      altitudeM: cameraAltitudeM,
+      desiredAltitudeM: cameraAltitudeM,
+      cameraDistanceM: this.shipCameraDistanceM,
+      nearM: this.camera.near,
+      farM: this.camera.far,
+    };
+  }
+
   update(deltaSeconds: number): PlanetControlState {
     const delta = clamp(deltaSeconds, 0, 0.05);
+    if (this.traverseMode === "spaceship") return this.updateSpaceship(delta);
     this.entryWheelLockSeconds = Math.max(0, this.entryWheelLockSeconds - delta);
+    this.spaceship.updateParkedPosition();
     this.setLocalBasis();
     const speedMps = this.jumpAnticipationSeconds > 0 ? 0 : this.updateMovement(delta);
     this.setLocalBasis();
@@ -789,6 +922,11 @@ export class SurfaceTraverseController {
       this.surfaceNormal,
       this.verticalOffsetM + BOOT_SOLE_CLEARANCE_M,
     );
+    this.shipDistanceM = this.spaceship.distanceTo(this.playerAbsolute);
+    this.shipCanBoard = this.entryReady &&
+      this.verticalOffsetM <= 0.001 &&
+      this.jumpAnticipationSeconds === 0 &&
+      this.shipDistanceM <= SHIP_BOARD_DISTANCE_M;
 
     this.headingVector(this.headingRad, this.forward);
     this.modelForward.copy(this.forward)
@@ -890,6 +1028,7 @@ export class SurfaceTraverseController {
     );
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
+    this.spaceship.syncVisual(this.cameraAbsolute);
 
     return {
       cameraAbsolute: { x: this.cameraAbsolute.x, y: this.cameraAbsolute.y, z: this.cameraAbsolute.z },
@@ -908,6 +1047,20 @@ export class SurfaceTraverseController {
     if (!this.active) return;
     const target = event.target;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
+    if (this.traverseMode === "spaceman" && event.code === "KeyE" && this.shipCanBoard && !event.repeat) {
+      event.preventDefault();
+      this.boardSpaceship();
+      return;
+    }
+    if (this.traverseMode === "spaceship") {
+      if ([
+        "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "Space",
+        "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
+        "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+      ].includes(event.code)) event.preventDefault();
+      this.keys.add(event.code);
+      return;
+    }
     if (event.code === "KeyR") {
       event.preventDefault();
       if (!event.repeat) this.autoMoveMode = nextWowAutoMoveMode(this.autoMoveMode);
@@ -950,6 +1103,8 @@ export class SurfaceTraverseController {
     this.keys.clear();
     this.mouseButtons.clear();
     this.pointerId = null;
+    this.shipAimX = 0;
+    this.shipAimY = 0;
   };
 
   private onContextMenu = (event: MouseEvent) => {
@@ -958,6 +1113,11 @@ export class SurfaceTraverseController {
 
   private onPointerDown = (event: PointerEvent) => {
     if (!this.active || (event.button !== 0 && event.button !== 2)) return;
+    if (this.traverseMode === "spaceship") {
+      event.preventDefault();
+      this.canvas.focus({ preventScroll: true });
+      return;
+    }
     event.preventDefault();
     this.mouseButtons.add(event.button);
     // A free-looked camera becomes the character's facing direction as soon
@@ -971,6 +1131,12 @@ export class SurfaceTraverseController {
   };
 
   private onPointerMove = (event: PointerEvent) => {
+    if (this.active && this.traverseMode === "spaceship") {
+      const bounds = this.canvas.getBoundingClientRect();
+      this.shipAimX = clamp((event.clientX - (bounds.left + bounds.width / 2)) / Math.max(1, bounds.width / 2), -1, 1);
+      this.shipAimY = clamp(((bounds.top + bounds.height / 2) - event.clientY) / Math.max(1, bounds.height / 2), -1, 1);
+      return;
+    }
     if (!this.active || this.pointerId !== event.pointerId) return;
     this.syncMouseButtons(event.buttons);
     if (this.mouseButtons.size === 0) return;
@@ -993,6 +1159,7 @@ export class SurfaceTraverseController {
   };
 
   private onPointerUp = (event: PointerEvent) => {
+    if (this.traverseMode === "spaceship") return;
     if (this.pointerId !== event.pointerId) return;
     this.syncMouseButtons(event.buttons);
     if (event.buttons === 0) {
@@ -1000,6 +1167,12 @@ export class SurfaceTraverseController {
       this.pointerId = null;
       this.mouseButtons.clear();
     }
+  };
+
+  private onPointerLeave = () => {
+    if (this.traverseMode !== "spaceship") return;
+    this.shipAimX = 0;
+    this.shipAimY = 0;
   };
 
   private syncMouseButtons(buttons: number) {
@@ -1012,6 +1185,15 @@ export class SurfaceTraverseController {
   private onWheel = (event: WheelEvent) => {
     if (!this.active) return;
     event.preventDefault();
+    if (this.traverseMode === "spaceship") {
+      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
+      this.shipCameraDistanceM = clamp(
+        this.shipCameraDistanceM * Math.exp(event.deltaY * modeScale * 0.0012),
+        SHIP_CAMERA_MIN_DISTANCE_M,
+        SHIP_CAMERA_MAX_DISTANCE_M,
+      );
+      return;
+    }
     if (this.entryWheelLockSeconds > 0) return;
     const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 480 : 1;
     this.cameraDistanceM = applyWowCameraZoom(this.cameraDistanceM, event.deltaY * modeScale);
@@ -1022,6 +1204,7 @@ export class SurfaceTraverseController {
     this.deactivate();
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    this.canvas.removeEventListener("pointerleave", this.onPointerLeave);
     this.canvas.removeEventListener("pointerup", this.onPointerUp);
     this.canvas.removeEventListener("pointercancel", this.onPointerUp);
     this.canvas.removeEventListener("wheel", this.onWheel);
@@ -1030,6 +1213,7 @@ export class SurfaceTraverseController {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.onBlur);
     this.mixer?.stopAllAction();
+    this.spaceship.dispose();
     this.model?.traverse((child) => {
       if (!(child instanceof THREE.Mesh)) return;
       child.geometry.dispose();

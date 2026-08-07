@@ -32,6 +32,22 @@
 | Random teleport | `~` | Chooses a new random surface location while remaining in traverse mode. |
 | Return to survey | `Escape` | The only way to leave spaceman mode. Returns to the maximum-altitude planetary view, centred above the same location. |
 
+## Surface spacecraft
+
+A flyable spacecraft is instantiated roughly 20 metres from the spaceman at every surface landing. Its movement always uses real elapsed time and is independent of the `MODEL RATE` setting.
+
+| Action | Input | Notes |
+| --- | --- | --- |
+| Board spacecraft | `E` | Approach within 5.5 m; the on-screen indicator changes to `BOARD SPACECRAFT` when in range. |
+| Point spacecraft | Move mouse | Pointer distance from the screen centre controls pitch and yaw. |
+| Thrust / reverse | `W` / `S` | Applies forward or reverse engine thrust. |
+| Boost | Hold `Shift` | Raises thrust for atmospheric climbs and long-distance flight. |
+| Roll | `A` / `D` | Rolls left or right. |
+| Strafe | `Q` / `E` | Applies lateral maneuvering thrust after boarding. |
+| Lift / descend | `Space` / `Ctrl` | Applies vertical maneuvering thrust. |
+| Change follow distance | Mouse wheel | Moves the third-person chase camera between 10 m and 140 m. |
+| Exit flight | `Escape` | Returns to planetary survey above the spacecraft's current Mars subpoint. |
+
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 
 Automated checks can read telemetry, place the camera at developer landmarks, and enable individual visual layers through the development API:

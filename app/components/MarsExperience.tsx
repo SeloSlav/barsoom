@@ -33,7 +33,8 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     textureMemoryMb: 0, geometryMemoryMb: 0, workerQueue: 0, terrainNodes: 6, horizonCulled: 0,
     depthStrategy: "logarithmic", surfaceShadows: false, shadowExtentM: 0,
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
-    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", surfaceReady: true,
+    frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", traverseMode: "spaceman", surfaceReady: true,
+    shipDistanceM: null, shipCanBoard: false, shipSpeedMps: 0,
   };
 }
 
@@ -249,11 +250,13 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [observedBody, telemetry.simulationUtc]);
   const surfaceMode = !orbitalMode && telemetry.controlMode === "surface";
   const surfaceSettling = surfaceMode && !telemetry.surfaceReady;
+  const spaceshipMode = surfaceMode && telemetry.traverseMode === "spaceship";
+  const shipIndicatorVisible = surfaceMode && !spaceshipMode && telemetry.shipDistanceM !== null && telemetry.shipDistanceM <= 36;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
 
   return (
-    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${orbitalMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
-      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={surfaceMode ? "Third-person astronaut traverse on Mars" : orbitalMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features, retired rover sites, moons, and active orbiters; then click one to select it."} />
+    <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${spaceshipMode ? " ship-flight" : ""}${orbitalMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
+      <canvas ref={canvasRef} className="mars-canvas" tabIndex={0} aria-label={spaceshipMode ? "Third-person free-flight spacecraft over Mars" : surfaceMode ? "Third-person astronaut traverse on Mars" : orbitalMode ? `Locked close-up rendering of ${observedBody}` : "Interactive three-dimensional rendering of Mars. Hover named features, retired rover sites, moons, and active orbiters; then click one to select it."} />
       <div className="hud-vignette" aria-hidden="true" />
       <div className="instrument-grid" aria-hidden="true" />
       {surfaceSettling && <div className="surface-entry-screen" role="status" aria-live="polite">
@@ -261,10 +264,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <span>RESOLVING LOCAL FIELD</span>
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
-      {surfaceMode && <aside className="surface-exit-hint" aria-label="Spaceman mode remains active at every zoom level. Press Escape to exit.">
-        <span>SPACEMAN MODE LOCKED</span>
+      {surfaceMode && <aside className="surface-exit-hint" aria-label={`${spaceshipMode ? "Spacecraft flight" : "Spaceman"} mode remains active. Press Escape to exit.`}>
+        <span>{spaceshipMode ? "SPACECRAFT FLIGHT" : "SPACEMAN MODE LOCKED"}</span>
         <strong><kbd>ESC</kbd> TO EXIT</strong>
       </aside>}
+      {shipIndicatorVisible && <aside className={`ship-board-indicator${telemetry.shipCanBoard ? " ready" : ""}`} aria-live={telemetry.shipCanBoard ? "polite" : "off"}>
+        <span><i aria-hidden="true" /> SPACECRAFT {formatDistance(telemetry.shipDistanceM ?? 0)}</span>
+        <strong>{telemetry.shipCanBoard ? <><kbd>E</kbd> BOARD SPACECRAFT</> : "APPROACH TO BOARD"}</strong>
+      </aside>}
+      {spaceshipMode && <div className="ship-flight-reticle" aria-hidden="true"><i /><span /></div>}
       <header className="mission-header">
         <div className="mission-identity">
           <div className="brand-lockup" ref={bodyMenuRef}>
@@ -300,7 +308,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               </li>)}
             </ul>}
           </div>
-          <span className="mission-mode"><i /> {orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} APERTURE / ORBITAL TRACK LOCKED` : `${surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED`}</span>
+          <span className="mission-mode"><i /> {orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} APERTURE / ORBITAL TRACK LOCKED` : spaceshipMode ? "LOCAL SPACECRAFT / REAL-TIME FLIGHT" : `${surfaceMode ? "LOCAL OBSERVER SOLUTION" : "PLANETARY APERTURE"} / PHASE LOCKED`}</span>
         </div>
         <div className="simulation-clock">
           <span>SOURCE EPOCH / UTC</span>
@@ -375,7 +383,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="coordinate-grid">
           <div><span>SOLVED LATITUDE</span><strong>{formatCoordinate(telemetry.latitudeDeg, "N", "S")}</strong></div>
           <div><span>SOLVED LONGITUDE</span><strong>{formatCoordinate(telemetry.longitudeDeg, "E", "W")}</strong></div>
-          <div><span>FOCAL HEIGHT / AGL</span><strong>{formatDistance(telemetry.altitudeM)}</strong></div>
+          <div><span>{spaceshipMode ? "FLIGHT HEIGHT / AGL" : "FOCAL HEIGHT / AGL"}</span><strong>{formatDistance(telemetry.altitudeM)}</strong></div>
           <div><span>SOLVED DATUM OFFSET</span><strong>{telemetry.elevationM >= 0 ? "+" : ""}{formatDistance(telemetry.elevationM)}</strong></div>
         </div>
         <div className="ground-span"><span>RECONSTRUCTED FIELD</span><b>{formatDistance(telemetry.groundWidthM)}</b></div>
@@ -468,7 +476,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       {helpVisible && <aside className="help-panel" aria-label="Instrument controls and field guide">
         <button type="button" onClick={() => setHelpVisible(false)} aria-label="Close instrument guide">×</button>
         <p className="panel-index">FIELD MANUAL / QSI–04</p>
-        <p className="eyebrow">{orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} TRACK` : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
+        <p className="eyebrow">{orbitalMode ? `${moonMode ? "SATELLITE" : "SPACECRAFT"} TRACK` : spaceshipMode ? "SPACECRAFT FLIGHT CONTROLS" : surfaceMode ? "LOCAL OBSERVER CONTROLS" : "APERTURE CONTROLS"}</p>
         {orbitalMode ? <div className="instrument-principle">
           <strong>{targetShortName(observedBody)} TRACK LOCKED.</strong>
           <p>The aperture follows {observedBody} on the simulation clock while retaining direct camera control. {moonMode ? "The moon remains at its physical size and Mars can occult it." : "The official model is shown only in close inspection, at its published deployed scale; the globe highlight remains screen-readable without enlarging the spacecraft."}</p>
@@ -477,15 +485,20 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
           <p>CAUCHY combines entanglement-enhanced interferometry across heliocentric receivers with geodetic phase priors to solve the outgoing Martian light field. Zoom changes the inverse-model focal volume; it does not move the telescope. Source epoch already includes photon time-of-flight.</p>
         </div>}
         {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
-          <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
-          <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². Spaceman mode stays locked to the figure at every wheel-zoom distance and exits only when you press <kbd>Esc</kbd>.</p>
+          {spaceshipMode ? <>
+            <dl><div><dt>Point spacecraft</dt><dd>Move mouse</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Boost</dt><dd>Hold Shift</dd></div><div><dt>Roll</dt><dd>A / D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Lift / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Follow distance</dt><dd>Mouse wheel</dd></div><div><dt>Exit flight</dt><dd>Escape</dd></div></dl>
+            <p>The spacecraft flight model advances on real frame time, independently of the selected orbital simulation rate. Point anywhere, apply thrust, and fly continuously from the terrain into space.</p>
+          </> : <>
+            <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Board spacecraft</dt><dd>Approach + E</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
+            <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². A spacecraft is instantiated nearby at every landing site.</p>
+          </>}
         </> : <>
           <dl><div><dt>Named landmark</dt><dd>Hover + click</dd></div><div><dt>Retired rover</dt><dd>Cyan beacon + click</dd></div><div><dt>Instantiate observer</dt><dd>~</dd></div><div><dt>Rotate solved field</dt><dd>Left / middle drag</dd></div><div><dt>Translate aperture</dt><dd>Right-mouse drag</dd></div><div><dt>Change focal volume</dt><dd>Mouse wheel</dd></div><div><dt>Phase-lock other terrain</dt><dd>Left click</dd></div><div><dt>Release phase lock</dt><dd>Right click</dd></div><div><dt>Tile residuals</dt><dd>F4</dd></div></dl>
           <p>Move the pointer over significant terrain or a cyan retired-rover beacon, then click to lock the exact visit point. Choose <strong>Instantiate here</strong> in the confirmation card—or press <kbd>~</kbd>—to enter the surface. Unnamed terrain uses the same phase-lock flow.</p>
         </>)}
       </aside>}
       <SovaTutorial libraryVisible={tutorialLibraryVisible} onCloseLibrary={() => setTutorialLibraryVisible(false)} />
-      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {orbitalMode ? `${targetShortName(observedBody)} EPHEMERIS TRACK LOCKED` : surfaceMode ? "SPACEMAN TRACK LOCKED · ESC TO EXIT" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
+      <footer className="mission-footer"><span>SPECTRAL ALBEDO · RELIEF PHASE / OBSERVATION PRIORS</span><span className="footer-center"><i /> {orbitalMode ? `${targetShortName(observedBody)} EPHEMERIS TRACK LOCKED` : spaceshipMode ? `SPACECRAFT ${formatDistance(telemetry.shipSpeedMps)}/s · REAL-TIME FLIGHT` : surfaceMode ? "SPACEMAN TRACK LOCKED · ESC TO EXIT" : "PHOTONIC BASELINE COHERENT"}</span><span>RETARDED FIELD RECONSTRUCTION</span></footer>
       {error && <div className="render-error" role="alert">{error}</div>}
     </main>
   );

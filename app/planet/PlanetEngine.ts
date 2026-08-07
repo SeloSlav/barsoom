@@ -664,6 +664,7 @@ export class PlanetEngine {
   private emitTelemetry(simulationUtc: Date, terrainStats: TerrainFrameStats) {
     const focusCoordinates = cartesianToLatLonElevation(this.controlState.focusDirection, 1);
     const surface = this.terrain.sampleSurface(this.controlState.focusDirection);
+    const spaceshipInteraction = this.surfaceTraverse.spaceshipInteraction;
     const groundWidth = Math.max(
       0.01,
       2 * Math.max(this.controlState.cameraDistanceM, 0.1) *
@@ -698,7 +699,15 @@ export class PlanetEngine {
       fps: 1000 / Math.max(0.01, this.smoothedFrameMs),
       simulationUtc: simulationUtc.toISOString(),
       controlMode: this.surfaceTraverse.active ? "surface" : "survey",
+      traverseMode: this.surfaceTraverse.mode,
       surfaceReady: this.surfaceTraverse.surfaceReady,
+      shipDistanceM: this.surfaceTraverse.active
+        ? spaceshipInteraction.distanceM
+        : null,
+      shipCanBoard: this.surfaceTraverse.active && spaceshipInteraction.canBoard,
+      shipSpeedMps: this.surfaceTraverse.active
+        ? spaceshipInteraction.speedMps
+        : 0,
     };
     this.onTelemetry(this.telemetry);
   }

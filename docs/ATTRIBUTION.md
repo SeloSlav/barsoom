@@ -34,6 +34,18 @@ The surface-traverse character is the rigged and animated **Astronaut** by Quate
 
 The included humanoid rig supplies the idle, walk and run animation clips used by the third-person controller.
 
+## Surface spacecraft
+
+The flyable surface spacecraft uses the matching **Spaceship** model from Quaternius's **Ultimate Space Kit**.
+
+- Included asset: `public/models/surface-spaceship.glb`
+- Creator: Quaternius
+- Pack: Ultimate Space Kit (March 2023)
+- License: Creative Commons Zero 1.0 Universal (CC0; attribution not required)
+- Official source: https://quaternius.com/packs/ultimatespacekit.html
+- Public GLTF bundle: https://poly.pizza/bundle/Ultimate-Space-Kit-YWh743lqGX
+- Adaptation: selected from the pack's spaceship variants, renamed for stable local loading, normalized to a 9.2 m flight length at runtime, and augmented with generated exhaust and trail effects
+
 ## Retired Mars rovers
 
 The surface heritage sites use two lightweight static rover assets. Both are loaded only when the observer reaches a nearby, terrain-resolved surface view; the globe uses highlight beacons without downloading or drawing the models.

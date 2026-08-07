@@ -59,7 +59,11 @@ export type PlanetTelemetry = {
   fps: number;
   simulationUtc: string;
   controlMode: "survey" | "surface";
+  traverseMode: "spaceman" | "spaceship";
   surfaceReady: boolean;
+  shipDistanceM: number | null;
+  shipCanBoard: boolean;
+  shipSpeedMps: number;
 };
 
 export type DebugFlags = {
