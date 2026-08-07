@@ -152,6 +152,27 @@ export function wowMouseAutoRun(leftMouseHeld: boolean, rightMouseHeld: boolean)
   return leftMouseHeld && rightMouseHeld;
 }
 
+export function wowStrafeInput(leftHeld: boolean, rightHeld: boolean) {
+  return Number(rightHeld) - Number(leftHeld);
+}
+
+/**
+ * Three.js cameras look down local -Z, so their screen-right axis is forward
+ * cross up. Using up cross forward mirrors Q/E relative to the player's view.
+ */
+export function surfaceCameraRight(forward: Vec3, up: Vec3): Vec3 {
+  const right = {
+    x: forward.y * up.z - forward.z * up.y,
+    y: forward.z * up.x - forward.x * up.z,
+    z: forward.x * up.y - forward.y * up.x,
+  };
+  const length = Math.hypot(right.x, right.y, right.z);
+  if (!Number.isFinite(length) || length <= Number.EPSILON) {
+    throw new RangeError("Surface camera forward and up axes must define a right direction.");
+  }
+  return { x: right.x / length, y: right.y / length, z: right.z / length };
+}
+
 export function isWowAutoRunKey(code: string) {
   return code === "NumLock" || code === "KeyR";
 }
@@ -500,7 +521,7 @@ export class SurfaceTraverseController {
     let forwardInput = Number(this.autoMoveMode !== "off" || this.keys.has("KeyW") || this.keys.has("ArrowUp"))
       - Number(this.keys.has("KeyS") || this.keys.has("ArrowDown"));
     if (wowMouseAutoRun(this.mouseButtons.has(0), rightMouse)) forwardInput += 1;
-    let strafeInput = Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ"));
+    let strafeInput = wowStrafeInput(this.keys.has("KeyQ"), this.keys.has("KeyE"));
     if (rightMouse) strafeInput += Number(turnRight) - Number(turnLeft);
     if (forwardInput === 0 && strafeInput === 0) return 0;
 
@@ -508,7 +529,8 @@ export class SurfaceTraverseController {
     forwardInput /= Math.max(1, inputLength);
     strafeInput /= Math.max(1, inputLength);
     this.headingVector(this.headingRad, this.forward);
-    this.right.crossVectors(this.up, this.forward).normalize();
+    const screenRight = surfaceCameraRight(this.forward, this.up);
+    this.right.set(screenRight.x, screenRight.y, screenRight.z);
     this.move.copy(this.forward).multiplyScalar(forwardInput).addScaledVector(this.right, strafeInput).normalize();
 
     const manualRun = this.autoMoveMode === "off" && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"));

@@ -17,8 +17,10 @@ import {
   randomMarsSurfaceDirection,
   rebaseCameraAnchorForTerrainChange,
   smoothCameraHeight,
+  surfaceCameraRight,
   wowCameraOrbitDistances,
   wowMouseAutoRun,
+  wowStrafeInput,
 } from "../app/planet/SurfaceTraverseController";
 
 describe("surface traverse physics", () => {
@@ -106,6 +108,19 @@ describe("surface traverse physics", () => {
     expect(wowMouseAutoRun(true, true)).toBe(true);
     expect(wowMouseAutoRun(true, false)).toBe(false);
     expect(wowMouseAutoRun(false, true)).toBe(false);
+  });
+
+  it("keeps Q on screen-left and E on screen-right", () => {
+    expect(wowStrafeInput(true, false)).toBe(-1);
+    expect(wowStrafeInput(false, true)).toBe(1);
+    expect(wowStrafeInput(false, false)).toBe(0);
+
+    // A Three.js camera looking along +Z has screen-right along -X because
+    // the camera's authored forward axis is local -Z.
+    expect(surfaceCameraRight(
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: 1, z: 0 },
+    )).toEqual({ x: -1, y: 0, z: 0 });
   });
 
   it("supports WoW autorun bindings", () => {
