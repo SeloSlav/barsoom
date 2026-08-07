@@ -197,10 +197,10 @@ export function terrainTransitionProgress(
 }
 
 const MARS_TERRAIN_OCCLUSION_RADIUS_M = MARS_REFERENCE_RADIUS_M - 9_000;
-const ORBITAL_COVERAGE_MIN_ALTITUDE_M = 180_000;
+const TERRAIN_COVERAGE_MIN_ALTITUDE_M = 0;
 
 export function orbitalCoverageSubstrateVisible(cameraAltitudeM: number) {
-  return cameraAltitudeM >= ORBITAL_COVERAGE_MIN_ALTITUDE_M;
+  return cameraAltitudeM >= TERRAIN_COVERAGE_MIN_ALTITUDE_M;
 }
 
 /**
@@ -365,7 +365,9 @@ export class PlanetTerrain {
     this.coverageMesh.name = "Mars stable orbital coverage substrate";
     this.coverageMesh.frustumCulled = false;
     // Draw after every opaque terrain tile so its depth test naturally limits
-    // the substrate to genuine coverage voids.
+    // the substrate to genuine coverage voids. Keep it available at surface
+    // flight altitudes too, where streamed LOD handoffs would otherwise expose
+    // the black scene background through their transient dither mask.
     this.coverageMesh.renderOrder = 10_000;
     this.coverageMesh.visible = false;
     this.scene.add(this.coverageMesh);

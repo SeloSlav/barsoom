@@ -363,8 +363,10 @@ describe("terrain worker geometry", () => {
     coverage.dispose();
   });
 
-  it("limits the stable coverage substrate to orbital imagery distances", () => {
-    expect(orbitalCoverageSubstrateVisible(179_999)).toBe(false);
+  it("keeps the stable coverage substrate available from surface flight through orbit", () => {
+    expect(orbitalCoverageSubstrateVisible(-0.001)).toBe(false);
+    expect(orbitalCoverageSubstrateVisible(0)).toBe(true);
+    expect(orbitalCoverageSubstrateVisible(49)).toBe(true);
     expect(orbitalCoverageSubstrateVisible(180_000)).toBe(true);
     expect(orbitalCoverageSubstrateVisible(10_000_000)).toBe(true);
   });
