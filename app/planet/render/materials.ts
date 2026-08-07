@@ -872,7 +872,18 @@ const atmosphereFragment = /* glsl */ `
     float rayStart = max(atmosphereHit.x, 0.0);
     float rayEnd = atmosphereHit.y;
     vec2 groundHit = raySphere(cameraFromCenter, viewRay, PLANET_RADIUS);
-    if (groundHit.x > 0.0) rayEnd = min(rayEnd, groundHit.x);
+    if (groundHit.x > 0.0) {
+      rayEnd = min(rayEnd, groundHit.x);
+    } else if (cameraOutside) {
+      // At the geometric limb, a ray that misses the ground suddenly sees the
+      // far half of the atmosphere as well as the near half. Bringing that
+      // contribution in gradually avoids a doubled, hard-edged horizon band.
+      float closestDistance = max(rayStart, -dot(cameraFromCenter, viewRay));
+      vec3 closestFromCenter = cameraFromCenter + viewRay * closestDistance;
+      float tangentAltitude = max(0.0, length(closestFromCenter) - PLANET_RADIUS);
+      float horizonFeather = smoothstep(0.0, 28000.0, tangentAltitude);
+      rayEnd = mix(min(rayEnd, closestDistance), rayEnd, horizonFeather);
+    }
     if (rayEnd <= rayStart) discard;
 
     vec3 betaRayleigh = vec3(${ATMOSPHERE_CONFIG.rayleigh.join(",")}) * ${ATMOSPHERE_CONFIG.density.toFixed(3)};
