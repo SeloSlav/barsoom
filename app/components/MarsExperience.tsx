@@ -11,6 +11,7 @@ import {
   type ObservedBody,
 } from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
+import { SIMULATION_RATES, type SimulationRate } from "../planet/simulationClock";
 import type { PlanetTelemetry } from "../planet/types";
 import { SovaTutorial } from "./SovaTutorial";
 
@@ -125,6 +126,7 @@ async function copyTextToClipboard(text: string) {
 export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodyMenuRef = useRef<HTMLDivElement>(null);
+  const rateMenuRef = useRef<HTMLDivElement>(null);
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
@@ -137,6 +139,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
+  const [simulationRate, setSimulationRate] = useState<SimulationRate>(60);
+  const [rateMenuVisible, setRateMenuVisible] = useState(false);
   const shareStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -185,12 +189,16 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [initialSimulationUtc]);
 
   useEffect(() => {
-    if (!bodyMenuVisible) return;
+    if (!bodyMenuVisible && !rateMenuVisible) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!bodyMenuRef.current?.contains(event.target as Node)) setBodyMenuVisible(false);
+      if (!rateMenuRef.current?.contains(event.target as Node)) setRateMenuVisible(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setBodyMenuVisible(false);
+      if (event.key === "Escape") {
+        setBodyMenuVisible(false);
+        setRateMenuVisible(false);
+      }
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
@@ -198,11 +206,12 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [bodyMenuVisible]);
+  }, [bodyMenuVisible, rateMenuVisible]);
 
   const selectObservedBody = (body: ObservedBody) => {
     setObservedBody(body);
     setBodyMenuVisible(false);
+    setRateMenuVisible(false);
     setHelpVisible(false);
     setTutorialLibraryVisible(false);
     setObserverAction(null);
@@ -210,6 +219,13 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     setLandmarkMarkers([]);
     setOrbitalMarkers([]);
     window.__BARSOOM__?.focusBody(body);
+    canvasRef.current?.focus();
+  };
+
+  const selectSimulationRate = (rate: SimulationRate) => {
+    setSimulationRate(rate);
+    setRateMenuVisible(false);
+    window.__BARSOOM__?.setSimulationRate(rate);
     canvasRef.current?.focus();
   };
 
@@ -257,7 +273,10 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               <button
                 className="wordmark-trigger"
                 type="button"
-                onClick={() => setBodyMenuVisible((visible) => !visible)}
+                onClick={() => {
+                  setRateMenuVisible(false);
+                  setBodyMenuVisible((visible) => !visible);
+                }}
                 aria-expanded={bodyMenuVisible}
                 aria-haspopup="listbox"
                 aria-controls="observation-target-menu"
@@ -286,7 +305,33 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <div className="simulation-clock">
           <span>SOURCE EPOCH / UTC</span>
           <strong>{simulationLabel}</strong>
-          <small>CAUSAL DELAY EMBEDDED · MODEL RATE 60×</small>
+          <div className="simulation-clock-meta">
+            <small>CAUSAL DELAY EMBEDDED ·</small>
+            <div className="simulation-rate" ref={rateMenuRef}>
+              <button
+                className="simulation-rate-trigger"
+                type="button"
+                onClick={() => {
+                  setBodyMenuVisible(false);
+                  setRateMenuVisible((visible) => !visible);
+                }}
+                aria-expanded={rateMenuVisible}
+                aria-haspopup="listbox"
+                aria-controls="simulation-rate-menu"
+                title="Select orbital simulation rate"
+              >MODEL RATE <b>{simulationRate}×</b><i aria-hidden="true" /></button>
+              {rateMenuVisible && <ul id="simulation-rate-menu" className="simulation-rate-menu" role="listbox" aria-label="Select simulation rate">
+                {SIMULATION_RATES.map((rate) => <li key={rate}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={rate === simulationRate}
+                    onClick={() => selectSimulationRate(rate)}
+                  ><span>{rate}×</span><b>{rate === 60 ? "SURVEY" : rate === 6 ? "OBSERVE" : "REAL TIME"}</b></button>
+                </li>)}
+              </ul>}
+            </div>
+          </div>
         </div>
         <div className="header-actions">
           <span className="array-state"><i /> ARRAY 07 / COHERENT</span>

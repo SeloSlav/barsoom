@@ -12,6 +12,7 @@
 | Toggle tile boundaries | `F4` | Draws cube-sphere tile edges. |
 | Toggle help | `H` | Opens or closes the control reference. |
 | Toggle audio | `AUDIO ON/OFF` button | Enables or mutes the ambient score, wind, instrument sonification and astronaut movement sounds. The preference persists in the browser. |
+| Select simulation rate | `MODEL RATE` menu | Changes moon and spacecraft propagation between 60× survey speed, 6× observation speed, and 1× real time without jumping the current simulation epoch. |
 | Manage tutorials | `TUTORIALS` button | Opens the SOVA briefing library. Each tutorial can be played independently; **Reset & restart** clears session-only skipped/heard state and restarts Briefing 01. |
 
 ## Third-person surface traverse
@@ -43,6 +44,7 @@ window.__BARSOOM__.querySurface(latitudeDeg, longitudeDeg)
 window.__BARSOOM__.setTerminator(altitudeM)
 window.__BARSOOM__.setNightSide(altitudeM)
 window.__BARSOOM__.setSimulationUtc("2032-04-17T05:23:11.000Z", 0)
+window.__BARSOOM__.setSimulationRate(6)
 window.__BARSOOM__.getState()
 window.__BARSOOM__.teleportRandomSurface()
 window.__BARSOOM__.exitSurfaceTraverse()

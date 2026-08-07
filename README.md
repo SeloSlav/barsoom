@@ -38,6 +38,7 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 - Bounded single-scattering integration with Rayleigh and dust/Mie density profiles, view/sun optical depth, transmittance, planetary shadow, a thin limb, horizon haze, and terrain aerial perspective.
 - 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric planet vectors transformed into the IAU Mars body frame.
 - Clickable moving highlights for Phobos, Deimos, Mars Odyssey, MRO, and TGO, with Mars occlusion, dropdown fallback, target-lock cameras, and current orbital telemetry.
+- Continuous 60×, 6×, and 1× model-rate selection, plus a wider Deimos lock framing that preserves Mars in the composition.
 - Optimized official spacecraft models lazy-loaded one at a time only during close inspection, while the globe view uses low-cost orbit tracks and DOM highlights.
 - Dedicated middle-orbit, right-pan, left-select, cursor-wheel zoom controls and a live orbital HUD.
 

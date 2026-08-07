@@ -13,6 +13,11 @@ import {
 import { findMarsLandmarkAtDirection, landmarkDirection, MARS_LANDMARKS, type MarsLandmark } from "./landmarks";
 import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, nextAdaptiveResolutionScale, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
+import {
+  DEFAULT_ORBITAL_STANDOFF_RADII,
+  initialOrbitalStandoffRadii,
+  MAX_ORBITAL_STANDOFF_RADII,
+} from "./orbitalCamera";
 import { AtmosphereRenderer } from "./render/AtmosphereRenderer";
 import { CelestialRenderer } from "./render/CelestialRenderer";
 import { LocalLightingPhaseLock } from "./render/LocalLightingPhaseLock";
@@ -21,6 +26,7 @@ import { OrbiterRenderer } from "./render/OrbiterRenderer";
 import { RetiredRoverRenderer } from "./render/RetiredRoverRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
+import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
@@ -67,6 +73,7 @@ export type PlanetEngineApi = {
   setNightSide: (altitudeM?: number) => void;
   setTerminator: (altitudeM?: number) => void;
   setSimulationUtc: (utcIso: string, rate?: number) => void;
+  setSimulationRate: (rate: number) => void;
   instantiateObserver: () => void;
   instantiateObserverAt: (latitudeDeg: number, longitudeDeg: number, headingRad?: number) => void;
   teleportRandomSurface: () => void;
@@ -82,8 +89,6 @@ declare global {
     __BARSOOM__?: PlanetEngineApi;
   }
 }
-
-const MOON_CAMERA_STANDOFF_RADII = 3.1;
 
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
@@ -158,7 +163,7 @@ export class PlanetEngine {
   private moonOrbitPitchRad = 0;
   private moonPanX = 0;
   private moonPanY = 0;
-  private moonStandoffRadii = MOON_CAMERA_STANDOFF_RADII;
+  private moonStandoffRadii = DEFAULT_ORBITAL_STANDOFF_RADII;
   private moonDrag: { id: number; button: number; lastX: number; lastY: number } | null = null;
   private telemetry: PlanetTelemetry | null = null;
   private debug: DebugFlags = {
@@ -379,13 +384,14 @@ export class PlanetEngine {
       setSimulationUtc: (utcIso, rate = this.simulationRate) => {
         const epoch = new Date(utcIso);
         if (!Number.isFinite(epoch.getTime())) throw new RangeError(`Invalid simulation UTC: ${utcIso}`);
-        if (!Number.isFinite(rate)) throw new RangeError(`Invalid simulation rate: ${rate}`);
+        if (!Number.isFinite(rate) || rate < 0) throw new RangeError(`Invalid simulation rate: ${rate}`);
         this.simulationStartUtc = epoch;
         this.simulationStartPerformance = performance.now();
         this.simulationRate = rate;
         this.skyState = calculateMarsSky(epoch);
         this.localLightingPhaseLock.reset();
       },
+      setSimulationRate: (rate) => this.setSimulationRate(rate),
       instantiateObserver: () => {
         if (!this.surfaceTraverse.active && this.selectionDirection) {
           void this.enterSurfaceTraverse(this.selectionDirection, this.selectionHeadingRad);
@@ -414,6 +420,21 @@ export class PlanetEngine {
     this.audio.setMuted(muted);
   }
 
+  private setSimulationRate(rate: number) {
+    const now = performance.now();
+    const rebased = rebaseSimulationClock(
+      this.simulationStartUtc.getTime(),
+      this.simulationStartPerformance,
+      this.simulationRate,
+      now,
+      rate,
+    );
+    this.simulationStartUtc = new Date(rebased.simulationStartUtcMs);
+    this.simulationStartPerformance = rebased.simulationStartPerformance;
+    this.simulationRate = rebased.simulationRate;
+    this.skyState = calculateMarsSky(this.simulationStartUtc);
+  }
+
   private focusBody(body: ObservedBody) {
     this.observedBody = body;
     this.orbiters.select(isMarsOrbiterName(body) ? body : null);
@@ -429,7 +450,7 @@ export class PlanetEngine {
     this.moonOrbitPitchRad = 0;
     this.moonPanX = 0;
     this.moonPanY = 0;
-    this.moonStandoffRadii = MOON_CAMERA_STANDOFF_RADII;
+    this.moonStandoffRadii = initialOrbitalStandoffRadii(body);
   }
 
   private updateOrbitalObservation(body: Exclude<ObservedBody, "Mars">): PlanetControlState {
@@ -507,9 +528,12 @@ export class PlanetEngine {
     const marsControlState = this.surfaceTraverse.active
       ? this.surfaceTraverse.update(deltaSeconds)
       : this.controls.update(deltaSeconds);
-    const simulationUtc = new Date(
-      this.simulationStartUtc.getTime() + (time - this.simulationStartPerformance) * this.simulationRate,
-    );
+    const simulationUtc = new Date(simulationUtcMsAt(
+      this.simulationStartUtc.getTime(),
+      this.simulationStartPerformance,
+      this.simulationRate,
+      time,
+    ));
     // Keep the accelerated ephemeris continuous in orbit. Close to the surface
     // the reconstructed field is phase-locked instead: rotating a directional
     // shadow projection at 60x makes an otherwise stationary ground shimmer.
@@ -633,7 +657,7 @@ export class PlanetEngine {
     this.moonStandoffRadii = clamp(
       this.moonStandoffRadii * Math.exp(event.deltaY * modeScale * 0.0012),
       1.8,
-      12,
+      MAX_ORBITAL_STANDOFF_RADII,
     );
   };
 
