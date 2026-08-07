@@ -40,13 +40,17 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | --- | --- | --- |
 | Board spacecraft | `E` | Approach within 5.5 m; the on-screen indicator changes to `BOARD SPACECRAFT` when in range. |
 | Point spacecraft | Move mouse | Pointer distance from the screen centre controls pitch and yaw. |
-| Thrust / reverse | `W` / `S` | Applies forward or reverse engine thrust. |
-| Boost | Hold `Shift` | Raises thrust for atmospheric climbs and long-distance flight. |
-| Roll | `A` / `D` | Rolls left or right. |
-| Strafe | `Q` / `E` | Applies lateral maneuvering thrust after boarding. |
-| Lift / descend | `Space` / `Ctrl` | Applies vertical maneuvering thrust. |
-| Change follow distance | Mouse wheel | Moves the third-person chase camera between 10 m and 140 m. |
-| Exit flight | `Escape` | Returns to planetary survey above the spacecraft's current Mars subpoint. |
+| Turn left / right | `A` / `D` or left / right arrows | Applies direct yaw, allowing the craft to turn even while the camera is orbiting. |
+| Pitch up / down | Up / down arrows | Applies direct pitch in addition to mouse steering. |
+| Thrust / reverse | `W` / `S` | Accelerates forward or applies reverse thrust to decelerate and back up. |
+| Boost + sharp maneuver | Hold `Shift` | Raises engine thrust and turn rates for climbs, fast acceleration, and tight turns. |
+| Space brake | `X` | Rapidly cancels momentum without changing the craft's heading. |
+| Roll | `Q` / `E` | Rolls left or right. |
+| Strafe | `Z` / `C` | Applies lateral maneuvering thrust. |
+| Rise / descend | `Space` / `Ctrl` | Applies vertical thrust away from or toward Mars regardless of craft roll. |
+| Orbit camera | Hold left or middle mouse and drag | Orbits freely around the moving spacecraft without turning it. |
+| Change follow distance | Mouse wheel | Zooms continuously from an 8 m chase view to the 30,000 km planetary-scale view while remaining locked to the moving spacecraft. |
+| Stop and disembark | `Escape` | Cancels all ship velocity, leaves it parked at its exact position, and restores the spaceman beside it at that location. Press `Escape` again as the spaceman to return to survey. |
 
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 

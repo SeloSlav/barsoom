@@ -12,6 +12,15 @@ import {
 } from "./ephemeris";
 import { findMarsLandmarkAtDirection, landmarkDirection, MARS_LANDMARKS, type MarsLandmark } from "./landmarks";
 import { cartesianToLatLonElevation, clamp, directionalShadowExtentM, latLonElevationToCartesian, nextAdaptiveResolutionScale, rayTerrainIntersection, snappedDirectionalShadowCenter, type DirectionalShadowSnap } from "./math";
+import {
+  detectGraphicsCapabilities,
+  GRAPHICS_PRESETS,
+  resolveGraphicsState,
+  type GraphicsCapabilities,
+  type GraphicsPreference,
+  type GraphicsPreset,
+  type GraphicsRuntimeState,
+} from "./graphicsSettings";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import {
   DEFAULT_ORBITAL_STANDOFF_RADII,
@@ -28,7 +37,7 @@ import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
 import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
-import { PlanetTerrain, type TerrainFrameStats } from "./terrain/PlanetTerrain";
+import { PlanetTerrain, type TerrainFrameStats, type TerrainQualitySettings } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
 
 export type ObservedBody = "Mars" | MarsMoonState["name"] | MarsOrbiterName;
@@ -80,6 +89,8 @@ export type PlanetEngineApi = {
   exitSurfaceTraverse: () => void;
   getAudioMuted: () => boolean;
   setAudioMuted: (muted: boolean) => void;
+  getGraphicsSettings: () => GraphicsRuntimeState;
+  setGraphicsPreference: (preference: GraphicsPreference) => GraphicsRuntimeState;
   setNarrationActive: (active: boolean) => void;
   focusBody: (body: ObservedBody) => void;
 };
@@ -93,6 +104,10 @@ declare global {
 export class PlanetEngine {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly depthStrategy: "reversed" | "logarithmic";
+  private readonly graphicsCapabilities: GraphicsCapabilities;
+  private graphicsState: GraphicsRuntimeState;
+  private graphicsPreset: GraphicsPreset;
+  private terrainQuality: TerrainQualitySettings;
   private readonly scene = new THREE.Scene();
   private readonly sunShadowLight = new THREE.DirectionalLight(0xffffff, 1);
   private readonly sunShadowTarget = new THREE.Object3D();
@@ -185,6 +200,8 @@ export class PlanetEngine {
     private readonly onLandmarkMarkersChange: (markers: readonly MarsLandmarkMarker[]) => void = () => {},
     private readonly onOrbitalMarkersChange: (markers: readonly MarsOrbitalMarker[]) => void = () => {},
     simulationRate = 60,
+    graphicsPreference: GraphicsPreference = "auto",
+    private readonly onGraphicsSettingsChange: (settings: GraphicsRuntimeState) => void = () => {},
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
       ? new Date(initialSimulationUtc)
@@ -200,6 +217,10 @@ export class PlanetEngine {
       powerPreference: "high-performance",
     });
     if (!context) throw new Error("Barsoom requires a WebGL 2 capable browser and GPU.");
+    this.graphicsCapabilities = detectGraphicsCapabilities(context);
+    this.graphicsState = resolveGraphicsState(graphicsPreference, this.graphicsCapabilities);
+    this.graphicsPreset = GRAPHICS_PRESETS[this.graphicsState.presetId];
+    this.terrainQuality = this.createTerrainQuality(this.graphicsPreset);
     const reversedDepthSupported = context.getExtension("EXT_clip_control") !== null;
     this.depthStrategy = reversedDepthSupported ? "reversed" : "logarithmic";
     this.renderer = new THREE.WebGLRenderer({
@@ -216,7 +237,7 @@ export class PlanetEngine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.18;
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = this.graphicsPreset.surfaceShadows;
     // r185 maps the removed PCFSoft mode to PCF and logs every surface entry.
     // Select the effective mode directly so the render path stays warning-free.
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -239,7 +260,7 @@ export class PlanetEngine {
     this.sunShadowTarget.name = "Mars shadow-map snapped target";
     this.sunShadowLight.target = this.sunShadowTarget;
     this.sunShadowLight.castShadow = false;
-    this.sunShadowLight.shadow.mapSize.set(RENDER_CONFIG.surfaceShadowMapSize, RENDER_CONFIG.surfaceShadowMapSize);
+    this.sunShadowLight.shadow.mapSize.set(this.graphicsPreset.shadowMapSize, this.graphicsPreset.shadowMapSize);
     this.sunShadowLight.shadow.bias = -0.00012;
     this.sunShadowLight.shadow.normalBias = 0.12;
     this.sunShadowLight.shadow.radius = 1.35;
@@ -406,9 +427,12 @@ export class PlanetEngine {
       exitSurfaceTraverse: () => this.exitSurfaceTraverse(),
       getAudioMuted: () => this.getAudioMuted(),
       setAudioMuted: (muted) => this.setAudioMuted(muted),
+      getGraphicsSettings: () => this.graphicsState,
+      setGraphicsPreference: (preference) => this.setGraphicsPreference(preference),
       setNarrationActive: (active) => this.audio.setNarrationActive(active),
       focusBody: (body) => this.focusBody(body),
     };
+    this.onGraphicsSettingsChange(this.graphicsState);
     this.renderer.setAnimationLoop(this.animate);
   }
 
@@ -418,6 +442,39 @@ export class PlanetEngine {
 
   setAudioMuted(muted: boolean) {
     this.audio.setMuted(muted);
+  }
+
+  private createTerrainQuality(preset: GraphicsPreset): TerrainQualitySettings {
+    return {
+      screenSpaceErrorPx: preset.terrainScreenSpaceErrorPx,
+      maxRenderLod: preset.terrainMaxRenderLod,
+      maxActiveTiles: preset.terrainMaxActiveTiles,
+      geometryCacheSize: preset.terrainGeometryCacheSize,
+      surfaceShadows: preset.surfaceShadows,
+    };
+  }
+
+  private setGraphicsPreference(preference: GraphicsPreference) {
+    const previousPreset = this.graphicsPreset;
+    this.graphicsState = resolveGraphicsState(preference, this.graphicsCapabilities);
+    this.graphicsPreset = GRAPHICS_PRESETS[this.graphicsState.presetId];
+    this.terrainQuality = this.createTerrainQuality(this.graphicsPreset);
+    this.renderer.shadowMap.enabled = this.graphicsPreset.surfaceShadows;
+    this.sunShadowLight.castShadow = false;
+    this.surfaceShadowsEnabled = false;
+    if (previousPreset.shadowMapSize !== this.graphicsPreset.shadowMapSize) {
+      this.sunShadowLight.shadow.map?.dispose();
+      this.sunShadowLight.shadow.map = null;
+      this.sunShadowLight.shadow.mapSize.set(
+        this.graphicsPreset.shadowMapSize,
+        this.graphicsPreset.shadowMapSize,
+      );
+    }
+    this.qualityScale = 1;
+    this.framesSinceQualityChange = 0;
+    this.resize();
+    this.onGraphicsSettingsChange(this.graphicsState);
+    return this.graphicsState;
   }
 
   private setSimulationRate(rate: number) {
@@ -508,7 +565,10 @@ export class PlanetEngine {
   private resize() {
     const width = Math.max(1, this.canvas.clientWidth);
     const height = Math.max(1, this.canvas.clientHeight);
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, RENDER_CONFIG.maxDevicePixelRatio) * this.qualityScale;
+    const pixelRatio = Math.min(
+      window.devicePixelRatio || 1,
+      this.graphicsPreset.maxDevicePixelRatio,
+    ) * this.qualityScale;
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
@@ -565,11 +625,13 @@ export class PlanetEngine {
       renderSkyState.sunDirection,
       this.debug,
       this.observedBody !== "Mars",
+      this.terrainQuality,
     );
     this.surfaceDetails.update(
       this.controlState.cameraAbsolute,
       this.controlState.cameraDirection,
       this.controlState.altitudeM,
+      this.graphicsPreset.surfaceDetailLevel,
     );
     this.retiredRovers.update(this.controlState.cameraAbsolute, this.controlState.altitudeM);
     this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
@@ -714,7 +776,8 @@ export class PlanetEngine {
 
   private updateSurfaceShadows(sunDirection: MarsSkyState["sunDirection"], daylight: number) {
     const altitudeM = this.controlState.altitudeM;
-    const enabled = altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM && daylight > 0.01;
+    const enabled = this.graphicsPreset.surfaceShadows &&
+      altitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM && daylight > 0.01;
     this.surfaceShadowsEnabled = enabled;
     this.sunShadowLight.castShadow = enabled;
     if (!enabled) {
@@ -732,7 +795,7 @@ export class PlanetEngine {
       this.controlState.cameraAbsolute,
       sunDirection,
       extentM,
-      RENDER_CONFIG.surfaceShadowMapSize,
+      this.graphicsPreset.shadowMapSize,
       this.shadowSnap,
     );
     // Match the receiver offset to the world-space texel size. A constant
@@ -766,7 +829,12 @@ export class PlanetEngine {
       return;
     }
     if (this.framesSinceQualityChange < 240) return;
-    const next = nextAdaptiveResolutionScale(this.qualityScale, this.smoothedFrameMs, true);
+    const next = nextAdaptiveResolutionScale(
+      this.qualityScale,
+      this.smoothedFrameMs,
+      true,
+      this.graphicsPreset.minimumResolutionScale,
+    );
     if (next !== this.qualityScale) {
       this.qualityScale = next;
       this.framesSinceQualityChange = 0;
@@ -1096,7 +1164,12 @@ export class PlanetEngine {
       void this.enterSurfaceTraverse();
     } else if (event.code === "Escape" && this.surfaceTraverse.active) {
       event.preventDefault();
-      this.exitSurfaceTraverse();
+      if (this.surfaceTraverse.mode === "spaceship") {
+        this.surfaceTraverse.disembarkSpaceship();
+        this.lastTelemetryTime = -Infinity;
+      } else {
+        this.exitSurfaceTraverse();
+      }
     } else if (event.code === "F4") {
       event.preventDefault();
       this.debug.tileBoundaries = !this.debug.tileBoundaries;

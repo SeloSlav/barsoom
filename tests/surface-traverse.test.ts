@@ -6,6 +6,7 @@ import {
 } from "../app/planet/constants";
 import {
   MARS_JUMP_ANTICIPATION_DURATION_S,
+  applySpaceshipCameraZoom,
   applyWowCameraDrag,
   applyWowCameraZoom,
   isWowAutoRunKey,
@@ -156,6 +157,12 @@ describe("surface traverse physics", () => {
     expect(applyWowCameraZoom(0, 120)).toBe(2.2);
     expect(applyWowCameraZoom(200, 120)).toBeGreaterThan(200);
     expect(applyWowCameraZoom(MAX_CAMERA_ALTITUDE_M, 120)).toBe(MAX_CAMERA_ALTITUDE_M);
+  });
+
+  it("keeps the moving spacecraft camera zoomable from chase view to planet scale", () => {
+    expect(applySpaceshipCameraZoom(24, -120)).toBeGreaterThanOrEqual(8);
+    expect(applySpaceshipCameraZoom(24, 120)).toBeGreaterThan(24);
+    expect(applySpaceshipCameraZoom(MAX_CAMERA_ALTITUDE_M, 120)).toBe(MAX_CAMERA_ALTITUDE_M);
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {

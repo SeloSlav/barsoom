@@ -11,9 +11,15 @@ import type { Vec3 } from "./types";
 const SHIP_GROUND_CLEARANCE_M = 1.15;
 const SHIP_SPAWN_FORWARD_M = 18;
 const SHIP_SPAWN_RIGHT_M = 10;
-const SHIP_THRUST_M_S2 = 58;
-const SHIP_BOOST_THRUST_M_S2 = 180;
-const SHIP_MANEUVER_THRUST_M_S2 = 34;
+const SHIP_THRUST_M_S2 = 76;
+const SHIP_BOOST_THRUST_M_S2 = 260;
+const SHIP_MANEUVER_THRUST_M_S2 = 52;
+const SHIP_VERTICAL_THRUST_M_S2 = 86;
+const SHIP_BRAKE_RATE_S = 4.2;
+const SHIP_YAW_RATE_RAD_S = 1.85;
+const SHIP_PITCH_RATE_RAD_S = 1.55;
+const SHIP_ROLL_RATE_RAD_S = 2.25;
+const SHIP_SHARP_TURN_MULTIPLIER = 1.85;
 const SHIP_MAX_SPEED_M_S = 12_000;
 const SHIP_TRAIL_LIFETIME_S = 4.8;
 const SHIP_TRAIL_POINT_INTERVAL_S = 0.035;
@@ -28,8 +34,11 @@ export type SpaceshipFlightInput = {
   throttle: number;
   strafe: number;
   lift: number;
+  yaw: number;
+  pitch: number;
   roll: number;
   boost: boolean;
+  brake: boolean;
   aimX: number;
   aimY: number;
 };
@@ -61,7 +70,7 @@ export class SurfaceSpaceship {
   private readonly forward = new THREE.Vector3(0, 0, 1);
   private readonly right = new THREE.Vector3(1, 0, 0);
   private readonly up = new THREE.Vector3(0, 1, 0);
-  private readonly scratch = new THREE.Vector3();
+  private readonly radialUp = new THREE.Vector3(1, 0, 0);
   private readonly orientation = new THREE.Matrix4();
   private readonly rotationStep = new THREE.Quaternion();
   private readonly rotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
@@ -76,6 +85,7 @@ export class SurfaceSpaceship {
   private trailPoints: TrailPoint[] = [];
   private trailEmitCountdownS = 0;
   private parked = true;
+  private groundAnchored = true;
   private active = false;
   private thrustVisible = false;
   private model: THREE.Object3D | null = null;
@@ -203,6 +213,7 @@ export class SurfaceSpaceship {
     this.root.quaternion.setFromRotationMatrix(this.orientation);
     this.velocity.set(0, 0, 0);
     this.parked = true;
+    this.groundAnchored = true;
     this.active = true;
     this.thrustVisible = false;
     this.root.visible = true;
@@ -226,11 +237,25 @@ export class SurfaceSpaceship {
 
   board() {
     this.parked = false;
+    this.groundAnchored = false;
     this.velocity.set(0, 0, 0);
   }
 
+  stopAndPark() {
+    if (!this.active) return;
+    this.velocity.set(0, 0, 0);
+    this.parked = true;
+    this.groundAnchored = false;
+    this.thrustVisible = false;
+    this.trailPoints = [];
+    this.trailEmitCountdownS = 0;
+    this.leftTrailGeometry.setDrawRange(0, 0);
+    this.rightTrailGeometry.setDrawRange(0, 0);
+    this.setFlamesVisible(false);
+  }
+
   updateParkedPosition() {
-    if (!this.active || !this.parked) return;
+    if (!this.active || !this.parked || !this.groundAnchored) return;
     const surface = this.terrainSurface(this.surfaceDirection);
     this.absolute.copy(this.surfaceDirection).multiplyScalar(
       MARS_REFERENCE_RADIUS_M + surface.heightM + SHIP_GROUND_CLEARANCE_M,
@@ -240,11 +265,15 @@ export class SurfaceSpaceship {
   updateFlight(deltaSeconds: number, input: SpaceshipFlightInput) {
     if (!this.active || this.parked) return;
     const delta = clamp(deltaSeconds, 0, 0.05);
-    const yaw = spaceshipSteerAmount(input.aimX) * 1.45;
-    const pitch = -spaceshipSteerAmount(input.aimY) * 1.3;
-    const automaticBank = -spaceshipSteerAmount(input.aimX) * 0.48;
-    const roll = clamp(input.roll, -1, 1) * 1.55 + automaticBank;
-    this.rotationEuler.set(pitch * delta, yaw * delta, roll * delta);
+    const turnMultiplier = input.boost ? SHIP_SHARP_TURN_MULTIPLIER : 1;
+    const yawInput = clamp(spaceshipSteerAmount(input.aimX) + input.yaw, -1, 1);
+    const pitchInput = clamp(spaceshipSteerAmount(input.aimY) + input.pitch, -1, 1);
+    const rollInput = clamp(input.roll, -1, 1);
+    this.rotationEuler.set(
+      -pitchInput * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
+      yawInput * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
+      -rollInput * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
+    );
     this.rotationStep.setFromEuler(this.rotationEuler);
     this.root.quaternion.multiply(this.rotationStep).normalize();
 
@@ -255,16 +284,20 @@ export class SurfaceSpaceship {
     const thrustAcceleration = input.boost ? SHIP_BOOST_THRUST_M_S2 : SHIP_THRUST_M_S2;
     this.velocity.addScaledVector(this.forward, thrust * thrustAcceleration * delta);
     this.velocity.addScaledVector(this.right, clamp(input.strafe, -1, 1) * SHIP_MANEUVER_THRUST_M_S2 * delta);
-    this.velocity.addScaledVector(this.up, clamp(input.lift, -1, 1) * SHIP_MANEUVER_THRUST_M_S2 * delta);
+    this.radialUp.copy(this.absolute).normalize();
+    this.velocity.addScaledVector(
+      this.radialUp,
+      clamp(input.lift, -1, 1) * SHIP_VERTICAL_THRUST_M_S2 * delta,
+    );
 
     const radiusM = Math.max(MARS_REFERENCE_RADIUS_M, this.absolute.length());
-    this.scratch.copy(this.absolute).normalize();
     const gravityMps2 = MARS_SURFACE_GRAVITY_M_S2 * (MARS_REFERENCE_RADIUS_M / radiusM) ** 2;
-    this.velocity.addScaledVector(this.scratch, -gravityMps2 * delta);
+    this.velocity.addScaledVector(this.radialUp, -gravityMps2 * delta);
 
     const altitudeM = radiusM - MARS_REFERENCE_RADIUS_M;
     const atmosphericDensity = Math.exp(-Math.max(0, altitudeM) / 11_100);
-    this.velocity.multiplyScalar(Math.exp(-delta * (0.002 + atmosphericDensity * 0.038)));
+    const brakeRate = input.brake ? SHIP_BRAKE_RATE_S : 0;
+    this.velocity.multiplyScalar(Math.exp(-delta * (0.002 + atmosphericDensity * 0.038 + brakeRate)));
     const speedMps = this.velocity.length();
     if (speedMps > SHIP_MAX_SPEED_M_S) this.velocity.multiplyScalar(SHIP_MAX_SPEED_M_S / speedMps);
     this.absolute.addScaledVector(this.velocity, delta);

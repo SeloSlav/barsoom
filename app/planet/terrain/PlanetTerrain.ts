@@ -170,14 +170,21 @@ const TERRAIN_LOD_MERGE_ERROR_RATIO = 0.75;
  * Uses separate split and merge thresholds so small camera movements cannot
  * alternate a ready parent and its children on consecutive frames.
  */
-export function terrainNodeNeedsRefinement(screenError: number, wasRefined: boolean) {
-  const threshold = TERRAIN_CONFIG.screenSpaceErrorPx *
+export function terrainNodeNeedsRefinement(
+  screenError: number,
+  wasRefined: boolean,
+  screenSpaceErrorPx: number = TERRAIN_CONFIG.screenSpaceErrorPx,
+) {
+  const threshold = screenSpaceErrorPx *
     (wasRefined ? TERRAIN_LOD_MERGE_ERROR_RATIO : 1);
   return screenError > threshold;
 }
 
-export function terrainMaximumLod(stabilizeOrbitalTerrain: boolean) {
-  return stabilizeOrbitalTerrain ? TERRAIN_CONFIG.assetMaxLod : TERRAIN_CONFIG.maxRenderLod;
+export function terrainMaximumLod(
+  stabilizeOrbitalTerrain: boolean,
+  maxRenderLod: number = TERRAIN_CONFIG.maxRenderLod,
+) {
+  return stabilizeOrbitalTerrain ? TERRAIN_CONFIG.assetMaxLod : maxRenderLod;
 }
 
 export function terrainTransitionProgress(
@@ -284,6 +291,22 @@ export type TerrainFrameStats = {
   horizonCulled: number;
 };
 
+export type TerrainQualitySettings = {
+  screenSpaceErrorPx: number;
+  maxRenderLod: number;
+  maxActiveTiles: number;
+  geometryCacheSize: number;
+  surfaceShadows: boolean;
+};
+
+const DEFAULT_TERRAIN_QUALITY: TerrainQualitySettings = {
+  screenSpaceErrorPx: TERRAIN_CONFIG.screenSpaceErrorPx,
+  maxRenderLod: TERRAIN_CONFIG.maxRenderLod,
+  maxActiveTiles: TERRAIN_CONFIG.maxActiveTiles,
+  geometryCacheSize: TERRAIN_CONFIG.geometryCacheSize,
+  surfaceShadows: true,
+};
+
 const FACE_INDEX = { px: 0, nx: 1, py: 2, ny: 3, pz: 4, nz: 5 } as const;
 const MATERIAL_PERIOD_M = 4096;
 const positiveModulo = (value: number, period: number) => ((value % period) + period) % period;
@@ -322,6 +345,7 @@ export class PlanetTerrain {
   private debugDisableHorizonCulling = false;
   private surfaceShadowsEnabled = false;
   private stabilizeOrbitalTerrain = false;
+  private quality = DEFAULT_TERRAIN_QUALITY;
   private geometryBytes = 0;
   private stats: TerrainFrameStats = {
     activeTiles: 0,
@@ -362,6 +386,7 @@ export class PlanetTerrain {
     sunDirection: Vec3,
     debug: DebugFlags,
     stabilizeOrbitalTerrain = false,
+    quality: TerrainQualitySettings = DEFAULT_TERRAIN_QUALITY,
   ): TerrainFrameStats {
     this.frame += 1;
     this.nowS = nowS;
@@ -371,7 +396,9 @@ export class PlanetTerrain {
     this.fovRadians = THREE.MathUtils.degToRad(camera.fov);
     this.debugDisableHorizonCulling = debug.horizonCulling;
     this.stabilizeOrbitalTerrain = stabilizeOrbitalTerrain;
-    this.surfaceShadowsEnabled = cameraAltitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM &&
+    this.quality = quality;
+    this.surfaceShadowsEnabled = quality.surfaceShadows &&
+      cameraAltitudeM <= RENDER_CONFIG.surfaceShadowMaxAltitudeM &&
       dot3(normalize3(cameraAbsolute), sunDirection) > 0.01;
     this.projectionScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projectionScreen);
@@ -409,7 +436,7 @@ export class PlanetTerrain {
     for (const root of rootsByPriority) this.visit(root, 10_000);
     this.updateVisibleEdgeMorphs();
     this.cancelStaleRequests();
-    if (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize + 12) this.evictGeometry();
+    if (this.readyNodes.size > this.quality.geometryCacheSize + 12) this.evictGeometry();
     if (this.frame % 120 === 0) this.pruneStaleNodes();
 
     let loading = 0;
@@ -440,12 +467,16 @@ export class PlanetTerrain {
     const focusTile = directionToTile(this.focusDirection, node.key.lod);
     const isFocusBranch = tileKeyToString(focusTile) === node.id;
     const isClipmapRing = visibility.focusProximity <= 2.25;
-    const needsRefinement = terrainNodeNeedsRefinement(visibility.screenError, node.refined);
+    const needsRefinement = terrainNodeNeedsRefinement(
+      visibility.screenError,
+      node.refined,
+      this.quality.screenSpaceErrorPx,
+    );
     const canSplit =
       needsRefinement &&
-      node.key.lod < terrainMaximumLod(this.stabilizeOrbitalTerrain) &&
+      node.key.lod < terrainMaximumLod(this.stabilizeOrbitalTerrain, this.quality.maxRenderLod) &&
       (isFocusBranch || isClipmapRing ||
-        this.stats.activeTiles + 4 < TERRAIN_CONFIG.maxActiveTiles);
+        this.stats.activeTiles + 4 < this.quality.maxActiveTiles);
     if (!canSplit) {
       node.refined = false;
       node.childrenReadyAt = -1;
@@ -730,7 +761,7 @@ export class PlanetTerrain {
         const bRecency = Math.max(b.lastUsedFrame, b.lastWantedFrame);
         return aRecency - bRecency;
       });
-    while (this.readyNodes.size > TERRAIN_CONFIG.geometryCacheSize && candidates.length) {
+    while (this.readyNodes.size > this.quality.geometryCacheSize && candidates.length) {
       const node = candidates.shift()!;
       this.releaseNodeGeometry(node);
     }

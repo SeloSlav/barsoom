@@ -13,8 +13,11 @@ const neutralFlightInput: SpaceshipFlightInput = {
   throttle: 0,
   strafe: 0,
   lift: 0,
+  yaw: 0,
+  pitch: 0,
   roll: 0,
   boost: false,
+  brake: false,
   aimX: 0,
   aimY: 0,
 };
@@ -61,8 +64,63 @@ describe("surface spaceship flight", () => {
       craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
     }
 
-    expect(craft.getSpeedMps()).toBeGreaterThan(45);
-    expect(craft.getSpeedMps()).toBeLessThan(70);
+    expect(craft.getSpeedMps()).toBeGreaterThan(68);
+    expect(craft.getSpeedMps()).toBeLessThan(82);
+    craft.dispose();
+  });
+
+  it("supports decisive keyboard yaw and vertical planetary thrust", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    const initialForward = craft.getForward(new THREE.Vector3()).clone();
+    const initialRadiusM = craft.getAbsolute(new THREE.Vector3()).length();
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, yaw: 1, lift: 1 });
+    }
+
+    const turnedForward = craft.getForward(new THREE.Vector3());
+    expect(turnedForward.dot(initialForward)).toBeLessThan(0.1);
+    expect(craft.getAbsolute(new THREE.Vector3()).length()).toBeGreaterThan(initialRadiusM + 25);
+    craft.dispose();
+  });
+
+  it("brakes hard and remains fixed after parking in place", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
+    }
+    const cruiseSpeedMps = craft.getSpeedMps();
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, brake: true });
+    }
+    expect(craft.getSpeedMps()).toBeLessThan(cruiseSpeedMps * 0.08);
+
+    craft.stopAndPark();
+    const parkedPosition = craft.getAbsolute(new THREE.Vector3()).clone();
+    craft.updateFlight(1, { ...neutralFlightInput, throttle: 1, boost: true });
+    expect(craft.getSpeedMps()).toBe(0);
+    expect(craft.getAbsolute(new THREE.Vector3()).distanceTo(parkedPosition)).toBe(0);
     craft.dispose();
   });
 });

@@ -4,6 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_CAMERA_ALTITUDE_M } from "../planet/constants";
 import { calculateMarsOrbiters, isMarsOrbiterName, MARS_ORBITER_NAMES } from "../planet/ephemeris";
 import {
+  GRAPHICS_PRESETS,
+  loadGraphicsPreference,
+  pendingGraphicsState,
+  saveGraphicsPreference,
+  type GraphicsPreference,
+  type GraphicsRuntimeState,
+} from "../planet/graphicsSettings";
+import {
   PlanetEngine,
   type MarsLandmarkHover,
   type MarsLandmarkMarker,
@@ -17,6 +25,7 @@ import { SovaTutorial } from "./SovaTutorial";
 
 const SIMULATION_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const OBSERVATION_TARGETS: readonly ObservedBody[] = ["Mars", "Phobos", "Deimos", ...MARS_ORBITER_NAMES];
+const GRAPHICS_OPTIONS: readonly GraphicsPreference[] = ["auto", "ultra", "high", "medium", "low"];
 
 function targetShortName(body: ObservedBody) {
   if (body === "Mars") return "BARSOOM";
@@ -128,6 +137,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bodyMenuRef = useRef<HTMLDivElement>(null);
   const rateMenuRef = useRef<HTMLDivElement>(null);
+  const graphicsButtonRef = useRef<HTMLButtonElement>(null);
+  const graphicsPanelRef = useRef<HTMLElement>(null);
   const [telemetry, setTelemetry] = useState<PlanetTelemetry>(() => createInitialTelemetry(initialSimulationUtc));
   const [error, setError] = useState<string | null>(null);
   const [helpVisible, setHelpVisible] = useState(false);
@@ -142,6 +153,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
   const [simulationRate, setSimulationRate] = useState<SimulationRate>(60);
   const [rateMenuVisible, setRateMenuVisible] = useState(false);
+  const [graphicsVisible, setGraphicsVisible] = useState(false);
+  const [graphicsState, setGraphicsState] = useState<GraphicsRuntimeState>(() => pendingGraphicsState());
   const shareStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -162,6 +175,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
         setLandmarkMarkers,
         setOrbitalMarkers,
+        60,
+        loadGraphicsPreference(),
+        setGraphicsState,
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);
@@ -179,7 +195,10 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       return;
     }
     const keyHandler = (event: KeyboardEvent) => {
-      if (event.code === "KeyH" && !event.ctrlKey && !event.metaKey) setHelpVisible((visible) => !visible);
+      if (event.code === "KeyH" && !event.ctrlKey && !event.metaKey) {
+        setGraphicsVisible(false);
+        setHelpVisible((visible) => !visible);
+      }
     };
     window.addEventListener("keydown", keyHandler);
     return () => {
@@ -190,15 +209,18 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   }, [initialSimulationUtc]);
 
   useEffect(() => {
-    if (!bodyMenuVisible && !rateMenuVisible) return;
+    if (!bodyMenuVisible && !rateMenuVisible && !graphicsVisible) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (!bodyMenuRef.current?.contains(event.target as Node)) setBodyMenuVisible(false);
       if (!rateMenuRef.current?.contains(event.target as Node)) setRateMenuVisible(false);
+      if (!graphicsPanelRef.current?.contains(event.target as Node) &&
+          !graphicsButtonRef.current?.contains(event.target as Node)) setGraphicsVisible(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setBodyMenuVisible(false);
         setRateMenuVisible(false);
+        setGraphicsVisible(false);
       }
     };
     document.addEventListener("pointerdown", closeOnOutsidePointer);
@@ -207,12 +229,13 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [bodyMenuVisible, rateMenuVisible]);
+  }, [bodyMenuVisible, graphicsVisible, rateMenuVisible]);
 
   const selectObservedBody = (body: ObservedBody) => {
     setObservedBody(body);
     setBodyMenuVisible(false);
     setRateMenuVisible(false);
+    setGraphicsVisible(false);
     setHelpVisible(false);
     setTutorialLibraryVisible(false);
     setObserverAction(null);
@@ -226,8 +249,15 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const selectSimulationRate = (rate: SimulationRate) => {
     setSimulationRate(rate);
     setRateMenuVisible(false);
+    setGraphicsVisible(false);
     window.__BARSOOM__?.setSimulationRate(rate);
     canvasRef.current?.focus();
+  };
+
+  const selectGraphicsPreference = (preference: GraphicsPreference) => {
+    saveGraphicsPreference(preference);
+    const next = window.__BARSOOM__?.setGraphicsPreference(preference);
+    if (next) setGraphicsState(next);
   };
 
   const shareSpacemanLocation = async () => {
@@ -264,9 +294,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <span>RESOLVING LOCAL FIELD</span>
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
-      {surfaceMode && <aside className="surface-exit-hint" aria-label={`${spaceshipMode ? "Spacecraft flight" : "Spaceman"} mode remains active. Press Escape to exit.`}>
+      {surfaceMode && <aside className="surface-exit-hint" aria-label={spaceshipMode ? "Press Escape to stop and disembark the spacecraft here." : "Spaceman mode remains active. Press Escape to exit."}>
         <span>{spaceshipMode ? "SPACECRAFT FLIGHT" : "SPACEMAN MODE LOCKED"}</span>
-        <strong><kbd>ESC</kbd> TO EXIT</strong>
+        <strong><kbd>ESC</kbd> {spaceshipMode ? "STOP + DISEMBARK" : "TO EXIT"}</strong>
       </aside>}
       {shipIndicatorVisible && <aside className={`ship-board-indicator${telemetry.shipCanBoard ? " ready" : ""}`} aria-live={telemetry.shipCanBoard ? "polite" : "off"}>
         <span><i aria-hidden="true" /> SPACECRAFT {formatDistance(telemetry.shipDistanceM ?? 0)}</span>
@@ -283,6 +313,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                 type="button"
                 onClick={() => {
                   setRateMenuVisible(false);
+                  setGraphicsVisible(false);
                   setBodyMenuVisible((visible) => !visible);
                 }}
                 aria-expanded={bodyMenuVisible}
@@ -321,6 +352,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
                 type="button"
                 onClick={() => {
                   setBodyMenuVisible(false);
+                  setGraphicsVisible(false);
                   setRateMenuVisible((visible) => !visible);
                 }}
                 aria-expanded={rateMenuVisible}
@@ -359,6 +391,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               className="help-button"
               type="button"
               onClick={() => {
+                setGraphicsVisible(false);
                 setTutorialLibraryVisible(false);
                 setHelpVisible((visible) => !visible);
               }}
@@ -368,15 +401,79 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               className="tutorials-button"
               type="button"
               onClick={() => {
+                setGraphicsVisible(false);
                 setHelpVisible(false);
                 setTutorialLibraryVisible((visible) => !visible);
               }}
               aria-expanded={tutorialLibraryVisible}
               aria-controls="sova-tutorial-library"
             >TUTORIALS</button>
+            <button
+              ref={graphicsButtonRef}
+              className="graphics-button"
+              type="button"
+              onClick={() => {
+                setBodyMenuVisible(false);
+                setRateMenuVisible(false);
+                setHelpVisible(false);
+                setTutorialLibraryVisible(false);
+                setGraphicsVisible((visible) => !visible);
+              }}
+              aria-expanded={graphicsVisible}
+              aria-controls="graphics-settings-panel"
+            >GRAPHICS <b>{GRAPHICS_PRESETS[graphicsState.presetId].label.toUpperCase()}</b></button>
           </div>
         </div>
       </header>
+      {graphicsVisible && <aside
+        ref={graphicsPanelRef}
+        id="graphics-settings-panel"
+        className="graphics-panel"
+        aria-labelledby="graphics-settings-title"
+      >
+        <button
+          className="graphics-panel-close"
+          type="button"
+          onClick={() => setGraphicsVisible(false)}
+          aria-label="Close graphics settings"
+        >×</button>
+        <p className="panel-index">RENDER PROFILE / LOCAL DEVICE</p>
+        <h2 id="graphics-settings-title">Graphics settings</h2>
+        <p className="graphics-intro">Auto selects a profile from the active GPU and browser hardware limits. Changes apply immediately and are saved on this device.</p>
+        <div className="graphics-detection" aria-live="polite">
+          <span>{graphicsState.preference === "auto" ? "AUTO-DETECTED" : "ACTIVE PROFILE"}</span>
+          <strong>{GRAPHICS_PRESETS[graphicsState.presetId].label.toUpperCase()}</strong>
+          <small>{graphicsState.rationale}</small>
+        </div>
+        <div className="graphics-device" title={graphicsState.capabilities.gpuName}>
+          <span>ACTIVE ADAPTER</span>
+          <strong>{graphicsState.capabilities.gpuName}</strong>
+          <div>
+            {graphicsState.capabilities.hardwareConcurrency > 0 && <small>{graphicsState.capabilities.hardwareConcurrency} CPU THREADS</small>}
+            {graphicsState.capabilities.deviceMemoryGb !== null && <small>{graphicsState.capabilities.deviceMemoryGb} GB SYSTEM MEMORY</small>}
+            {graphicsState.capabilities.maxTextureSize > 0 && <small>{graphicsState.capabilities.maxTextureSize}px GPU TEXTURE LIMIT</small>}
+          </div>
+        </div>
+        <div className="graphics-options" role="group" aria-label="Graphics quality">
+          {GRAPHICS_OPTIONS.map((option) => {
+            const auto = option === "auto";
+            const preset = option === "auto"
+              ? GRAPHICS_PRESETS[graphicsState.presetId]
+              : GRAPHICS_PRESETS[option];
+            return <button
+              key={option}
+              type="button"
+              className={graphicsState.preference === option ? "selected" : ""}
+              onClick={() => selectGraphicsPreference(option)}
+              aria-pressed={graphicsState.preference === option}
+            >
+              <span><strong>{auto ? "Auto" : preset.label}</strong><b>{auto ? `DETECTED ${GRAPHICS_PRESETS[graphicsState.presetId].label.toUpperCase()}` : option === "ultra" ? "ORIGINAL" : "MANUAL"}</b></span>
+              <small>{auto ? "Recommended. Matches the active adapter and display load." : preset.description}</small>
+            </button>;
+          })}
+        </div>
+        <p className="graphics-note">On dual-GPU laptops, the active adapter above should be the dedicated GPU. If it shows Intel graphics, select the high-performance GPU for your browser in Windows Graphics settings.</p>
+      </aside>}
       {!orbitalMode && <section className="coordinate-panel" aria-label="Current Mars reconstruction coordinates">
         <div className="panel-index">SOLUTION / 01</div>
         <div className="eyebrow">VIRTUAL APERTURE SOLUTION</div>
@@ -486,8 +583,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </div>}
         {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
           {spaceshipMode ? <>
-            <dl><div><dt>Point spacecraft</dt><dd>Move mouse</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Boost</dt><dd>Hold Shift</dd></div><div><dt>Roll</dt><dd>A / D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Lift / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Follow distance</dt><dd>Mouse wheel</dd></div><div><dt>Exit flight</dt><dd>Escape</dd></div></dl>
-            <p>The spacecraft flight model advances on real frame time, independently of the selected orbital simulation rate. Point anywhere, apply thrust, and fly continuously from the terrain into space.</p>
+            <dl><div><dt>Point spacecraft</dt><dd>Move mouse</dd></div><div><dt>Turn / pitch</dt><dd>A D / arrow keys</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Boost + sharp turn</dt><dd>Hold Shift</dd></div><div><dt>Space brake</dt><dd>X</dd></div><div><dt>Roll</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Orbit camera</dt><dd>Left / middle drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Stop + disembark here</dt><dd>Escape</dd></div></dl>
+            <p>The spacecraft uses real frame time, independently of the orbital simulation rate. It supports full pitch, yaw, roll, radial ascent, braking, sharp boosted turns, an independent orbit camera, and continuous chase-to-planet zoom.</p>
           </> : <>
             <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Board spacecraft</dt><dd>Approach + E</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
             <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². A spacecraft is instantiated nearby at every landing site.</p>

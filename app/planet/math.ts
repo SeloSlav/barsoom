@@ -382,10 +382,12 @@ export function nextAdaptiveResolutionScale(
   currentScale: number,
   smoothedFrameMs: number,
   allowChange: boolean,
+  minimumScale = 0.72,
 ) {
-  const current = clamp(Number.isFinite(currentScale) ? currentScale : 1, 0.72, 1);
+  const minimum = clamp(Number.isFinite(minimumScale) ? minimumScale : 0.72, 0.4, 1);
+  const current = clamp(Number.isFinite(currentScale) ? currentScale : 1, minimum, 1);
   if (!allowChange || !Number.isFinite(smoothedFrameMs)) return current;
-  if (smoothedFrameMs > 22 && current > 0.72) return Math.max(0.72, current - 0.1);
+  if (smoothedFrameMs > 22 && current > minimum) return Math.max(minimum, current - 0.1);
   if (smoothedFrameMs < 15.2 && current < 1) return Math.min(1, current + 0.05);
   return current;
 }

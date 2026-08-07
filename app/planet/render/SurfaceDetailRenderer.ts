@@ -275,6 +275,7 @@ export class SurfaceDetailRenderer {
   private readonly hiddenScale = new THREE.Vector3(0, 0, 0);
   private readonly modelUp = new THREE.Vector3(0, 1, 0);
   private hasAnchor = false;
+  private detailLevel: 0 | 1 | 2 = 2;
 
   constructor(
     scene: THREE.Scene,
@@ -322,11 +323,29 @@ export class SurfaceDetailRenderer {
     }
   }
 
-  update(cameraAbsoluteInput: Vec3, cameraDirectionInput: Vec3, altitudeM: number) {
-    const visible = altitudeM <= SURFACE_DETAIL_MAX_ALTITUDE_M;
+  update(
+    cameraAbsoluteInput: Vec3,
+    cameraDirectionInput: Vec3,
+    altitudeM: number,
+    detailLevel: 0 | 1 | 2 = 2,
+  ) {
+    if (detailLevel !== this.detailLevel) {
+      this.detailLevel = detailLevel;
+      this.hasAnchor = false;
+      for (const [index, field] of this.fields.entries()) {
+        if (index >= detailLevel) {
+          field.instances = [];
+          field.mesh.count = 0;
+          field.mesh.visible = false;
+        }
+      }
+    }
+    const visible = detailLevel > 0 && altitudeM <= SURFACE_DETAIL_MAX_ALTITUDE_M;
     this.rockSkyFill.visible = visible;
     this.rockSkyFill.intensity = 0.32 + 0.26 * (1 - clamp(altitudeM / SURFACE_DETAIL_MAX_ALTITUDE_M, 0, 1));
-    for (const field of this.fields) field.mesh.visible = altitudeM <= field.maxAltitudeM;
+    for (const [index, field] of this.fields.entries()) {
+      field.mesh.visible = index < detailLevel && altitudeM <= field.maxAltitudeM;
+    }
     if (!visible) return;
 
     const cameraDirection = normalize3(cameraDirectionInput);
@@ -396,7 +415,12 @@ export class SurfaceDetailRenderer {
     this.anchorDirection.set(centerDirection.x, centerDirection.y, centerDirection.z).normalize();
     this.hasAnchor = true;
 
-    for (const field of this.fields) {
+    for (const [fieldIndex, field] of this.fields.entries()) {
+      if (fieldIndex >= this.detailLevel) {
+        field.instances = [];
+        field.mesh.count = 0;
+        continue;
+      }
       const points = generateSurfaceScatter(centerDirection, field.config);
       field.instances = points.map((point, index) => {
         this.colour.copy(field.dark).lerp(field.light, 0.18 + point.tint * 0.72);
