@@ -230,6 +230,25 @@ export function applySpaceshipCameraZoom(cameraDistanceM: number, wheelDeltaPixe
   );
 }
 
+export function applySpaceshipCameraOrbitDrag(
+  cameraYawRad: number,
+  cameraPitchRad: number,
+  deltaX: number,
+  deltaY: number,
+) {
+  return {
+    // The camera sits on the negative orbit-forward vector. Subtracting the
+    // drag delta makes the camera itself follow the pointer instead of moving
+    // opposite it around the craft.
+    cameraYawRad: cameraYawRad - deltaX * 0.0042,
+    cameraPitchRad: clamp(
+      cameraPitchRad + deltaY * 0.0032,
+      SHIP_CAMERA_MIN_PITCH_RAD,
+      SHIP_CAMERA_MAX_PITCH_RAD,
+    ),
+  };
+}
+
 export function rebaseCameraAnchorForTerrainChange(
   cameraAnchorHeightM: number,
   desiredCameraAnchorHeightM: number,
@@ -381,6 +400,8 @@ export class SurfaceTraverseController {
   private shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
   private shipCameraYawRad = 0;
   private shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+  private shipBrakeRequested = false;
+  private shipCruiseThrust = false;
   private disposed = false;
   active = false;
 
@@ -506,6 +527,8 @@ export class SurfaceTraverseController {
     this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
     this.shipCameraYawRad = 0;
     this.shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+    this.shipBrakeRequested = false;
+    this.shipCruiseThrust = false;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -828,6 +851,8 @@ export class SurfaceTraverseController {
     this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
     this.shipCameraYawRad = 0;
     this.shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+    this.shipBrakeRequested = false;
+    this.shipCruiseThrust = false;
     this.cameraCollisionFraction = 1;
     this.keys.clear();
     this.mouseButtons.clear();
@@ -906,6 +931,8 @@ export class SurfaceTraverseController {
     this.shipCanBoard = this.verticalOffsetM <= 0.001;
     this.shipAimX = 0;
     this.shipAimY = 0;
+    this.shipBrakeRequested = false;
+    this.shipCruiseThrust = false;
     this.keys.clear();
     this.mouseButtons.clear();
     this.pointerId = null;
@@ -920,8 +947,10 @@ export class SurfaceTraverseController {
   }
 
   private updateSpaceship(delta: number): PlanetControlState {
+    const brakeRequested = this.shipBrakeRequested || this.keys.has("KeyX");
+    this.shipBrakeRequested = false;
     const flightInput: SpaceshipFlightInput = {
-      throttle: Number(this.keys.has("KeyW")) - Number(this.keys.has("KeyS")),
+      throttle: Number(this.shipCruiseThrust || this.keys.has("KeyW")) - Number(this.keys.has("KeyS")),
       strafe: Number(this.keys.has("KeyC")) - Number(this.keys.has("KeyZ")),
       lift: Number(this.keys.has("Space"))
         - Number(this.keys.has("ControlLeft") || this.keys.has("ControlRight")),
@@ -930,7 +959,7 @@ export class SurfaceTraverseController {
       pitch: Number(this.keys.has("ArrowUp")) - Number(this.keys.has("ArrowDown")),
       roll: Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ")),
       boost: this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"),
-      brake: this.keys.has("KeyX"),
+      brake: brakeRequested,
       aimX: this.shipAimX,
       aimY: this.shipAimY,
     };
@@ -1180,11 +1209,21 @@ export class SurfaceTraverseController {
       return;
     }
     if (this.traverseMode === "spaceship") {
+      if (event.code === "KeyR" && !event.repeat) {
+        event.preventDefault();
+        this.shipCruiseThrust = !this.shipCruiseThrust;
+        return;
+      }
       if ([
         "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyZ", "KeyC", "KeyX", "Space",
         "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
       ].includes(event.code)) event.preventDefault();
+      if (event.code === "KeyX" && !event.repeat) {
+        this.shipBrakeRequested = true;
+        this.shipCruiseThrust = false;
+      }
+      if (event.code === "KeyS") this.shipCruiseThrust = false;
       this.keys.add(event.code);
       return;
     }
@@ -1232,6 +1271,8 @@ export class SurfaceTraverseController {
     this.pointerId = null;
     this.shipAimX = 0;
     this.shipAimY = 0;
+    this.shipBrakeRequested = false;
+    this.shipCruiseThrust = false;
   };
 
   private onContextMenu = (event: MouseEvent) => {
@@ -1273,12 +1314,14 @@ export class SurfaceTraverseController {
         this.pointerX = event.clientX;
         this.pointerY = event.clientY;
         if (this.mouseButtons.has(0) || this.mouseButtons.has(1)) {
-          this.shipCameraYawRad += dx * 0.0042;
-          this.shipCameraPitchRad = clamp(
-            this.shipCameraPitchRad - dy * 0.0032,
-            SHIP_CAMERA_MIN_PITCH_RAD,
-            SHIP_CAMERA_MAX_PITCH_RAD,
+          const orbit = applySpaceshipCameraOrbitDrag(
+            this.shipCameraYawRad,
+            this.shipCameraPitchRad,
+            dx,
+            dy,
           );
+          this.shipCameraYawRad = orbit.cameraYawRad;
+          this.shipCameraPitchRad = orbit.cameraPitchRad;
           this.shipAimX = 0;
           this.shipAimY = 0;
           event.preventDefault();

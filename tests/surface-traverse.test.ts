@@ -6,6 +6,7 @@ import {
 } from "../app/planet/constants";
 import {
   MARS_JUMP_ANTICIPATION_DURATION_S,
+  applySpaceshipCameraOrbitDrag,
   applySpaceshipCameraZoom,
   applyWowCameraDrag,
   applyWowCameraZoom,
@@ -163,6 +164,12 @@ describe("surface traverse physics", () => {
     expect(applySpaceshipCameraZoom(24, -120)).toBeGreaterThanOrEqual(8);
     expect(applySpaceshipCameraZoom(24, 120)).toBeGreaterThan(24);
     expect(applySpaceshipCameraZoom(MAX_CAMERA_ALTITUDE_M, 120)).toBe(MAX_CAMERA_ALTITUDE_M);
+  });
+
+  it("moves the spacecraft orbit camera in the same direction as the drag", () => {
+    const dragged = applySpaceshipCameraOrbitDrag(0, 0, 100, 50);
+    expect(dragged.cameraYawRad).toBeLessThan(0);
+    expect(dragged.cameraPitchRad).toBeGreaterThan(0);
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {

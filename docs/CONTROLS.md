@@ -43,12 +43,13 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | Turn left / right | `A` / `D` or left / right arrows | Applies direct yaw, allowing the craft to turn even while the camera is orbiting. |
 | Pitch up / down | Up / down arrows | Applies direct pitch in addition to mouse steering. |
 | Thrust / reverse | `W` / `S` | Accelerates forward or applies reverse thrust to decelerate and back up. |
-| Boost + sharp maneuver | Hold `Shift` | Raises engine thrust and turn rates for climbs, fast acceleration, and tight turns. |
-| Space brake | `X` | Rapidly cancels momentum without changing the craft's heading. |
+| Toggle cruise thrust | `R` | Locks forward thrust on for long flights. Press `R` again to coast; reverse thrust or auto-brake cancels cruise. |
+| Boost + sharp maneuver | Hold `Shift` | Raises engine thrust and turn rates for climbs, fast acceleration, and tight turns. The exhaust switches to a longer, denser orange boost plume. |
+| Auto-brake / position hold | `X` | Engages flight assist, rapidly cancels momentum, and holds the exact stopped position until the next thrust, strafe, or vertical input. |
 | Roll | `Q` / `E` | Rolls left or right. |
 | Strafe | `Z` / `C` | Applies lateral maneuvering thrust. |
 | Rise / descend | `Space` / `Ctrl` | Applies vertical thrust away from or toward Mars regardless of craft roll. |
-| Orbit camera | Hold left or middle mouse and drag | Orbits freely around the moving spacecraft without turning it. |
+| Orbit camera | Hold left or middle mouse and drag | Orbits freely around the moving spacecraft without turning it; the camera follows the drag direction. |
 | Change follow distance | Mouse wheel | Zooms continuously from an 8 m chase view to the 30,000 km planetary-scale view while remaining locked to the moving spacecraft. |
 | Stop and disembark | `Escape` | Cancels all ship velocity, leaves it parked at its exact position, and restores the spaceman beside it at that location. Press `Escape` again as the spaceman to return to survey. |
 

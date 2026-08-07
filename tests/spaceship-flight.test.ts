@@ -6,6 +6,7 @@ import {
   SurfaceSpaceship,
   SURFACE_SPACESHIP_MODEL_PATH,
   spaceshipSteerAmount,
+  spaceshipTrailStyle,
   type SpaceshipFlightInput,
 } from "../app/planet/SurfaceSpaceship";
 
@@ -94,6 +95,34 @@ describe("surface spaceship flight", () => {
     craft.dispose();
   });
 
+  it("turns existing momentum with the hull instead of sliding along the old line", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
+    }
+    const oldCourse = craft.getVelocity(new THREE.Vector3()).normalize().clone();
+    for (let frame = 0; frame < 30; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, yaw: 1 });
+    }
+
+    const velocityDirection = craft.getVelocity(new THREE.Vector3()).normalize();
+    const hullDirection = craft.getForward(new THREE.Vector3());
+    expect(velocityDirection.dot(hullDirection)).toBeGreaterThan(0.995);
+    expect(velocityDirection.dot(oldCourse)).toBeLessThan(0.7);
+    craft.dispose();
+  });
+
   it("brakes hard and remains fixed after parking in place", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
@@ -111,16 +140,49 @@ describe("surface spaceship flight", () => {
       craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
     }
     const cruiseSpeedMps = craft.getSpeedMps();
-    for (let frame = 0; frame < 60; frame += 1) {
-      craft.updateFlight(1 / 60, { ...neutralFlightInput, brake: true });
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, brake: true });
+    for (let frame = 0; frame < 120; frame += 1) {
+      craft.updateFlight(1 / 60, neutralFlightInput);
     }
-    expect(craft.getSpeedMps()).toBeLessThan(cruiseSpeedMps * 0.08);
+    expect(craft.getSpeedMps()).toBeLessThan(cruiseSpeedMps * 0.001);
+
+    const heldPosition = craft.getAbsolute(new THREE.Vector3()).clone();
+    for (let frame = 0; frame < 120; frame += 1) {
+      craft.updateFlight(1 / 60, neutralFlightInput);
+    }
+    expect(craft.getAbsolute(new THREE.Vector3()).distanceTo(heldPosition)).toBe(0);
 
     craft.stopAndPark();
     const parkedPosition = craft.getAbsolute(new THREE.Vector3()).clone();
     craft.updateFlight(1, { ...neutralFlightInput, throttle: 1, boost: true });
     expect(craft.getSpeedMps()).toBe(0);
     expect(craft.getAbsolute(new THREE.Vector3()).distanceTo(parkedPosition)).toBe(0);
+    craft.dispose();
+  });
+
+  it("uses a visibly distinct, longer-lived boost plume", () => {
+    const normal = spaceshipTrailStyle(false);
+    const boost = spaceshipTrailStyle(true);
+    expect(boost.color).not.toEqual(normal.color);
+    expect(boost.lifetimeS).toBeGreaterThan(normal.lifetimeS);
+    expect(boost.pointIntervalS).toBeLessThan(normal.pointIntervalS);
+
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
+    expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(false);
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1, boost: true });
+    expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(true);
     craft.dispose();
   });
 });
