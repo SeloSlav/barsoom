@@ -1316,7 +1316,6 @@ export class SurfaceTraverseController {
       this.pointerId = event.pointerId;
       this.pointerX = event.clientX;
       this.pointerY = event.clientY;
-      this.updateShipAimFromPointer(event.clientX, event.clientY);
       try {
         this.canvas.setPointerCapture(event.pointerId);
       } catch {
@@ -1432,20 +1431,9 @@ export class SurfaceTraverseController {
 
   private requestShipPointerLock() {
     try {
-      const request = this.canvas.requestPointerLock({ unadjustedMovement: true });
-      void request.catch(() => {
-        try {
-          void this.canvas.requestPointerLock();
-        } catch {
-          // Capture still provides a finite-drag fallback.
-        }
-      });
+      void this.canvas.requestPointerLock();
     } catch {
-      try {
-        void this.canvas.requestPointerLock();
-      } catch {
-        // Capture still provides a finite-drag fallback.
-      }
+      // Capture still provides a finite-drag fallback.
     }
   }
 
