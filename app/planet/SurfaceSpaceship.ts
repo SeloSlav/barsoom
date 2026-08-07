@@ -1,9 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import {
-  MARS_REFERENCE_RADIUS_M,
-  MARS_SURFACE_GRAVITY_M_S2,
-} from "./constants";
+import { MARS_REFERENCE_RADIUS_M } from "./constants";
 import { clamp } from "./math";
 import type { TraverseSurfaceSample } from "./SurfaceTraverseController";
 import type { Vec3 } from "./types";
@@ -76,6 +73,11 @@ export function spaceshipSteerAmount(value: number, deadZone = SHIP_STEER_DEAD_Z
   if (magnitude <= deadZone) return 0;
   const normalized = (magnitude - deadZone) / Math.max(Number.EPSILON, 1 - deadZone);
   return Math.sign(value) * normalized * normalized;
+}
+
+export function spaceshipDirectionalSteer(pointerAim: number, keyboardInput: number) {
+  const directInput = clamp(keyboardInput, -1, 1);
+  return Math.abs(directInput) > 0.001 ? directInput : spaceshipSteerAmount(pointerAim);
 }
 
 /**
@@ -314,8 +316,10 @@ export class SurfaceSpaceship {
     if (!this.active || this.parked) return;
     const delta = clamp(deltaSeconds, 0, 0.05);
     const turnMultiplier = input.boost ? SHIP_SHARP_TURN_MULTIPLIER : 1;
-    const yawInput = clamp(spaceshipSteerAmount(input.aimX) + input.yaw, -1, 1);
-    const pitchInput = clamp(spaceshipSteerAmount(input.aimY) + input.pitch, -1, 1);
+    // A pressed direction is authoritative on its axis. A stale pointer at the
+    // opposite screen edge must never cancel or reverse a keyboard command.
+    const yawInput = spaceshipDirectionalSteer(input.aimX, input.yaw);
+    const pitchInput = spaceshipDirectionalSteer(input.aimY, input.pitch);
     const rollInput = clamp(input.roll, -1, 1);
     this.previousRotation.copy(this.root.quaternion);
     this.rotationEuler.set(
@@ -324,7 +328,7 @@ export class SurfaceSpaceship {
       // -X. Negating yaw makes D/right-arrow and a pointer on the right turn
       // toward the side the player actually selected on screen.
       -yawInput * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
-      -rollInput * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
+      rollInput * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
     );
     this.rotationStep.setFromEuler(this.rotationEuler);
     this.root.quaternion.multiply(this.rotationStep).normalize();
@@ -356,8 +360,9 @@ export class SurfaceSpaceship {
     }
 
     const radiusM = Math.max(MARS_REFERENCE_RADIUS_M, this.absolute.length());
-    const gravityMps2 = MARS_SURFACE_GRAVITY_M_S2 * (MARS_REFERENCE_RADIUS_M / radiusM) ** 2;
-    if (!this.stationKeeping) this.velocity.addScaledVector(this.radialUp, -gravityMps2 * delta);
+    // The assisted spacecraft flight computer cancels local gravity. This
+    // keeps a nose-up coast climbing along the pointed flight vector instead
+    // of letting gravity detach the trajectory from the hull and pull it down.
 
     const altitudeM = radiusM - MARS_REFERENCE_RADIUS_M;
     const atmosphericDensity = Math.exp(-Math.max(0, altitudeM) / 11_100);

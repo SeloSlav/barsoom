@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   SurfaceSpaceship,
   SURFACE_SPACESHIP_MODEL_PATH,
+  spaceshipDirectionalSteer,
   spaceshipSteerAmount,
   spaceshipTrailStyle,
   type SpaceshipFlightInput,
@@ -46,6 +47,8 @@ describe("surface spaceship flight", () => {
     expect(spaceshipSteerAmount(0.5)).toBeGreaterThan(0);
     expect(spaceshipSteerAmount(-0.5)).toBeCloseTo(-spaceshipSteerAmount(0.5), 12);
     expect(spaceshipSteerAmount(1)).toBe(1);
+    expect(spaceshipDirectionalSteer(-1, 1)).toBe(1);
+    expect(spaceshipDirectionalSteer(1, -1)).toBe(-1);
   });
 
   it("integrates thrust from real delta seconds without an ephemeris-rate input", () => {
@@ -123,6 +126,71 @@ describe("surface spaceship flight", () => {
     expect(velocityDirection.dot(hullDirection)).toBeGreaterThan(0.995);
     expect(velocityDirection.dot(oldCourse)).toBeLessThan(0.7);
     craft.dispose();
+  });
+
+  it("points the nose upward and carries forward flight upward with pitch input", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    const initialRadiusM = craft.getAbsolute(new THREE.Vector3()).length();
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, pitch: 1 });
+    }
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, neutralFlightInput);
+    }
+
+    const radialUp = craft.getAbsolute(new THREE.Vector3()).normalize();
+    const nose = craft.getForward(new THREE.Vector3());
+    const flightDirection = craft.getVelocity(new THREE.Vector3()).normalize();
+    expect(nose.dot(radialUp)).toBeGreaterThan(0.99);
+    expect(flightDirection.dot(nose)).toBeGreaterThan(0.995);
+    expect(craft.getVelocity(new THREE.Vector3()).dot(radialUp)).toBeGreaterThan(0.8);
+    expect(craft.getAbsolute(new THREE.Vector3()).length()).toBeGreaterThan(initialRadiusM + 0.5);
+    craft.dispose();
+  });
+
+  it("maps Q to a visible left roll and E to a visible right roll", () => {
+    const scene = new THREE.Scene();
+    const makeCraft = () => {
+      const craft = new SurfaceSpaceship(
+        scene,
+        () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+        () => undefined,
+      );
+      craft.spawnNear(
+        new THREE.Vector3(1, 0, 0),
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(0, -1, 0),
+      );
+      craft.board();
+      return craft;
+    };
+    const qCraft = makeCraft();
+    const qVisualLeft = qCraft.getRight(new THREE.Vector3());
+    for (let frame = 0; frame < 5; frame += 1) {
+      qCraft.updateFlight(0.05, { ...neutralFlightInput, roll: -1 });
+    }
+    expect(qCraft.getUp(new THREE.Vector3()).dot(qVisualLeft)).toBeGreaterThan(0.4);
+
+    const eCraft = makeCraft();
+    const eVisualLeft = eCraft.getRight(new THREE.Vector3());
+    for (let frame = 0; frame < 5; frame += 1) {
+      eCraft.updateFlight(0.05, { ...neutralFlightInput, roll: 1 });
+    }
+    expect(eCraft.getUp(new THREE.Vector3()).dot(eVisualLeft)).toBeLessThan(-0.4);
+    qCraft.dispose();
+    eCraft.dispose();
   });
 
   it("brakes hard and remains fixed after parking in place", () => {

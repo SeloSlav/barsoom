@@ -41,17 +41,19 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | Board spacecraft | `E` | Approach within 5.5 m; the on-screen indicator changes to `BOARD SPACECRAFT` when in range. |
 | Point spacecraft | Move mouse | Pointer distance from the screen centre controls pitch and yaw. |
 | Turn left / right | `A` / `D` or left / right arrows | Turns toward the side you press, even while the camera is orbiting. Mouse steering likewise turns toward the pointer. |
-| Pitch up / down | Up / down arrows | Applies direct pitch in addition to mouse steering. |
+| Pitch up / down | Up / down arrows | Points the nose and flight path upward or downward. A pressed direction overrides mouse steering on that axis. |
 | Thrust / reverse | `W` / `S` | Accelerates forward or applies reverse thrust to decelerate and back up. |
 | Toggle cruise thrust | `R` | Locks forward thrust on for long flights. Press `R` again to coast; reverse thrust or auto-brake cancels cruise. |
 | Boost + sharp maneuver | Hold `Shift` | Raises engine thrust and turn rates for climbs, fast acceleration, and tight turns. The exhaust switches to a longer, denser orange boost plume. |
 | Auto-brake / position hold | `X` | Engages flight assist, rapidly cancels momentum, and holds the exact stopped position until the next thrust, strafe, or vertical input. |
-| Roll | `Q` / `E` | Rolls left or right. |
+| Roll left / right | `Q` / `E` | `Q` visibly rolls left and `E` visibly rolls right. |
 | Strafe | `Z` / `C` | Applies lateral maneuvering thrust. |
 | Rise / descend | `Space` / `Ctrl` | Applies vertical thrust away from or toward Mars regardless of craft roll. |
 | Orbit camera | Hold left or middle mouse and drag | Orbits freely around the moving spacecraft without turning it; the camera follows the drag direction. |
 | Change follow distance | Mouse wheel | Zooms continuously from an 8 m chase view to the 30,000 km planetary-scale view while remaining locked to the moving spacecraft. |
 | Stop and disembark | `Escape` | Cancels all ship velocity, leaves it parked at its exact position, and restores the spaceman beside it at that location. Press `Escape` again as the spaceman to return to survey. |
+
+The flight computer compensates for local gravity while piloted, so a nose-up or nose-down trajectory continues along the direction the spacecraft is pointing instead of falling away from it.
 
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 
