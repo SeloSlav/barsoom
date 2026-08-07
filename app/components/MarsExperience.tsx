@@ -178,6 +178,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         60,
         loadGraphicsPreference(),
         setGraphicsState,
+        setObservedBody,
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);

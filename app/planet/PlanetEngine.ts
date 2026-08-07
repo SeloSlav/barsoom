@@ -202,6 +202,7 @@ export class PlanetEngine {
     simulationRate = 60,
     graphicsPreference: GraphicsPreference = "auto",
     private readonly onGraphicsSettingsChange: (settings: GraphicsRuntimeState) => void = () => {},
+    private readonly onObservedBodyChange: (body: ObservedBody) => void = () => {},
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
       ? new Date(initialSimulationUtc)
@@ -494,6 +495,7 @@ export class PlanetEngine {
 
   private focusBody(body: ObservedBody) {
     this.observedBody = body;
+    this.onObservedBodyChange(body);
     this.orbiters.select(isMarsOrbiterName(body) ? body : null);
     if (body === "Mars") {
       this.releaseMoonDrag();
@@ -1162,6 +1164,9 @@ export class PlanetEngine {
     if (event.code === "Backquote" && !event.repeat && this.observedBody === "Mars") {
       event.preventDefault();
       void this.enterSurfaceTraverse();
+    } else if (event.code === "Escape" && this.observedBody !== "Mars") {
+      event.preventDefault();
+      this.focusBody("Mars");
     } else if (event.code === "Escape" && this.surfaceTraverse.active) {
       event.preventDefault();
       if (this.surfaceTraverse.mode === "spaceship") {
