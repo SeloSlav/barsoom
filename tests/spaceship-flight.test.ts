@@ -84,6 +84,7 @@ describe("surface spaceship flight", () => {
     );
     craft.board();
     const initialForward = craft.getForward(new THREE.Vector3()).clone();
+    const chaseViewRight = craft.getRight(new THREE.Vector3()).negate();
     const initialRadiusM = craft.getAbsolute(new THREE.Vector3()).length();
     for (let frame = 0; frame < 60; frame += 1) {
       craft.updateFlight(1 / 60, { ...neutralFlightInput, yaw: 1, lift: 1 });
@@ -91,6 +92,7 @@ describe("surface spaceship flight", () => {
 
     const turnedForward = craft.getForward(new THREE.Vector3());
     expect(turnedForward.dot(initialForward)).toBeLessThan(0.1);
+    expect(turnedForward.dot(chaseViewRight)).toBeGreaterThan(0.9);
     expect(craft.getAbsolute(new THREE.Vector3()).length()).toBeGreaterThan(initialRadiusM + 25);
     craft.dispose();
   });

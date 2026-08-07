@@ -320,7 +320,10 @@ export class SurfaceSpaceship {
     this.previousRotation.copy(this.root.quaternion);
     this.rotationEuler.set(
       -pitchInput * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
-      yawInput * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
+      // The craft is authored facing local +Z, so chase-view right is local
+      // -X. Negating yaw makes D/right-arrow and a pointer on the right turn
+      // toward the side the player actually selected on screen.
+      -yawInput * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
       -rollInput * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
     );
     this.rotationStep.setFromEuler(this.rotationEuler);

@@ -237,12 +237,11 @@ export function applySpaceshipCameraOrbitDrag(
   deltaY: number,
 ) {
   return {
-    // The camera sits on the negative orbit-forward vector. Subtracting the
-    // drag delta makes the camera itself follow the pointer instead of moving
-    // opposite it around the craft.
+    // The camera sits on the negative orbit-forward vector. Subtracting both
+    // drag deltas makes the camera itself follow the pointer around the craft.
     cameraYawRad: cameraYawRad - deltaX * 0.0042,
     cameraPitchRad: clamp(
-      cameraPitchRad + deltaY * 0.0032,
+      cameraPitchRad - deltaY * 0.0032,
       SHIP_CAMERA_MIN_PITCH_RAD,
       SHIP_CAMERA_MAX_PITCH_RAD,
     ),

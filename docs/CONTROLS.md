@@ -40,7 +40,7 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | --- | --- | --- |
 | Board spacecraft | `E` | Approach within 5.5 m; the on-screen indicator changes to `BOARD SPACECRAFT` when in range. |
 | Point spacecraft | Move mouse | Pointer distance from the screen centre controls pitch and yaw. |
-| Turn left / right | `A` / `D` or left / right arrows | Applies direct yaw, allowing the craft to turn even while the camera is orbiting. |
+| Turn left / right | `A` / `D` or left / right arrows | Turns toward the side you press, even while the camera is orbiting. Mouse steering likewise turns toward the pointer. |
 | Pitch up / down | Up / down arrows | Applies direct pitch in addition to mouse steering. |
 | Thrust / reverse | `W` / `S` | Accelerates forward or applies reverse thrust to decelerate and back up. |
 | Toggle cruise thrust | `R` | Locks forward thrust on for long flights. Press `R` again to coast; reverse thrust or auto-brake cancels cruise. |

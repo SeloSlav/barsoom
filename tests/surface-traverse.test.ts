@@ -169,7 +169,7 @@ describe("surface traverse physics", () => {
   it("moves the spacecraft orbit camera in the same direction as the drag", () => {
     const dragged = applySpaceshipCameraOrbitDrag(0, 0, 100, 50);
     expect(dragged.cameraYawRad).toBeLessThan(0);
-    expect(dragged.cameraPitchRad).toBeGreaterThan(0);
+    expect(dragged.cameraPitchRad).toBeLessThan(0);
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {
