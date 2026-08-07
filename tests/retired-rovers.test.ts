@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
 import { MARS_LANDMARKS } from "../app/planet/landmarks";
+import { dot3, localEnuBasis } from "../app/planet/math";
 import {
   createRetiredRoverModel,
   fitRoverAssetToPhysicalSize,
@@ -12,6 +13,7 @@ import {
 import {
   RETIRED_ROVER_SITES,
   roverModelBasis,
+  roverFacingHeading,
   roverSiteDirection,
   roverVisitCoordinates,
 } from "../app/planet/roverSites";
@@ -65,7 +67,24 @@ describe("retired Mars rover heritage sites", () => {
       expect(landmark?.landingLongitudeDeg).toBe(visit.longitudeDeg);
       const separationM = Math.abs(site.latitudeDeg - visit.latitudeDeg) * Math.PI / 180 * MARS_REFERENCE_RADIUS_M;
       expect(separationM).toBeCloseTo(site.visitDistanceM, 6);
-      expect(visit.headingRad).toBe(0);
+      expect(Math.abs(visit.headingRad)).toBeCloseTo(Math.PI, 8);
+
+      const visitorDirection = roverSiteDirection(visit);
+      const roverDirection = roverSiteDirection(site);
+      const basis = localEnuBasis(visit.latitudeDeg, visit.longitudeDeg);
+      const facing = {
+        x: basis.north.x * Math.cos(visit.headingRad) + basis.east.x * Math.sin(visit.headingRad),
+        y: basis.north.y * Math.cos(visit.headingRad) + basis.east.y * Math.sin(visit.headingRad),
+        z: basis.north.z * Math.cos(visit.headingRad) + basis.east.z * Math.sin(visit.headingRad),
+      };
+      const radialComponent = dot3(roverDirection, visitorDirection);
+      const towardRover = {
+        x: roverDirection.x - visitorDirection.x * radialComponent,
+        y: roverDirection.y - visitorDirection.y * radialComponent,
+        z: roverDirection.z - visitorDirection.z * radialComponent,
+      };
+      expect(dot3(facing, towardRover) / Math.hypot(towardRover.x, towardRover.y, towardRover.z)).toBeCloseTo(1, 8);
+      expect(visit.headingRad).toBe(roverFacingHeading(site, visit));
     }
   });
 

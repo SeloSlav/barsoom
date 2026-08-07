@@ -1,5 +1,5 @@
 import { MARS_REFERENCE_RADIUS_M } from "./constants";
-import { localEnuBasis } from "./math";
+import { dot3, localEnuBasis, normalize3 } from "./math";
 import type { Vec3 } from "./types";
 
 export type RetiredRoverModel = "sojourner" | "mer";
@@ -74,14 +74,30 @@ export function roverSiteDirection(site: Pick<RetiredRoverSite, "latitudeDeg" | 
   };
 }
 
-/** Places a visitor south of the artifact, facing due north toward it. */
+export function roverFacingHeading(
+  site: Pick<RetiredRoverSite, "latitudeDeg" | "longitudeDeg">,
+  visitor: { latitudeDeg: number; longitudeDeg: number },
+) {
+  const visitorDirection = roverSiteDirection(visitor);
+  const roverDirection = roverSiteDirection(site);
+  const radialComponent = dot3(roverDirection, visitorDirection);
+  const towardRover = normalize3({
+    x: roverDirection.x - visitorDirection.x * radialComponent,
+    y: roverDirection.y - visitorDirection.y * radialComponent,
+    z: roverDirection.z - visitorDirection.z * radialComponent,
+  });
+  const basis = localEnuBasis(visitor.latitudeDeg, visitor.longitudeDeg);
+  return Math.atan2(dot3(towardRover, basis.east), dot3(towardRover, basis.north));
+}
+
+/** Places a visitor south of the artifact, facing directly toward it. */
 export function roverVisitCoordinates(site: RetiredRoverSite) {
   const latitudeOffsetDeg = site.visitDistanceM / MARS_REFERENCE_RADIUS_M * 180 / Math.PI;
-  return {
+  const visitor = {
     latitudeDeg: site.latitudeDeg - latitudeOffsetDeg,
     longitudeDeg: site.longitudeDeg,
-    headingRad: 0,
   };
+  return { ...visitor, headingRad: roverFacingHeading(site, visitor) };
 }
 
 export function roverModelBasis(site: RetiredRoverSite, surfaceNormalInput: Vec3) {
