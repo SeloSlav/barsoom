@@ -31,7 +31,7 @@ export function landingAudioTargets(narrationActive: boolean) {
 
 export function suitThrusterAudioTarget(active: boolean, narrationActive: boolean) {
   if (!active) return 0;
-  return 0.24 * (narrationActive ? 0.42 : 1);
+  return 0.42 * (narrationActive ? 0.58 : 1);
 }
 
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
@@ -217,7 +217,7 @@ export class BarsoomAudio {
     }
     if (event.type === "suitThruster") {
       if (event.active && !this.suitThrusterActive) {
-        this.playEffect("thrusterBurst", 0.3 * (this.narrationActive ? 0.42 : 1), 1.3);
+        this.playEffect("thrusterBurst", 0.52 * (this.narrationActive ? 0.58 : 1), 1.42);
       }
       this.suitThrusterActive = event.active;
       return;

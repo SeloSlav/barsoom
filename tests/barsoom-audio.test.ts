@@ -45,7 +45,7 @@ describe("spacecraft audio", () => {
 
   it("runs an audible suit-thruster loop only while maneuvering", () => {
     expect(suitThrusterAudioTarget(false, false)).toBe(0);
-    expect(suitThrusterAudioTarget(true, false)).toBeGreaterThan(0.2);
-    expect(suitThrusterAudioTarget(true, true)).toBeGreaterThan(0.09);
+    expect(suitThrusterAudioTarget(true, false)).toBeGreaterThan(0.4);
+    expect(suitThrusterAudioTarget(true, true)).toBeGreaterThan(0.24);
   });
 });

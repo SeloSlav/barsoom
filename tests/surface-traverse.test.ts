@@ -12,6 +12,7 @@ import {
   applyWowCameraDrag,
   applyWowCameraZoom,
   crossedLoopingAnimationPhase,
+  findSuitThrusterFootBone,
   groundAutopilotStoppingDistanceM,
   isWowAutoRunKey,
   isSpaceshipManualFlightControlKey,
@@ -82,6 +83,18 @@ describe("surface traverse physics", () => {
     expect(diagonal.z).toBeLessThan(0);
     expect(diagonal.y).toBeLessThan(0);
     expect(Math.hypot(diagonal.x, diagonal.y, diagonal.z)).toBeCloseTo(1, 12);
+  });
+
+  it("binds boot thrusters to the dotted foot-bone names in the astronaut asset", () => {
+    const leftFoot = { name: "left" };
+    const rightFoot = { name: "right" };
+    const bones = new Map([
+      ["Foot.L", leftFoot],
+      ["Foot.R", rightFoot],
+    ]);
+
+    expect(findSuitThrusterFootBone(bones, "left")).toBe(leftFoot);
+    expect(findSuitThrusterFootBone(bones, "right")).toBe(rightFoot);
   });
 
   it("detects foot contacts from looping animation phase without cadence drift", () => {

@@ -74,6 +74,10 @@ const FOOT_CONTACT_PHASES: Record<LocomotionAnimationName, readonly number[]> = 
   run: [0, 0.5],
 };
 const SUIT_THRUSTER_DOWN_BIAS = 0.22;
+const SUIT_THRUSTER_FOOT_BONE_ALIASES = {
+  left: ["Foot.L", "FootL", "LeftFoot", "mixamorigLeftFoot"],
+  right: ["Foot.R", "FootR", "RightFoot", "mixamorigRightFoot"],
+} as const;
 
 type JumpPoseWeights = {
   squat: number;
@@ -147,6 +151,24 @@ export function suitThrusterLocalDirection(
     y: -down / length,
     z: -forwardInput / length,
   };
+}
+
+/** Resolves the boot bones across dotted, compact, and Mixamo-style rigs. */
+export function findSuitThrusterFootBone<T>(
+  bones: ReadonlyMap<string, T>,
+  side: keyof typeof SUIT_THRUSTER_FOOT_BONE_ALIASES,
+): T | null {
+  const aliases = SUIT_THRUSTER_FOOT_BONE_ALIASES[side];
+  for (const alias of aliases) {
+    const bone = bones.get(alias);
+    if (bone) return bone;
+  }
+
+  const normalizedAliases = new Set(aliases.map((alias) => alias.replace(/[^a-z0-9]/gi, "").toLowerCase()));
+  for (const [name, bone] of bones) {
+    if (normalizedAliases.has(name.replace(/[^a-z0-9]/gi, "").toLowerCase())) return bone;
+  }
+  return null;
 }
 
 export function crossedLoopingAnimationPhase(
@@ -530,6 +552,7 @@ export class SurfaceTraverseController {
   private readonly suitThrusterDirectionLocal = new THREE.Vector3();
   private readonly suitThrusterSourceAxis = new THREE.Vector3(0, -1, 0);
   private readonly suitThrusterPlumes: THREE.Group[] = [];
+  private readonly suitThrusterFootBones: Array<THREE.Bone | null> = [null, null];
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
@@ -644,6 +667,8 @@ export class SurfaceTraverseController {
           child.frustumCulled = false;
         }
       });
+      this.suitThrusterFootBones[0] = findSuitThrusterFootBone(this.poseBones, "left");
+      this.suitThrusterFootBones[1] = findSuitThrusterFootBone(this.poseBones, "right");
       this.root.add(this.model);
 
       this.mixer = new THREE.AnimationMixer(this.model);
@@ -1136,11 +1161,10 @@ export class SurfaceTraverseController {
 
     this.suitThrusterTimeSeconds += deltaSeconds;
     this.suitThrusterDirectionLocal.set(direction.x, direction.y, direction.z);
-    const feet = [this.poseBones.get("FootL"), this.poseBones.get("FootR")];
     this.model?.updateWorldMatrix(true, true);
     for (let index = 0; index < this.suitThrusterPlumes.length; index += 1) {
       const plume = this.suitThrusterPlumes[index];
-      const foot = feet[index];
+      const foot = this.suitThrusterFootBones[index];
       plume.visible = Boolean(foot);
       if (!foot) continue;
 
