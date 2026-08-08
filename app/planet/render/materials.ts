@@ -615,9 +615,11 @@ const terrainFragment = /* glsl */ `
 
     float distanceM = length(vWorldPosition);
     float surfaceDensity = exp(-max(uCameraAltitude, 0.0) / ${ATMOSPHERE_CONFIG.scaleHeightM.toFixed(1)});
-    float horizonPath = 1.0 - exp(-distanceM / 90000.0);
+    float weatherVisibilityM = mix(90000.0, 9000.0, clamp(uDustActivity, 0.0, 1.0));
+    float horizonPath = 1.0 - exp(-distanceM / weatherVisibilityM);
     float haze = clamp(horizonPath * surfaceDensity * ${ATMOSPHERE_CONFIG.aerialPerspective.toFixed(2)}, 0.0, 0.82);
     vec3 hazeColour = mix(vec3(0.15, 0.055, 0.035), vec3(0.72, 0.20, 0.075), pow(max(dot(viewDirection, sun), 0.0), 6.0));
+    hazeColour = mix(hazeColour, vec3(0.49, 0.13, 0.045), uDustActivity * 0.46);
     colour = mix(colour, hazeColour, haze * (0.42 + 0.58 * daylight));
 
     // A tiny linear-space finish opens the low mid-tones without lifting
@@ -1013,11 +1015,11 @@ const atmosphereFragment = /* glsl */ `
     vec3 dustySky = mix(vec3(0.13, 0.035, 0.018), vec3(0.70, 0.235, 0.075), horizonGlow);
     dustySky = mix(dustySky, vec3(0.34, 0.43, 0.52), solarAureole * 0.48);
     float cameraDustVeil = dustWeatherField(cameraUp);
-    float stormBoost = uDustActivity * cameraDustVeil;
-    dustySky = mix(dustySky, vec3(0.50, 0.14, 0.045), stormBoost * 0.24);
-    colour += dustySky * nearGround * (0.14 + horizonGlow * (0.38 + stormBoost * 0.24)) *
-      (0.22 + localDaylight * 0.78) * (1.0 + stormBoost * 0.32);
-    float surfaceAlpha = nearGround * (0.14 + horizonGlow * (0.46 + stormBoost * 0.20)) *
+    float stormBoost = uDustActivity * mix(0.35, 1.0, cameraDustVeil);
+    dustySky = mix(dustySky, vec3(0.50, 0.14, 0.045), stormBoost * 0.42);
+    colour += dustySky * nearGround * (0.14 + horizonGlow * (0.38 + stormBoost * 0.36)) *
+      (0.22 + localDaylight * 0.78) * (1.0 + stormBoost * 0.52);
+    float surfaceAlpha = nearGround * (0.14 + horizonGlow * (0.46 + stormBoost * 0.32)) *
       (0.30 + localDaylight * 0.70);
     float alpha = clamp(max(surfaceAlpha, opticalAlpha * 0.92 + dot(colour, vec3(0.22))), 0.0, 0.96);
     float atmosphereLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));

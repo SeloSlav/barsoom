@@ -99,9 +99,9 @@ const cloudFragment = /* glsl */ `
       noise3(vec3(radial.y * 5.0 + uTime * 0.000018, radial.x * 1.3, radial.z * 1.3))
     );
     float structure = (broad * 0.72 + filament * 0.28) * latitudeBand;
-    float threshold = mix(0.89, 0.53, clamp(uCoverage, 0.0, 1.0));
+    float threshold = mix(0.76, 0.32, clamp(uCoverage, 0.0, 1.0));
     float cloud = smoothstep(threshold, threshold + 0.115, structure);
-    cloud *= smoothstep(0.30, 0.68, filament);
+    cloud *= smoothstep(0.27, 0.60, filament);
 
     float sunHeight = dot(radial, sun);
     float daylight = smoothstep(-0.22, 0.10, sunHeight);
@@ -111,7 +111,7 @@ const cloudFragment = /* glsl */ `
     float pathLength = clamp(0.24 / max(facing, 0.10), 0.38, 2.15);
 
     vec3 waterShadow = vec3(0.37, 0.34, 0.33);
-    vec3 waterLight = vec3(0.91, 0.84, 0.74);
+    vec3 waterLight = vec3(0.98, 0.93, 0.86);
     vec3 colour = mix(waterShadow, waterLight, 0.22 + daylight * 0.70);
     float visibility = 0.32 + daylight * 0.68;
 
@@ -144,7 +144,7 @@ export function createMarsCloudMaterial(layerKind: "water" | "co2") {
       uTime: { value: 0 },
       uCoverage: { value: water ? 0.48 : 0.18 },
       uScale: { value: water ? 7.2 : 10.5 },
-      uOpacity: { value: water ? 0.34 : 0.25 },
+      uOpacity: { value: water ? 0.52 : 0.28 },
       uLayerKind: { value: water ? 0 : 1 },
     },
     transparent: true,
@@ -210,7 +210,7 @@ const dustFragment = /* glsl */ `
     float soft = 1.0 - smoothstep(0.20, 0.50, length(point));
     if (soft <= 0.001 || vOpacity <= 0.001) discard;
     vec3 colour = mix(vec3(0.42, 0.16, 0.075), vec3(0.70, 0.30, 0.13), vWarmth);
-    gl_FragColor = vec4(colour, soft * vOpacity * 0.23);
+    gl_FragColor = vec4(colour, soft * vOpacity * 0.38);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -316,7 +316,7 @@ export class WeatherRenderer {
       cloudCover = 0.08;
       dustActivity = 0.08;
     } else if (this.preset === "cloudy") {
-      cloudCover = 0.86;
+      cloudCover = 0.95;
       dustActivity = 0.24;
     } else if (this.preset === "dust-storm") {
       cloudCover = 0.22;
