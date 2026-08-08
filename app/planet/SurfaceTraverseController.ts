@@ -53,6 +53,7 @@ const SHIP_CAMERA_MAX_DISTANCE_M = CAMERA_MAX_DISTANCE_M;
 const SHIP_CAMERA_DEFAULT_PITCH_RAD = 0;
 const SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S = 1.9;
 const SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S = 1.55;
+const SHIP_FREE_LOOK_RETURN_RATE_S = 7;
 const SHIP_EXIT_OFFSET_M = 4.2;
 const SHIP_EXIT_GROUND_SNAP_M = 6;
 
@@ -267,6 +268,23 @@ export function applySpaceshipCameraPointerSteer(
   };
 }
 
+export function spaceshipAltFreeLook(
+  altHeld: boolean,
+  leftButton: boolean,
+  middleButton: boolean,
+  rightButton: boolean,
+) {
+  return altHeld && ((leftButton && !rightButton) || middleButton);
+}
+
+export function recenterSpaceshipFreeLook(angleRad: number, deltaSeconds: number) {
+  const wrappedAngleRad = Math.atan2(Math.sin(angleRad), Math.cos(angleRad));
+  const next = wrappedAngleRad * Math.exp(
+    -SHIP_FREE_LOOK_RETURN_RATE_S * clamp(deltaSeconds, 0, 0.05),
+  );
+  return Math.abs(next) < 1e-4 ? 0 : next;
+}
+
 export function rebaseCameraAnchorForTerrainChange(
   cameraAnchorHeightM: number,
   desiredCameraAnchorHeightM: number,
@@ -369,6 +387,10 @@ export class SurfaceTraverseController {
   private readonly shipCameraBaseUp = new THREE.Vector3();
   private readonly shipCameraForward = new THREE.Vector3();
   private readonly shipCameraUp = new THREE.Vector3();
+  private readonly shipViewForward = new THREE.Vector3();
+  private readonly shipViewRight = new THREE.Vector3();
+  private readonly shipViewUp = new THREE.Vector3();
+  private readonly shipViewRotation = new THREE.Quaternion();
   private readonly orientation = new THREE.Matrix4();
   private readonly poseEuler = new THREE.Euler();
   private readonly poseQuaternion = new THREE.Quaternion();
@@ -423,6 +445,8 @@ export class SurfaceTraverseController {
   private shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
   private shipCameraYawRad = 0;
   private shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+  private shipLookYawRad = 0;
+  private shipLookPitchRad = 0;
   private shipBrakeRequested = false;
   private shipCruiseThrust = false;
   private disposed = false;
@@ -550,6 +574,8 @@ export class SurfaceTraverseController {
     this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
     this.shipCameraYawRad = 0;
     this.shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+    this.shipLookYawRad = 0;
+    this.shipLookPitchRad = 0;
     this.shipBrakeRequested = false;
     this.shipCruiseThrust = false;
     this.active = true;
@@ -577,7 +603,8 @@ export class SurfaceTraverseController {
     this.spaceship.deactivate();
     this.keys.clear();
     this.mouseButtons.clear();
-    this.releaseShipPointerLock();
+    this.shipLookYawRad = 0;
+    this.shipLookPitchRad = 0;
     this.autoMoveMode = "off";
     this.camera.fov = this.surveyFovDegrees;
     this.camera.updateProjectionMatrix();
@@ -875,6 +902,8 @@ export class SurfaceTraverseController {
     this.shipCameraDistanceM = SHIP_CAMERA_DEFAULT_DISTANCE_M;
     this.shipCameraYawRad = 0;
     this.shipCameraPitchRad = SHIP_CAMERA_DEFAULT_PITCH_RAD;
+    this.shipLookYawRad = 0;
+    this.shipLookPitchRad = 0;
     this.shipBrakeRequested = false;
     this.shipCruiseThrust = false;
     this.cameraCollisionFraction = 1;
@@ -961,7 +990,8 @@ export class SurfaceTraverseController {
     this.shipAimY = 0;
     this.shipBrakeRequested = false;
     this.shipCruiseThrust = false;
-    this.releaseShipPointerLock();
+    this.shipLookYawRad = 0;
+    this.shipLookPitchRad = 0;
     this.keys.clear();
     this.mouseButtons.clear();
     this.pointerId = null;
@@ -990,6 +1020,18 @@ export class SurfaceTraverseController {
       .normalize();
   }
 
+  private updateShipViewFrame() {
+    this.shipViewForward.copy(this.shipCameraForward);
+    this.shipViewUp.copy(this.shipCameraUp);
+    this.shipViewRotation.setFromAxisAngle(this.shipCameraUp, this.shipLookYawRad);
+    this.shipViewForward.applyQuaternion(this.shipViewRotation).normalize();
+    this.shipViewUp.applyQuaternion(this.shipViewRotation).normalize();
+    this.shipViewRight.crossVectors(this.shipViewForward, this.shipViewUp).normalize();
+    this.shipViewRotation.setFromAxisAngle(this.shipViewRight, this.shipLookPitchRad);
+    this.shipViewForward.applyQuaternion(this.shipViewRotation).normalize();
+    this.shipViewUp.applyQuaternion(this.shipViewRotation).normalize();
+  }
+
   private updateSpaceship(delta: number): PlanetControlState {
     const brakeRequested = this.shipBrakeRequested || this.keys.has("KeyX");
     this.shipBrakeRequested = false;
@@ -999,7 +1041,8 @@ export class SurfaceTraverseController {
     );
     const cameraOrbiting = (this.mouseButtons.has(0) && !this.mouseButtons.has(2)) ||
       this.mouseButtons.has(1);
-    if (!cameraOrbiting) {
+    const altHeld = this.keys.has("AltLeft") || this.keys.has("AltRight");
+    if (!cameraOrbiting && !altHeld) {
       const cameraAim = applySpaceshipCameraPointerSteer(
         this.shipCameraYawRad,
         this.shipCameraPitchRad,
@@ -1010,7 +1053,12 @@ export class SurfaceTraverseController {
       this.shipCameraYawRad = cameraAim.cameraYawRad;
       this.shipCameraPitchRad = cameraAim.cameraPitchRad;
     }
+    if (!altHeld) {
+      this.shipLookYawRad = recenterSpaceshipFreeLook(this.shipLookYawRad, delta);
+      this.shipLookPitchRad = recenterSpaceshipFreeLook(this.shipLookPitchRad, delta);
+    }
     this.updateShipCameraFrame();
+    this.updateShipViewFrame();
     const flightInput: SpaceshipFlightInput = {
       throttle: Number(this.shipCruiseThrust || this.keys.has("KeyW") || mouseForward)
         - Number(this.keys.has("KeyS")),
@@ -1043,7 +1091,7 @@ export class SurfaceTraverseController {
 
     this.targetAbsolute.copy(this.shipAbsolute).addScaledVector(this.shipRadialUp, 1.5);
     this.desiredCameraAbsolute.copy(this.targetAbsolute)
-      .addScaledVector(this.shipCameraForward, -this.shipCameraDistanceM);
+      .addScaledVector(this.shipViewForward, -this.shipCameraDistanceM);
     const safeCollisionFraction = this.safeCameraCollisionFraction(this.desiredCameraAbsolute);
     if (safeCollisionFraction < this.cameraCollisionFraction) {
       this.cameraCollisionFraction = safeCollisionFraction;
@@ -1070,7 +1118,7 @@ export class SurfaceTraverseController {
     this.relativeTarget.copy(this.targetAbsolute).sub(this.cameraAbsolute).normalize();
     // This is the analytic up-vector of the orbit circle. It rolls through
     // both poles continuously, avoiding the former fallback-axis snap.
-    this.camera.up.copy(this.shipCameraUp);
+    this.camera.up.copy(this.shipViewUp);
     this.camera.lookAt(this.relativeTarget);
     this.camera.near = clamp(this.shipCameraDistanceM * 0.000001, 0.08, 30);
     this.camera.far = Math.max(
@@ -1276,7 +1324,7 @@ export class SurfaceTraverseController {
       }
       if ([
         "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyZ", "KeyC", "KeyX", "Space",
-        "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
+        "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight",
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
       ].includes(event.code)) event.preventDefault();
       if (event.code === "KeyX" && !event.repeat) {
@@ -1323,6 +1371,10 @@ export class SurfaceTraverseController {
 
   private onKeyUp = (event: KeyboardEvent) => {
     this.keys.delete(event.code);
+    if (this.traverseMode === "spaceship" && (event.code === "AltLeft" || event.code === "AltRight")) {
+      this.shipAimX = 0;
+      this.shipAimY = 0;
+    }
   };
 
   private onBlur = () => {
@@ -1333,7 +1385,8 @@ export class SurfaceTraverseController {
     this.shipAimY = 0;
     this.shipBrakeRequested = false;
     this.shipCruiseThrust = false;
-    this.releaseShipPointerLock();
+    this.shipLookYawRad = 0;
+    this.shipLookPitchRad = 0;
   };
 
   private onContextMenu = (event: MouseEvent) => {
@@ -1354,10 +1407,7 @@ export class SurfaceTraverseController {
       try {
         this.canvas.setPointerCapture(event.pointerId);
       } catch {
-        // Pointer lock can supersede capture on some browsers.
-      }
-      if ((event.button === 0 || event.button === 1) && !this.mouseButtons.has(2)) {
-        this.requestShipPointerLock();
+        // Pointer capture is only a drag convenience; controls still work without it.
       }
       return;
     }
@@ -1377,28 +1427,35 @@ export class SurfaceTraverseController {
     if (this.active && this.traverseMode === "spaceship") {
       if (this.pointerId === event.pointerId) {
         this.syncMouseButtons(event.buttons);
-        const pointerLocked = document.pointerLockElement === this.canvas;
-        const dx = pointerLocked ? event.movementX : event.clientX - this.pointerX;
-        const dy = pointerLocked ? event.movementY : event.clientY - this.pointerY;
-        if (!pointerLocked) {
-          this.pointerX = event.clientX;
-          this.pointerY = event.clientY;
-        }
+        const dx = event.clientX - this.pointerX;
+        const dy = event.clientY - this.pointerY;
+        this.pointerX = event.clientX;
+        this.pointerY = event.clientY;
         const cameraOrbiting = (this.mouseButtons.has(0) && !this.mouseButtons.has(2)) ||
           this.mouseButtons.has(1);
         if (cameraOrbiting) {
+          const freeLooking = spaceshipAltFreeLook(
+            event.altKey || this.keys.has("AltLeft") || this.keys.has("AltRight"),
+            this.mouseButtons.has(0),
+            this.mouseButtons.has(1),
+            this.mouseButtons.has(2),
+          );
           const orbit = applySpaceshipCameraOrbitDrag(
-            this.shipCameraYawRad,
-            this.shipCameraPitchRad,
+            freeLooking ? this.shipLookYawRad : this.shipCameraYawRad,
+            freeLooking ? this.shipLookPitchRad : this.shipCameraPitchRad,
             dx,
             dy,
           );
-          this.shipCameraYawRad = orbit.cameraYawRad;
-          this.shipCameraPitchRad = orbit.cameraPitchRad;
+          if (freeLooking) {
+            this.shipLookYawRad = orbit.cameraYawRad;
+            this.shipLookPitchRad = orbit.cameraPitchRad;
+          } else {
+            this.shipCameraYawRad = orbit.cameraYawRad;
+            this.shipCameraPitchRad = orbit.cameraPitchRad;
+          }
           event.preventDefault();
           return;
         }
-        if (pointerLocked) return;
       }
       this.updateShipAimFromPointer(event.clientX, event.clientY);
       return;
@@ -1432,7 +1489,6 @@ export class SurfaceTraverseController {
         if (this.canvas.hasPointerCapture(event.pointerId)) this.canvas.releasePointerCapture(event.pointerId);
         this.pointerId = null;
         this.mouseButtons.clear();
-        this.releaseShipPointerLock();
       }
       return;
     }
@@ -1464,20 +1520,6 @@ export class SurfaceTraverseController {
       -1,
       1,
     );
-  }
-
-  private requestShipPointerLock() {
-    try {
-      void this.canvas.requestPointerLock();
-    } catch {
-      // Capture still provides a finite-drag fallback.
-    }
-  }
-
-  private releaseShipPointerLock() {
-    if (typeof document !== "undefined" && document.pointerLockElement === this.canvas) {
-      document.exitPointerLock();
-    }
   }
 
   private syncMouseButtons(buttons: number) {

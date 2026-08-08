@@ -19,7 +19,9 @@ import {
   randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
   rebaseCameraAnchorForTerrainChange,
+  recenterSpaceshipFreeLook,
   smoothCameraHeight,
+  spaceshipAltFreeLook,
   spaceshipMouseForward,
   surfaceCameraRight,
   wowCameraOrbitDistances,
@@ -184,6 +186,26 @@ describe("surface traverse physics", () => {
     );
     expect(firstLoop.cameraPitchRad).toBeLessThan(-Math.PI * 2);
     expect(secondLoop.cameraPitchRad).toBeLessThan(firstLoop.cameraPitchRad - Math.PI * 2);
+  });
+
+  it("uses Alt-drag as free-look without stealing the two-button thrust chord", () => {
+    expect(spaceshipAltFreeLook(true, true, false, false)).toBe(true);
+    expect(spaceshipAltFreeLook(true, false, true, false)).toBe(true);
+    expect(spaceshipAltFreeLook(false, true, false, false)).toBe(false);
+    expect(spaceshipAltFreeLook(true, true, false, true)).toBe(false);
+  });
+
+  it("smoothly recentres free-look after Alt is released", () => {
+    let angleRad = Math.PI * 4 + 1;
+    const firstFrame = recenterSpaceshipFreeLook(angleRad, 1 / 60);
+    expect(firstFrame).toBeGreaterThan(0);
+    expect(firstFrame).toBeLessThan(1);
+
+    angleRad = firstFrame;
+    for (let frame = 0; frame < 120; frame += 1) {
+      angleRad = recenterSpaceshipFreeLook(angleRad, 1 / 60);
+    }
+    expect(angleRad).toBe(0);
   });
 
   it("engages spacecraft forward thrust only for the two-button chord", () => {
