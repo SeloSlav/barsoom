@@ -18,13 +18,16 @@ const SHIP_PITCH_RATE_RAD_S = 1.55;
 const SHIP_ROLL_RATE_RAD_S = 2.25;
 const SHIP_SHARP_TURN_MULTIPLIER = 1.85;
 const SHIP_MAX_SPEED_M_S = 12_000;
-const SHIP_TRAIL_MAX_POINTS = 240;
+const SHIP_TRAIL_MAX_POINTS = 420;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
 const SHIP_TRANSLATION_RESPONSE_S = 16;
 const SHIP_AIM_RESPONSE_S = 9;
 const SHIP_AIM_MAX_RATE_RAD_S = 2.8;
 const SHIP_MODEL_LENGTH_M = 9.2;
+const SHIP_ENGINE_NOZZLE_Z = -4.55;
+const SHIP_ENGINE_FLAME_LENGTH_M = 1.9;
+const SHIP_BOOST_FLAME_LENGTH_M = 5.8;
 
 export const SHIP_BOARD_DISTANCE_M = 5.5;
 export const SURFACE_SPACESHIP_MODEL_PATH = "/models/surface-spaceship.glb";
@@ -49,6 +52,17 @@ type TrailPoint = {
   lifeS: number;
   maxLifeS: number;
   boosted: boolean;
+  phase: number;
+};
+
+type PlumeMesh = THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+
+type EnginePlume = {
+  outer: PlumeMesh;
+  core: PlumeMesh;
+  boostOuter: PlumeMesh;
+  boostCore: PlumeMesh;
+  shockDiamonds: PlumeMesh[];
 };
 
 export type SpaceshipTrailStyle = {
@@ -58,19 +72,47 @@ export type SpaceshipTrailStyle = {
 };
 
 const NORMAL_TRAIL_STYLE: SpaceshipTrailStyle = {
-  color: [0.22, 0.68, 1],
-  lifetimeS: 4.2,
-  pointIntervalS: 0.035,
+  color: [0.08, 0.52, 1],
+  lifetimeS: 4.8,
+  pointIntervalS: 0.03,
 };
 
 const BOOST_TRAIL_STYLE: SpaceshipTrailStyle = {
-  color: [1, 0.3, 0.055],
-  lifetimeS: 7.4,
-  pointIntervalS: 0.016,
+  color: [1, 0.22, 0.025],
+  lifetimeS: 8,
+  pointIntervalS: 0.014,
 };
 
 export function spaceshipTrailStyle(boosted: boolean): SpaceshipTrailStyle {
   return boosted ? BOOST_TRAIL_STYLE : NORMAL_TRAIL_STYLE;
+}
+
+export function spaceshipPlumeAnimation(
+  timeSeconds: number,
+  thrust: number,
+  boosted: boolean,
+  engineIndex = 0,
+) {
+  const power = clamp(Math.abs(thrust), 0, 1);
+  const phase = timeSeconds * (boosted ? 34 : 22) + engineIndex * 1.73;
+  const fastFlutter = 0.5 + 0.5 * Math.sin(phase);
+  const turbulence = 0.5 + 0.5 * Math.sin(phase * 0.43 + Math.sin(phase * 0.19));
+  return {
+    outerLengthScale: (0.72 + power * 0.72) * (0.9 + fastFlutter * 0.12),
+    outerRadiusScale: (0.76 + power * 0.3) * (0.94 + turbulence * 0.08),
+    outerOpacity: 0.42 + power * 0.34,
+    coreLengthScale: (0.62 + power * 0.58) * (0.91 + turbulence * 0.13),
+    coreRadiusScale: (0.7 + power * 0.18) * (0.96 + fastFlutter * 0.06),
+    coreOpacity: 0.68 + power * 0.27,
+    boostLengthScale: boosted
+      ? (0.94 + power * 0.5) * (0.86 + turbulence * 0.2)
+      : 0,
+    boostRadiusScale: boosted
+      ? (0.9 + power * 0.38) * (0.9 + fastFlutter * 0.13)
+      : 0,
+    boostOpacity: boosted ? 0.58 + power * 0.32 : 0,
+    shockPulse: 0.76 + 0.28 * Math.sin(phase * 0.74 + 0.6),
+  };
 }
 
 export function spaceshipSteerAmount(value: number, deadZone = SHIP_STEER_DEAD_ZONE) {
@@ -122,10 +164,15 @@ export class SurfaceSpaceship {
   private readonly trailColors = new Float32Array(SHIP_TRAIL_MAX_POINTS * 3);
   private readonly leftTrailGeometry = new THREE.BufferGeometry();
   private readonly rightTrailGeometry = new THREE.BufferGeometry();
-  private readonly flames: THREE.Mesh[] = [];
-  private readonly boostFlames: THREE.Mesh[] = [];
+  private readonly enginePlumes: EnginePlume[] = [];
+  private readonly engineLight = new THREE.PointLight(0x78d8ff, 0, 18, 2);
+  private readonly trailAcross = new THREE.Vector3();
+  private readonly trailNormal = new THREE.Vector3();
+  private readonly trailLeftVisual = new THREE.Vector3();
+  private readonly trailRightVisual = new THREE.Vector3();
   private trailPoints: TrailPoint[] = [];
   private trailEmitCountdownS = 0;
+  private effectTimeSeconds = 0;
   private parked = true;
   private groundAnchored = true;
   private stationKeeping = true;
@@ -190,39 +237,63 @@ export class SurfaceSpaceship {
   }
 
   private buildEngineEffects() {
-    const engineMaterial = new THREE.MeshStandardMaterial({
-      color: 0x54bce8,
-      emissive: 0x1478aa,
-      emissiveIntensity: 2.8,
-      toneMapped: true,
-    });
-    const boostMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff7a24,
+    const material = (color: number, opacity: number) => new THREE.MeshBasicMaterial({
+      color,
       transparent: true,
-      opacity: 0.9,
+      opacity,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false,
+      side: THREE.DoubleSide,
     });
-    for (const x of [this.engineLeft.x, this.engineRight.x]) {
-      const flame = new THREE.Mesh(new THREE.ConeGeometry(0.31, 1.7, 14, 1, true), engineMaterial);
-      flame.rotation.x = -Math.PI / 2;
-      flame.position.set(x, 0.05, -5.35);
-      flame.visible = false;
-      this.flames.push(flame);
-      this.root.add(flame);
+    const normalOuterGeometry = new THREE.ConeGeometry(0.39, SHIP_ENGINE_FLAME_LENGTH_M, 18, 2, true);
+    const normalCoreGeometry = new THREE.ConeGeometry(0.19, SHIP_ENGINE_FLAME_LENGTH_M * 0.74, 16, 1, true);
+    const boostOuterGeometry = new THREE.ConeGeometry(0.43, SHIP_BOOST_FLAME_LENGTH_M, 20, 3, true);
+    const boostCoreGeometry = new THREE.ConeGeometry(0.18, SHIP_BOOST_FLAME_LENGTH_M * 0.62, 18, 2, true);
+    const shockGeometry = new THREE.OctahedronGeometry(0.2, 0);
 
-      const boostFlame = new THREE.Mesh(
-        new THREE.ConeGeometry(0.22, 4.4, 14, 1, true),
-        boostMaterial,
-      );
-      boostFlame.name = "Spacecraft boost plume";
-      boostFlame.rotation.x = -Math.PI / 2;
-      boostFlame.position.set(x, 0.05, -6.7);
-      boostFlame.visible = false;
-      this.boostFlames.push(boostFlame);
-      this.root.add(boostFlame);
-    }
+    [this.engineLeft.x, this.engineRight.x].forEach((x, engineIndex) => {
+      const outer = new THREE.Mesh(normalOuterGeometry, material(0x2b9fff, 0.68));
+      outer.name = "Spacecraft animated engine plume";
+      outer.rotation.x = -Math.PI / 2;
+
+      const core = new THREE.Mesh(normalCoreGeometry, material(0xd9fbff, 0.92));
+      core.name = "Spacecraft engine hot core";
+      core.rotation.x = -Math.PI / 2;
+
+      const boostOuter = new THREE.Mesh(boostOuterGeometry, material(0xff541c, 0.82));
+      boostOuter.name = "Spacecraft boost plume";
+      boostOuter.rotation.x = -Math.PI / 2;
+
+      const boostCore = new THREE.Mesh(boostCoreGeometry, material(0xfff2b0, 0.94));
+      boostCore.name = "Spacecraft boost hot core";
+      boostCore.rotation.x = -Math.PI / 2;
+
+      const shockDiamonds = Array.from({ length: 3 }, (_, shockIndex) => {
+        const shock = new THREE.Mesh(
+          shockGeometry,
+          material(shockIndex % 2 === 0 ? 0xfff5d6 : 0xff8b32, 0.84),
+        );
+        shock.name = "Spacecraft boost shock diamond";
+        shock.position.set(x, 0.05, SHIP_ENGINE_NOZZLE_Z - 2.15 - shockIndex * 1.28);
+        shock.visible = false;
+        shock.renderOrder = 8_998 + shockIndex;
+        this.root.add(shock);
+        return shock;
+      });
+
+      for (const plume of [outer, core, boostOuter, boostCore]) {
+        plume.position.set(x, 0.05, SHIP_ENGINE_NOZZLE_Z);
+        plume.visible = false;
+        plume.renderOrder = 9_000 + engineIndex;
+        this.root.add(plume);
+      }
+      this.enginePlumes.push({ outer, core, boostOuter, boostCore, shockDiamonds });
+    });
+
+    this.engineLight.name = "Spacecraft exhaust illumination";
+    this.engineLight.position.set(0, 0.08, SHIP_ENGINE_NOZZLE_Z - 0.25);
+    this.root.add(this.engineLight);
   }
 
   private buildTrails() {
@@ -246,23 +317,35 @@ export class SurfaceSpaceship {
     right.frustumCulled = false;
     left.renderOrder = 9_000;
     right.renderOrder = 9_000;
-    const particlesMaterial = new THREE.PointsMaterial({
+    const haloMaterial = new THREE.PointsMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.72,
-      size: 0.22,
+      opacity: 0.22,
+      size: 0.58,
       sizeAttenuation: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     });
-    const leftParticles = new THREE.Points(this.leftTrailGeometry, particlesMaterial);
-    const rightParticles = new THREE.Points(this.rightTrailGeometry, particlesMaterial.clone());
-    leftParticles.frustumCulled = false;
-    rightParticles.frustumCulled = false;
-    leftParticles.renderOrder = 9_001;
-    rightParticles.renderOrder = 9_001;
-    this.trailRoot.add(left, right, leftParticles, rightParticles);
+    const coreMaterial = new THREE.PointsMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.88,
+      size: 0.15,
+      sizeAttenuation: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    const leftHalo = new THREE.Points(this.leftTrailGeometry, haloMaterial);
+    const rightHalo = new THREE.Points(this.rightTrailGeometry, haloMaterial.clone());
+    const leftCore = new THREE.Points(this.leftTrailGeometry, coreMaterial);
+    const rightCore = new THREE.Points(this.rightTrailGeometry, coreMaterial.clone());
+    for (const particles of [leftHalo, rightHalo, leftCore, rightCore]) {
+      particles.frustumCulled = false;
+      particles.renderOrder = particles === leftHalo || particles === rightHalo ? 9_001 : 9_002;
+    }
+    this.trailRoot.add(left, right, leftHalo, rightHalo, leftCore, rightCore);
   }
 
   spawnNear(originDirection: THREE.Vector3, headingForward: THREE.Vector3, headingRight: THREE.Vector3) {
@@ -290,6 +373,7 @@ export class SurfaceSpaceship {
     this.trailRoot.visible = true;
     this.trailPoints = [];
     this.trailEmitCountdownS = 0;
+    this.effectTimeSeconds = 0;
     this.setEngineEffect(false, false);
     this.prefetch(this.surfaceDirection);
   }
@@ -479,7 +563,7 @@ export class SurfaceSpaceship {
 
     this.thrustVisible = !this.stationKeeping && Math.abs(thrust) > 0.04;
     const boostVisible = this.thrustVisible && input.boost && thrust > 0;
-    this.setEngineEffect(this.thrustVisible, boostVisible);
+    this.updateEngineEffect(delta, this.thrustVisible ? Math.abs(thrust) : 0, boostVisible);
     this.updateTrailLife(delta);
     if (this.thrustVisible) {
       const trailStyle = spaceshipTrailStyle(boostVisible);
@@ -512,6 +596,7 @@ export class SurfaceSpaceship {
       lifeS: style.lifetimeS,
       maxLifeS: style.lifetimeS,
       boosted,
+      phase: this.effectTimeSeconds * 2.3 + this.trailPoints.length * 0.61,
     });
     if (this.trailPoints.length > SHIP_TRAIL_MAX_POINTS) this.trailPoints.shift();
   }
@@ -522,11 +607,66 @@ export class SurfaceSpaceship {
   }
 
   private setEngineEffect(visible: boolean, boosted: boolean) {
-    for (const flame of this.flames) {
-      flame.visible = visible;
-      flame.scale.set(boosted ? 1.28 : 1, boosted ? 1.72 : 1, boosted ? 1.28 : 1);
+    for (const plume of this.enginePlumes) {
+      plume.outer.visible = visible;
+      plume.core.visible = visible;
+      plume.boostOuter.visible = boosted;
+      plume.boostCore.visible = boosted;
+      for (const shock of plume.shockDiamonds) shock.visible = boosted;
     }
-    for (const boostFlame of this.boostFlames) boostFlame.visible = boosted;
+    if (!visible) this.engineLight.intensity = 0;
+  }
+
+  private updateEngineEffect(deltaSeconds: number, thrust: number, boosted: boolean) {
+    this.effectTimeSeconds += deltaSeconds;
+    const visible = thrust > 0.04;
+    this.setEngineEffect(visible, visible && boosted);
+    if (!visible) return;
+
+    this.enginePlumes.forEach((plume, engineIndex) => {
+      const frame = spaceshipPlumeAnimation(this.effectTimeSeconds, thrust, boosted, engineIndex);
+      plume.outer.scale.set(frame.outerRadiusScale, frame.outerLengthScale, frame.outerRadiusScale);
+      plume.outer.position.z = SHIP_ENGINE_NOZZLE_Z
+        - SHIP_ENGINE_FLAME_LENGTH_M * frame.outerLengthScale * 0.5;
+      plume.outer.material.opacity = frame.outerOpacity;
+
+      plume.core.scale.set(frame.coreRadiusScale, frame.coreLengthScale, frame.coreRadiusScale);
+      plume.core.position.z = SHIP_ENGINE_NOZZLE_Z
+        - SHIP_ENGINE_FLAME_LENGTH_M * 0.74 * frame.coreLengthScale * 0.5;
+      plume.core.material.opacity = frame.coreOpacity;
+
+      if (boosted) {
+        plume.boostOuter.scale.set(frame.boostRadiusScale, frame.boostLengthScale, frame.boostRadiusScale);
+        plume.boostOuter.position.z = SHIP_ENGINE_NOZZLE_Z
+          - SHIP_BOOST_FLAME_LENGTH_M * frame.boostLengthScale * 0.5;
+        plume.boostOuter.material.opacity = frame.boostOpacity;
+
+        plume.boostCore.scale.set(
+          frame.boostRadiusScale * 0.72,
+          frame.boostLengthScale * 0.78,
+          frame.boostRadiusScale * 0.72,
+        );
+        plume.boostCore.position.z = SHIP_ENGINE_NOZZLE_Z
+          - SHIP_BOOST_FLAME_LENGTH_M * 0.62 * frame.boostLengthScale * 0.78 * 0.5;
+        plume.boostCore.material.opacity = Math.min(1, frame.boostOpacity + 0.12);
+
+        plume.shockDiamonds.forEach((shock, shockIndex) => {
+          const alternatingPulse = frame.shockPulse * (shockIndex % 2 === 0 ? 1 : 0.82);
+          shock.position.z = SHIP_ENGINE_NOZZLE_Z
+            - (2.05 + shockIndex * 1.28) * frame.boostLengthScale;
+          shock.scale.set(
+            frame.boostRadiusScale * alternatingPulse,
+            frame.boostRadiusScale * alternatingPulse,
+            (1.25 + shockIndex * 0.22) * alternatingPulse,
+          );
+          shock.material.opacity = frame.boostOpacity * (0.92 - shockIndex * 0.16);
+        });
+      }
+    });
+
+    this.engineLight.color.setHex(boosted ? 0xff7a30 : 0x70d9ff);
+    this.engineLight.intensity = (boosted ? 46 : 15) * clamp(thrust, 0, 1);
+    this.engineLight.distance = boosted ? 26 : 16;
   }
 
   syncVisual(cameraAbsolute: THREE.Vector3) {
@@ -536,18 +676,39 @@ export class SurfaceSpaceship {
     for (let index = 0; index < pointCount; index += 1) {
       const point = this.trailPoints[this.trailPoints.length - pointCount + index];
       const offset = index * 3;
-      this.leftTrailPositions[offset] = point.left.x - cameraAbsolute.x;
-      this.leftTrailPositions[offset + 1] = point.left.y - cameraAbsolute.y;
-      this.leftTrailPositions[offset + 2] = point.left.z - cameraAbsolute.z;
-      this.rightTrailPositions[offset] = point.right.x - cameraAbsolute.x;
-      this.rightTrailPositions[offset + 1] = point.right.y - cameraAbsolute.y;
-      this.rightTrailPositions[offset + 2] = point.right.z - cameraAbsolute.z;
-      const ageFade = Math.sqrt(clamp(point.lifeS / point.maxLifeS, 0, 1));
-      const brightness = (0.08 + 0.92 * index / Math.max(1, pointCount - 1)) * ageFade;
-      const color = spaceshipTrailStyle(point.boosted).color;
-      this.trailColors[offset] = color[0] * brightness;
-      this.trailColors[offset + 1] = color[1] * brightness;
-      this.trailColors[offset + 2] = color[2] * brightness;
+      const lifeFraction = clamp(point.lifeS / point.maxLifeS, 0, 1);
+      const age = 1 - lifeFraction;
+      this.trailAcross.subVectors(point.right, point.left).normalize();
+      this.trailNormal.copy(point.left).add(point.right).multiplyScalar(0.5).normalize();
+      const ripple = Math.sin(this.effectTimeSeconds * 8 + point.phase + age * 17)
+        * Math.pow(age, 1.25)
+        * (point.boosted ? 0.3 : 0.11);
+      const spread = Math.pow(age, 1.4) * (point.boosted ? 0.28 : 0.1);
+      this.trailLeftVisual.copy(point.left)
+        .addScaledVector(this.trailNormal, ripple)
+        .addScaledVector(this.trailAcross, -spread);
+      this.trailRightVisual.copy(point.right)
+        .addScaledVector(this.trailNormal, -ripple)
+        .addScaledVector(this.trailAcross, spread);
+
+      this.leftTrailPositions[offset] = this.trailLeftVisual.x - cameraAbsolute.x;
+      this.leftTrailPositions[offset + 1] = this.trailLeftVisual.y - cameraAbsolute.y;
+      this.leftTrailPositions[offset + 2] = this.trailLeftVisual.z - cameraAbsolute.z;
+      this.rightTrailPositions[offset] = this.trailRightVisual.x - cameraAbsolute.x;
+      this.rightTrailPositions[offset + 1] = this.trailRightVisual.y - cameraAbsolute.y;
+      this.rightTrailPositions[offset + 2] = this.trailRightVisual.z - cameraAbsolute.z;
+
+      const headBrightness = 0.08 + 0.92 * index / Math.max(1, pointCount - 1);
+      const animatedFlicker = 0.84 + 0.16 * Math.sin(this.effectTimeSeconds * 19 + point.phase);
+      const brightness = headBrightness * Math.sqrt(lifeFraction) * animatedFlicker;
+      const hotMix = clamp((lifeFraction - 0.68) / 0.32, 0, 1);
+      const tailColor = spaceshipTrailStyle(point.boosted).color;
+      const hotColor: readonly [number, number, number] = point.boosted
+        ? [1, 0.9, 0.56]
+        : [0.72, 0.96, 1];
+      this.trailColors[offset] = (tailColor[0] + (hotColor[0] - tailColor[0]) * hotMix) * brightness;
+      this.trailColors[offset + 1] = (tailColor[1] + (hotColor[1] - tailColor[1]) * hotMix) * brightness;
+      this.trailColors[offset + 2] = (tailColor[2] + (hotColor[2] - tailColor[2]) * hotMix) * brightness;
     }
     (this.leftTrailGeometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;
     (this.rightTrailGeometry.getAttribute("position") as THREE.BufferAttribute).needsUpdate = true;

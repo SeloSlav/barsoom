@@ -7,6 +7,7 @@ import {
   SURFACE_SPACESHIP_MODEL_PATH,
   spaceshipDampedInput,
   spaceshipDirectionalSteer,
+  spaceshipPlumeAnimation,
   spaceshipSteerAmount,
   spaceshipTrailStyle,
   type SpaceshipFlightInput,
@@ -292,6 +293,21 @@ describe("surface spaceship flight", () => {
     expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(false);
     craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1, boost: true });
     expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(true);
+    expect(scene.getObjectByName("Spacecraft boost hot core")?.visible).toBe(true);
+    expect(scene.getObjectByName("Spacecraft boost shock diamond")?.visible).toBe(true);
     craft.dispose();
+  });
+
+  it("animates layered plume length, turbulence, and boost intensity over time", () => {
+    const idleFrame = spaceshipPlumeAnimation(0, 0, false);
+    const cruiseFrame = spaceshipPlumeAnimation(0, 1, false);
+    const laterCruiseFrame = spaceshipPlumeAnimation(0.1, 1, false);
+    const boostFrame = spaceshipPlumeAnimation(0.1, 1, true);
+
+    expect(cruiseFrame.outerLengthScale).toBeGreaterThan(idleFrame.outerLengthScale);
+    expect(laterCruiseFrame.outerLengthScale).not.toBe(cruiseFrame.outerLengthScale);
+    expect(boostFrame.boostLengthScale).toBeGreaterThan(1);
+    expect(boostFrame.boostOpacity).toBeGreaterThan(0.8);
+    expect(boostFrame.shockPulse).not.toBe(spaceshipPlumeAnimation(0.2, 1, true).shockPulse);
   });
 });
