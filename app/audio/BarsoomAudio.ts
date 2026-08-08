@@ -2,6 +2,7 @@ export type TraverseAudioEvent =
   | { type: "step"; running: boolean }
   | { type: "jump" }
   | { type: "land" }
+  | { type: "suitThruster"; active: boolean }
   | { type: "warp" }
   | { type: "flight"; active: boolean; throttle: number; boost: boolean; maneuver: number };
 
@@ -28,6 +29,11 @@ export function landingAudioTargets(narrationActive: boolean) {
   };
 }
 
+export function suitThrusterAudioTarget(active: boolean, narrationActive: boolean) {
+  if (!active) return 0;
+  return 0.24 * (narrationActive ? 0.42 : 1);
+}
+
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
 type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition" | "boostIgnite" | "thrusterBurst";
 
@@ -38,6 +44,7 @@ const AUDIO_PATHS = {
   score: "/audio/barsoom-survey-score.mp3",
   engine: "/audio/spacecraft-engine-loop.mp3",
   booster: "/audio/spacecraft-boost-loop.mp3",
+  suitThruster: "/audio/spacecraft-boost-loop.mp3",
   stepA: "/audio/boot-step-a.mp3",
   stepB: "/audio/boot-step-b.mp3",
   stepC: "/audio/boot-step-c.mp3",
@@ -71,6 +78,7 @@ export class BarsoomAudio {
   private readonly score = createAudio(AUDIO_PATHS.score, true);
   private readonly engine = createAudio(AUDIO_PATHS.engine, true);
   private readonly booster = createAudio(AUDIO_PATHS.booster, true);
+  private readonly suitThruster = createAudio(AUDIO_PATHS.suitThruster, true);
   private readonly effects: Record<EffectId, HTMLAudioElement[]> = {
     stepA: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.stepA)),
     stepB: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.stepB)),
@@ -109,10 +117,12 @@ export class BarsoomAudio {
   private scoreVolume = 0;
   private engineVolume = 0;
   private boosterVolume = 0;
+  private suitThrusterVolume = 0;
   private flightActive = false;
   private flightThrottle = 0;
   private flightBoost = false;
   private flightManeuver = false;
+  private suitThrusterActive = false;
   private disposed = false;
 
   constructor() {
@@ -125,6 +135,7 @@ export class BarsoomAudio {
     this.score.volume = 0;
     this.engine.volume = 0;
     this.booster.volume = 0;
+    this.suitThruster.volume = 0;
     window.addEventListener("pointerdown", this.onFirstInteraction, { capture: true });
     window.addEventListener("keydown", this.onFirstInteraction, { capture: true });
     document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -172,12 +183,17 @@ export class BarsoomAudio {
     this.scoreVolume += (scoreTarget - this.scoreVolume) * blend;
     this.engineVolume += (flightTargets.engine * narrationDuck - this.engineVolume) * blend;
     this.boosterVolume += (flightTargets.booster * narrationDuck - this.boosterVolume) * blend;
+    const suitThrusterTarget = suitThrusterAudioTarget(this.suitThrusterActive, this.narrationActive);
+    const suitThrusterBlend = 1 - Math.exp(-Math.max(0, deltaSeconds) * 14);
+    this.suitThrusterVolume += (suitThrusterTarget - this.suitThrusterVolume) * suitThrusterBlend;
     this.wind.volume = this.windVolume;
     this.score.volume = this.scoreVolume;
     this.engine.volume = this.engineVolume;
     this.booster.volume = this.boosterVolume;
+    this.suitThruster.volume = this.suitThrusterVolume;
     this.engine.playbackRate = 0.88 + Math.min(1, Math.abs(this.flightThrottle)) * 0.22;
     this.booster.playbackRate = 0.98 + Math.min(1, Math.abs(this.flightThrottle)) * 0.08;
+    this.suitThruster.playbackRate = 1.34;
   }
 
   handleTraverseEvent(event: TraverseAudioEvent) {
@@ -197,6 +213,13 @@ export class BarsoomAudio {
       this.playEffect("boostIgnite", 0.95, 0.62);
       this.playEffect("observerTransition", 0.72, 0.55);
       this.playEffect("thrusterBurst", 0.7, 0.74);
+      return;
+    }
+    if (event.type === "suitThruster") {
+      if (event.active && !this.suitThrusterActive) {
+        this.playEffect("thrusterBurst", 0.3 * (this.narrationActive ? 0.42 : 1), 1.3);
+      }
+      this.suitThrusterActive = event.active;
       return;
     }
     // Physical feedback should remain audible during SOVA narration. Duck it
@@ -255,7 +278,7 @@ export class BarsoomAudio {
   }
 
   private startLoops() {
-    for (const audio of [this.wind, this.score, this.engine, this.booster]) {
+    for (const audio of [this.wind, this.score, this.engine, this.booster, this.suitThruster]) {
       if (!audio.paused) continue;
       void audio.play().catch(() => {
         // A later user interaction can retry if a browser blocks this gesture.
@@ -292,6 +315,7 @@ export class BarsoomAudio {
     this.score.pause();
     this.engine.pause();
     this.booster.pause();
+    this.suitThruster.pause();
     for (const pool of Object.values(this.effects)) {
       for (const audio of pool) audio.pause();
     }

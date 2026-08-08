@@ -30,6 +30,7 @@ import {
   spaceshipKeyboardAttitudeInput,
   spaceshipMouseForward,
   surfaceCameraRight,
+  suitThrusterLocalDirection,
   wowCameraOrbitDistances,
   wowMouseAutoRun,
   wowStrafeInput,
@@ -62,6 +63,25 @@ describe("surface traverse physics", () => {
     expect(ascending.descent).toBe(0);
     expect(descending.descent).toBeGreaterThan(0.9);
     expect(descending.squat).toBe(0);
+  });
+
+  it("aims boot thrusters opposite airborne W/S/Q/E motion", () => {
+    expect(suitThrusterLocalDirection(0, 0)).toBeNull();
+
+    const forward = suitThrusterLocalDirection(1, 0)!;
+    const backward = suitThrusterLocalDirection(-1, 0)!;
+    const left = suitThrusterLocalDirection(0, -1)!;
+    const right = suitThrusterLocalDirection(0, 1)!;
+    const diagonal = suitThrusterLocalDirection(1, 1)!;
+
+    expect(forward.z).toBeLessThan(0);
+    expect(backward.z).toBeGreaterThan(0);
+    expect(left.x).toBeLessThan(0);
+    expect(right.x).toBeGreaterThan(0);
+    expect(diagonal.x).toBeGreaterThan(0);
+    expect(diagonal.z).toBeLessThan(0);
+    expect(diagonal.y).toBeLessThan(0);
+    expect(Math.hypot(diagonal.x, diagonal.y, diagonal.z)).toBeCloseTo(1, 12);
   });
 
   it("detects foot contacts from looping animation phase without cadence drift", () => {

@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { flightAudioTargets, landingAudioTargets } from "../app/audio/BarsoomAudio";
+import {
+  flightAudioTargets,
+  landingAudioTargets,
+  suitThrusterAudioTarget,
+} from "../app/audio/BarsoomAudio";
 
 describe("spacecraft audio", () => {
   it("crossfades from an audible flight engine into the booster layer", () => {
@@ -37,5 +41,11 @@ describe("spacecraft audio", () => {
     expect(normal.suitContactVolume).toBeGreaterThan(0.3);
     expect(narrated.impactVolume).toBeGreaterThan(0.65);
     expect(narrated.suitContactVolume).toBeGreaterThan(0.2);
+  });
+
+  it("runs an audible suit-thruster loop only while maneuvering", () => {
+    expect(suitThrusterAudioTarget(false, false)).toBe(0);
+    expect(suitThrusterAudioTarget(true, false)).toBeGreaterThan(0.2);
+    expect(suitThrusterAudioTarget(true, true)).toBeGreaterThan(0.09);
   });
 });

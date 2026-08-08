@@ -73,6 +73,7 @@ const FOOT_CONTACT_PHASES: Record<LocomotionAnimationName, readonly number[]> = 
   walk: [0.08, 0.58],
   run: [0, 0.5],
 };
+const SUIT_THRUSTER_DOWN_BIAS = 0.22;
 
 type JumpPoseWeights = {
   squat: number;
@@ -127,6 +128,25 @@ export function normalizeMarsSurfaceDirection(direction: Vec3): Vec3 {
 
 export function marsJumpApexHeight(launchSpeedMps = MARS_TRAVERSE_JUMP_SPEED_M_S) {
   return (launchSpeedMps * launchSpeedMps) / (2 * MARS_SURFACE_GRAVITY_M_S2);
+}
+
+/**
+ * Returns the boot-plume direction in astronaut-local space. Gameplay strafe
+ * right maps to local -X for this model, so the reaction plume maps to +X.
+ */
+export function suitThrusterLocalDirection(
+  forwardInput: number,
+  strafeInput: number,
+): Vec3 | null {
+  const planarMagnitude = Math.hypot(forwardInput, strafeInput);
+  if (planarMagnitude <= Number.EPSILON) return null;
+  const down = SUIT_THRUSTER_DOWN_BIAS * planarMagnitude;
+  const length = Math.hypot(planarMagnitude, down);
+  return {
+    x: strafeInput / length,
+    y: -down / length,
+    z: -forwardInput / length,
+  };
 }
 
 export function crossedLoopingAnimationPhase(
@@ -507,6 +527,9 @@ export class SurfaceTraverseController {
   private readonly poseDesiredKnee = new THREE.Vector3();
   private readonly poseDirection = new THREE.Vector3();
   private readonly poseLocalDirection = new THREE.Vector3();
+  private readonly suitThrusterDirectionLocal = new THREE.Vector3();
+  private readonly suitThrusterSourceAxis = new THREE.Vector3(0, -1, 0);
+  private readonly suitThrusterPlumes: THREE.Group[] = [];
   private readonly keys = new Set<string>();
   private readonly mouseButtons = new Set<number>();
   private readonly actions = new Map<AnimationName, THREE.AnimationAction>();
@@ -533,6 +556,8 @@ export class SurfaceTraverseController {
   private landingSeconds = 0;
   private footstepAnimation: LocomotionAnimationName | null = null;
   private footstepPhase: number | null = null;
+  private suitThrusterActive = false;
+  private suitThrusterTimeSeconds = 0;
   private groundHeightM = 0;
   private surveyFovDegrees: number;
   private autoMoveMode: WowAutoMoveMode = "off";
@@ -575,6 +600,11 @@ export class SurfaceTraverseController {
     this.root.visible = false;
     this.localFill.name = "Astronaut suit fill";
     this.localFill.visible = false;
+    this.suitThrusterPlumes.push(
+      this.createSuitThrusterPlume("Left boot maneuvering thruster"),
+      this.createSuitThrusterPlume("Right boot maneuvering thruster"),
+    );
+    this.root.add(...this.suitThrusterPlumes);
     scene.add(this.root, this.localFill);
     this.spaceship = new SurfaceSpaceship(scene, terrainSurface, prefetch, onAssetError);
 
@@ -645,12 +675,71 @@ export class SurfaceTraverseController {
     }
   }
 
+  private createSuitThrusterPlume(name: string) {
+    const plume = new THREE.Group();
+    plume.name = name;
+    plume.visible = false;
+
+    const outerGeometry = new THREE.ConeGeometry(0.075, 0.52, 10, 1, true);
+    outerGeometry.translate(0, -0.26, 0);
+    const outer = new THREE.Mesh(
+      outerGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0x39bfff,
+        transparent: true,
+        opacity: 0.44,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+
+    const coreGeometry = new THREE.ConeGeometry(0.038, 0.34, 8, 1, true);
+    coreGeometry.translate(0, -0.17, 0);
+    const core = new THREE.Mesh(
+      coreGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0xd9fbff,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+
+    const nozzleGeometry = new THREE.TorusGeometry(0.054, 0.011, 6, 14);
+    nozzleGeometry.rotateX(Math.PI / 2);
+    const nozzleGlow = new THREE.Mesh(
+      nozzleGeometry,
+      new THREE.MeshBasicMaterial({
+        color: 0x8beaff,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    const light = new THREE.PointLight(0x5ed8ff, 1.4, 1.6, 2);
+    light.position.y = -0.04;
+    for (const mesh of [outer, core, nozzleGlow]) {
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 6;
+    }
+    plume.add(outer, core, nozzleGlow, light);
+    return plume;
+  }
+
   teleportRandom(random: () => number = Math.random) {
     this.teleportTo(randomMarsSurfaceDirection(random), random() * Math.PI * 2);
   }
 
   teleportTo(targetDirection: Vec3, headingRad = Math.random() * Math.PI * 2) {
     const wasActive = this.active;
+    this.setSuitThrusterActive(false);
     const next = normalizeMarsSurfaceDirection(targetDirection);
     this.direction.set(next.x, next.y, next.z);
     this.headingRad = headingRad;
@@ -709,6 +798,7 @@ export class SurfaceTraverseController {
 
   deactivate() {
     if (!this.active) return;
+    this.setSuitThrusterActive(false);
     this.active = false;
     this.root.visible = false;
     this.localFill.visible = false;
@@ -1027,6 +1117,48 @@ export class SurfaceTraverseController {
     this.footstepPhase = phase;
   }
 
+  private setSuitThrusterActive(active: boolean) {
+    if (active === this.suitThrusterActive) return;
+    this.suitThrusterActive = active;
+    if (!active) {
+      for (const plume of this.suitThrusterPlumes) plume.visible = false;
+    }
+    this.onAudioEvent({ type: "suitThruster", active });
+  }
+
+  private updateSuitThrusters(airborne: boolean, deltaSeconds: number) {
+    const forwardInput = Number(this.keys.has("KeyW")) - Number(this.keys.has("KeyS"));
+    const strafeInput = wowStrafeInput(this.keys.has("KeyQ"), this.keys.has("KeyE"));
+    const direction = suitThrusterLocalDirection(forwardInput, strafeInput);
+    const active = airborne && direction !== null;
+    this.setSuitThrusterActive(active);
+    if (!active || !direction) return;
+
+    this.suitThrusterTimeSeconds += deltaSeconds;
+    this.suitThrusterDirectionLocal.set(direction.x, direction.y, direction.z);
+    const feet = [this.poseBones.get("FootL"), this.poseBones.get("FootR")];
+    this.model?.updateWorldMatrix(true, true);
+    for (let index = 0; index < this.suitThrusterPlumes.length; index += 1) {
+      const plume = this.suitThrusterPlumes[index];
+      const foot = feet[index];
+      plume.visible = Boolean(foot);
+      if (!foot) continue;
+
+      foot.getWorldPosition(this.poseFoot);
+      this.root.worldToLocal(this.poseFoot);
+      plume.position.copy(this.poseFoot)
+        .addScaledVector(this.suitThrusterDirectionLocal, 0.055);
+      plume.position.y -= 0.045;
+      plume.quaternion.setFromUnitVectors(
+        this.suitThrusterSourceAxis,
+        this.suitThrusterDirectionLocal,
+      );
+      const pulse = Math.sin(this.suitThrusterTimeSeconds * 34 + index * 1.7);
+      const radialScale = 0.92 + pulse * 0.1;
+      plume.scale.set(radialScale, 0.92 + pulse * 0.14, radialScale);
+    }
+  }
+
   private playAnimation(name: AnimationName, fadeSeconds = 0.16) {
     if (name !== "walk" && name !== "run") this.resetFootstepSync();
     const next = this.actions.get(name) ?? this.actions.get(name === "run" ? "walk" : "idle");
@@ -1060,6 +1192,7 @@ export class SurfaceTraverseController {
 
   private boardSpaceship() {
     if (this.traverseMode !== "spaceman" || !this.shipCanBoard) return;
+    this.setSuitThrusterActive(false);
     this.traverseMode = "spaceship";
     this.shipCanBoard = false;
     this.shipDistanceM = 0;
@@ -1497,6 +1630,7 @@ export class SurfaceTraverseController {
     // This astronaut asset is authored facing local +Z. The basis +Z axis is
     // the movement heading, so no additional half-turn belongs here.
     this.root.quaternion.setFromRotationMatrix(this.orientation);
+    this.updateSuitThrusters(airborne, delta);
 
     // The camera frame stays tangent to the smooth planetary radial direction.
     // Rendered triangle normals are intentionally excluded: they are piecewise
@@ -1874,6 +2008,14 @@ export class SurfaceTraverseController {
       const materials = Array.isArray(child.material) ? child.material : [child.material];
       for (const material of materials) material.dispose();
     });
+    for (const plume of this.suitThrusterPlumes) {
+      plume.traverse((child) => {
+        if (!(child instanceof THREE.Mesh)) return;
+        child.geometry.dispose();
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        for (const material of materials) material.dispose();
+      });
+    }
     this.root.removeFromParent();
     this.localFill.removeFromParent();
   }
