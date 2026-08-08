@@ -14,6 +14,17 @@ export type FlightHudProjection = {
   angleRad: number;
 };
 
+/** Returns a fresh, range-sorted list capped to the closest destinations. */
+export function selectNearestFlightTargets<T extends { rangeM: number }>(
+  targets: readonly T[],
+  maximumTargets: number,
+) {
+  const limit = Math.max(0, Math.floor(maximumTargets));
+  return [...targets]
+    .sort((first, second) => first.rangeM - second.rangeM)
+    .slice(0, limit);
+}
+
 type FlightHudProjectionInput = {
   viewX: number;
   viewY: number;

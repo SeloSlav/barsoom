@@ -3,6 +3,7 @@ import {
   distributeFlightHudEdges,
   marsSurfaceRangeM,
   projectFlightHudTarget,
+  selectNearestFlightTargets,
   type FlightHudInsets,
 } from "../app/planet/flightNavigation";
 
@@ -74,6 +75,19 @@ describe("spacecraft flight navigation HUD", () => {
     expect(edgeMarkers[1].y - edgeMarkers[0].y).toBeGreaterThanOrEqual(44);
     expect(edgeMarkers[2].y - edgeMarkers[1].y).toBeGreaterThanOrEqual(44);
     expect(markers[3]).toMatchObject({ x: 410, y: 320, edge: null });
+  });
+
+  it("limits surface navigation to the nearest destinations", () => {
+    const targets = [
+      { id: "far", rangeM: 900 },
+      { id: "nearest", rangeM: 100 },
+      { id: "middle", rangeM: 500 },
+      { id: "near", rangeM: 300 },
+    ];
+    expect(selectNearestFlightTargets(targets, 3).map((target) => target.id))
+      .toEqual(["nearest", "near", "middle"]);
+    expect(targets.map((target) => target.id))
+      .toEqual(["far", "nearest", "middle", "near"]);
   });
 
   it("reports globe-following range for surface destinations", () => {

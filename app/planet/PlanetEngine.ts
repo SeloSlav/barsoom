@@ -25,6 +25,7 @@ import {
   distributeFlightHudEdges,
   marsSurfaceRangeM,
   projectFlightHudTarget,
+  selectNearestFlightTargets,
   type FlightHudEdge,
   type FlightHudInsets,
 } from "./flightNavigation";
@@ -1196,6 +1197,7 @@ export class PlanetEngine {
       const bounds = this.canvas.getBoundingClientRect();
       const insets = this.flightNavigationInsets(bounds);
       this.flightCameraInverse.copy(this.camera.quaternion).invert();
+      const surfaceMarkers: MarsFlightNavigationMarker[] = [];
 
       for (const landmark of MARS_LANDMARKS) {
         const direction = this.landmarkDirections.get(landmark.id);
@@ -1218,7 +1220,7 @@ export class PlanetEngine {
           direction,
           MARS_REFERENCE_RADIUS_M,
         );
-        markers.push({
+        surfaceMarkers.push({
           id: landmark.id,
           name: landmark.name,
           shortName: landmark.name.toUpperCase(),
@@ -1229,16 +1231,18 @@ export class PlanetEngine {
           occulted,
         });
       }
+      markers.push(...selectNearestFlightTargets(surfaceMarkers, 3));
 
       for (const moon of this.skyState.moons) {
         const occulted = this.orbitalTargetIsOcculted(moon.positionM);
+        if (occulted) continue;
         markers.push({
           id: moon.name,
           name: moon.name,
           shortName: moon.name.toUpperCase(),
           featureType: "Natural satellite",
           kind: "moon",
-          ...this.projectFlightNavigationTarget(moon.positionM, bounds, insets, occulted),
+          ...this.projectFlightNavigationTarget(moon.positionM, bounds, insets, false),
           rangeM: Math.hypot(
             moon.positionM.x - this.controlState.cameraAbsolute.x,
             moon.positionM.y - this.controlState.cameraAbsolute.y,
@@ -1250,13 +1254,14 @@ export class PlanetEngine {
 
       for (const orbiter of this.skyState.orbiters) {
         const occulted = this.orbitalTargetIsOcculted(orbiter.positionM);
+        if (occulted) continue;
         markers.push({
           id: orbiter.name,
           name: orbiter.name,
           shortName: orbiter.shortName,
           featureType: "Active Mars orbiter",
           kind: "orbiter",
-          ...this.projectFlightNavigationTarget(orbiter.positionM, bounds, insets, occulted),
+          ...this.projectFlightNavigationTarget(orbiter.positionM, bounds, insets, false),
           rangeM: Math.hypot(
             orbiter.positionM.x - this.controlState.cameraAbsolute.x,
             orbiter.positionM.y - this.controlState.cameraAbsolute.y,
