@@ -32,6 +32,8 @@ const SHIP_MODEL_LENGTH_M = 9.2;
 const SHIP_ENGINE_NOZZLE_Z = -4.55;
 const SHIP_ENGINE_FLAME_LENGTH_M = 1.9;
 const SHIP_BOOST_FLAME_LENGTH_M = 5.8;
+const SHIP_REVERSE_NOZZLE_Z = 3.45;
+const SHIP_REVERSE_FLAME_LENGTH_M = 2.2;
 
 export const SHIP_BOARD_DISTANCE_M = 5.5;
 export const SURFACE_SPACESHIP_MODEL_PATH = "/models/surface-spaceship.glb";
@@ -72,6 +74,11 @@ type EnginePlume = {
   boostOuter: PlumeMesh;
   boostCore: PlumeMesh;
   shockDiamonds: PlumeMesh[];
+};
+
+type ReverseThrusterPlume = {
+  outer: PlumeMesh;
+  core: PlumeMesh;
 };
 
 export type SpaceshipTrailStyle = {
@@ -179,7 +186,9 @@ export class SurfaceSpaceship {
   private readonly leftTrailGeometry = new THREE.BufferGeometry();
   private readonly rightTrailGeometry = new THREE.BufferGeometry();
   private readonly enginePlumes: EnginePlume[] = [];
+  private readonly reverseThrusterPlumes: ReverseThrusterPlume[] = [];
   private readonly engineLight = new THREE.PointLight(0x78d8ff, 0, 18, 2);
+  private readonly reverseThrusterLight = new THREE.PointLight(0xa9eeff, 0, 16, 2);
   private readonly trailAcross = new THREE.Vector3();
   private readonly trailNormal = new THREE.Vector3();
   private readonly trailLeftVisual = new THREE.Vector3();
@@ -312,6 +321,39 @@ export class SurfaceSpaceship {
     this.engineLight.name = "Spacecraft exhaust illumination";
     this.engineLight.position.set(0, 0.08, SHIP_ENGINE_NOZZLE_Z - 0.25);
     this.root.add(this.engineLight);
+
+    const reverseOuterGeometry = new THREE.ConeGeometry(
+      0.18,
+      SHIP_REVERSE_FLAME_LENGTH_M,
+      14,
+      2,
+      true,
+    );
+    const reverseCoreGeometry = new THREE.ConeGeometry(
+      0.075,
+      SHIP_REVERSE_FLAME_LENGTH_M * 0.7,
+      12,
+      1,
+      true,
+    );
+    [-2.75, -0.92, 0.92, 2.75].forEach((x, thrusterIndex) => {
+      const outer = new THREE.Mesh(reverseOuterGeometry, material(0x39bfff, 0.82));
+      outer.name = "Spacecraft reverse thruster plume";
+      outer.rotation.x = Math.PI / 2;
+      const core = new THREE.Mesh(reverseCoreGeometry, material(0xe5fdff, 0.98));
+      core.name = "Spacecraft reverse thruster hot core";
+      core.rotation.x = Math.PI / 2;
+      for (const plume of [outer, core]) {
+        plume.position.set(x, 0.14, SHIP_REVERSE_NOZZLE_Z);
+        plume.visible = false;
+        plume.renderOrder = 9_006 + thrusterIndex;
+        this.root.add(plume);
+      }
+      this.reverseThrusterPlumes.push({ outer, core });
+    });
+    this.reverseThrusterLight.name = "Spacecraft reverse thruster illumination";
+    this.reverseThrusterLight.position.set(0, 0.2, SHIP_REVERSE_NOZZLE_Z + 0.7);
+    this.root.add(this.reverseThrusterLight);
   }
 
   private buildTrails() {
@@ -395,6 +437,7 @@ export class SurfaceSpaceship {
     this.warpEffectSeconds = 0;
     this.autolandActive = false;
     this.setEngineEffect(false, false);
+    this.setReverseThrusterEffect(false, 0);
     this.prefetch(this.surfaceDirection);
   }
 
@@ -407,6 +450,7 @@ export class SurfaceSpaceship {
     this.leftTrailGeometry.setDrawRange(0, 0);
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
+    this.setReverseThrusterEffect(false, 0);
     this.warpEffectSeconds = 0;
     this.autolandActive = false;
   }
@@ -419,6 +463,7 @@ export class SurfaceSpaceship {
     this.warpEffectSeconds = 0;
     this.autolandActive = false;
     this.resetInputSmoothing();
+    this.setReverseThrusterEffect(false, 0);
   }
 
   stopAndPark() {
@@ -434,6 +479,7 @@ export class SurfaceSpaceship {
     this.leftTrailGeometry.setDrawRange(0, 0);
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
+    this.setReverseThrusterEffect(false, 0);
     this.warpEffectSeconds = 0;
     this.autolandActive = false;
   }
@@ -490,6 +536,7 @@ export class SurfaceSpaceship {
     this.stationKeeping = true;
     this.velocity.set(0, 0, 0);
     this.setEngineEffect(false, false);
+    this.setReverseThrusterEffect(false, 0);
   }
 
   updateAutoland(deltaSeconds: number) {
@@ -525,6 +572,7 @@ export class SurfaceSpaceship {
     this.root.quaternion.setFromRotationMatrix(this.orientation);
     this.thrustVisible = progress < 0.96;
     this.updateEngineEffect(delta, this.thrustVisible ? 0.42 : 0, false);
+    this.setReverseThrusterEffect(false, 0);
     this.updateTrailLife(delta);
     if (this.thrustVisible) {
       this.trailEmitCountdownS -= delta;
@@ -545,6 +593,7 @@ export class SurfaceSpaceship {
     this.stationKeeping = true;
     this.thrustVisible = false;
     this.setEngineEffect(false, false);
+    this.setReverseThrusterEffect(false, 0);
     return true;
   }
 
@@ -750,6 +799,10 @@ export class SurfaceSpaceship {
       this.thrustVisible ? (warpEffectActive ? 1 : Math.abs(thrust)) : 0,
       boostVisible,
     );
+    this.updateReverseThrusterEffect(
+      input.brake,
+      clamp(0.52 + speedBeforeLinearBrakeMps / SHIP_AUTOPILOT_WARP_SPEED_M_S, 0.52, 1),
+    );
     this.updateTrailLife(delta);
     if (this.thrustVisible) {
       const trailStyle = spaceshipTrailStyle(boostVisible);
@@ -853,6 +906,34 @@ export class SurfaceSpaceship {
     this.engineLight.color.setHex(boosted ? 0xff7a30 : 0x70d9ff);
     this.engineLight.intensity = (boosted ? 46 : 15) * clamp(thrust, 0, 1);
     this.engineLight.distance = boosted ? 26 : 16;
+  }
+
+  private setReverseThrusterEffect(visible: boolean, intensity: number) {
+    const strength = clamp(intensity, 0, 1);
+    for (const plume of this.reverseThrusterPlumes) {
+      plume.outer.visible = visible;
+      plume.core.visible = visible;
+    }
+    this.reverseThrusterLight.intensity = visible ? 28 * strength : 0;
+  }
+
+  private updateReverseThrusterEffect(visible: boolean, intensity: number) {
+    this.setReverseThrusterEffect(visible, intensity);
+    if (!visible) return;
+    const strength = clamp(intensity, 0, 1);
+    this.reverseThrusterPlumes.forEach((plume, thrusterIndex) => {
+      const flicker = 0.88 + Math.sin(this.effectTimeSeconds * 31 + thrusterIndex * 1.7) * 0.12;
+      const lengthScale = (0.68 + strength * 0.58) * flicker;
+      const radiusScale = 0.78 + strength * 0.34;
+      plume.outer.scale.set(radiusScale, lengthScale, radiusScale);
+      plume.outer.position.z = SHIP_REVERSE_NOZZLE_Z
+        + SHIP_REVERSE_FLAME_LENGTH_M * lengthScale * 0.5;
+      plume.outer.material.opacity = 0.58 + strength * 0.3;
+      plume.core.scale.set(radiusScale * 0.68, lengthScale * 0.72, radiusScale * 0.68);
+      plume.core.position.z = SHIP_REVERSE_NOZZLE_Z
+        + SHIP_REVERSE_FLAME_LENGTH_M * 0.7 * lengthScale * 0.72 * 0.5;
+      plume.core.material.opacity = 0.82 + strength * 0.16;
+    });
   }
 
   syncVisual(cameraAbsolute: THREE.Vector3) {

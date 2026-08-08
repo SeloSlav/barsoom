@@ -43,7 +43,7 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | Turn left / right | `A` / `D` or left / right arrows | Turns toward the side you press, even while the camera is orbiting. Mouse steering likewise turns toward the pointer. |
 | Pitch up / down | Up / down arrows | Points the nose and flight path upward or downward. A pressed direction overrides mouse steering on that axis. |
 | Thrust | `W` | Accelerates forward; releasing thrust preserves momentum and lets the ship coast. |
-| Assisted full stop | Hold `S` | Commands a strong velocity-aware deceleration, including from ultra-warp speed. |
+| Reverse-thruster stop | Hold `S` | Commands a strong velocity-aware deceleration, including from ultra-warp speed, with four visible forward braking jets. |
 | Auto-flight cycle | `R` | Cycles cruise thrust, full thrust, and coast. Any manual flight input cancels automation. |
 | Boost | Hold `Shift` | Raises engine thrust without allowing abrupt camera-led lateral snaps. The exhaust switches to a longer, denser orange boost plume. |
 | Ultra-warp burst | `F` | Adds a 180 km/s forward impulse with a widened field of view, long boost plume, and dedicated sound cue. |

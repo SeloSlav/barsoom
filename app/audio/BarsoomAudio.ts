@@ -20,6 +20,14 @@ export function flightAudioTargets(state: FlightAudioState) {
   };
 }
 
+export function landingAudioTargets(narrationActive: boolean) {
+  const gain = narrationActive ? 0.72 : 1;
+  return {
+    impactVolume: 0.92 * gain,
+    suitContactVolume: 0.34 * gain,
+  };
+}
+
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
 type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition" | "boostIgnite" | "thrusterBurst";
 
@@ -203,7 +211,9 @@ export class BarsoomAudio {
     } else if (event.type === "jump") {
       this.playEffect("jump", 0.42 * narrationFoleyGain, 1);
     } else if (event.type === "land") {
-      this.playEffect("land", 0.55 * narrationFoleyGain, 1);
+      const touchdown = landingAudioTargets(this.narrationActive);
+      this.playEffect("land", touchdown.impactVolume, 0.9);
+      this.playEffect("stepC", touchdown.suitContactVolume, 0.76);
     }
   }
 

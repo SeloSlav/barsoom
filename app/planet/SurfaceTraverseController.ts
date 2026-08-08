@@ -1361,6 +1361,7 @@ export class SurfaceTraverseController {
       throttle: brakeRequested ? 0 : flightInput.throttle,
       boost: flightInput.boost || warpBurst || destinationWarpCruise,
       maneuver: Math.max(
+        brakeRequested ? 1 : 0,
         Math.abs(flightInput.strafe),
         Math.abs(flightInput.lift),
         Math.abs(flightInput.pitch),

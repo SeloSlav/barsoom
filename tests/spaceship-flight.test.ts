@@ -291,6 +291,34 @@ describe("surface spaceship flight", () => {
     craft.dispose();
   });
 
+  it("shows forward-facing reverse thrusters while braking", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
+    craft.updateFlight(1 / 60, {
+      ...neutralFlightInput,
+      brake: true,
+      brakeAccelerationMps2: 60,
+    });
+    expect(scene.getObjectByName("Spacecraft reverse thruster plume")?.visible).toBe(true);
+    const light = scene.getObjectByName("Spacecraft reverse thruster illumination");
+    expect(light).toBeInstanceOf(THREE.PointLight);
+    expect((light as THREE.PointLight).intensity).toBeGreaterThan(0);
+    craft.updateFlight(1 / 60, neutralFlightInput);
+    expect(scene.getObjectByName("Spacecraft reverse thruster plume")?.visible).toBe(false);
+    craft.dispose();
+  });
+
   it("applies an ultra warp impulse along the spacecraft nose", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
