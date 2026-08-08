@@ -181,8 +181,9 @@ describe("surface traverse physics", () => {
   });
 
   it("brakes ground autopilot early enough for a controlled landing sequence", () => {
-    expect(groundAutopilotStoppingDistanceM(180_000)).toBeGreaterThan(270_000);
-    expect(nextGroundAutopilotPhase("cruise", 250_000, 180_000)).toBe("braking");
+    expect(groundAutopilotStoppingDistanceM(180_000)).toBeGreaterThan(28_000);
+    expect(groundAutopilotStoppingDistanceM(180_000)).toBeLessThan(30_000);
+    expect(nextGroundAutopilotPhase("cruise", 25_000, 180_000)).toBe("braking");
     expect(nextGroundAutopilotPhase("braking", 20_000, 250)).toBe("approach");
     expect(nextGroundAutopilotPhase("braking", 8_000, 250)).toBe("landing");
     expect(nextGroundAutopilotPhase("approach", 4_000, 250)).toBe("landing");

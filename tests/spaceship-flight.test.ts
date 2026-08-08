@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
 import {
   SurfaceSpaceship,
+  SHIP_AUTOPILOT_WARP_SPEED_M_S,
   SHIP_WARP_BURST_DELTA_V_M_S,
   SURFACE_SPACESHIP_MODEL_PATH,
   spaceshipDampedInput,
@@ -336,6 +337,33 @@ describe("surface spaceship flight", () => {
       });
     }
     expect(craft.getSpeedMps()).toBe(0);
+    craft.dispose();
+  });
+
+  it("sustains burst speed throughout destination-autopilot cruise", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    for (let frame = 0; frame < 180; frame += 1) {
+      craft.updateFlight(1 / 60, {
+        ...neutralFlightInput,
+        throttle: 1,
+        boost: true,
+        sustainedWarp: true,
+        velocityAssistDirection: { x: 0, y: 0, z: 1 },
+      });
+      expect(craft.getSpeedMps()).toBeCloseTo(SHIP_AUTOPILOT_WARP_SPEED_M_S, 6);
+    }
+    expect(craft.getWarpEffectIntensity()).toBe(1);
     craft.dispose();
   });
 

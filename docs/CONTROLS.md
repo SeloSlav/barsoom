@@ -55,7 +55,7 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | Change follow distance | Mouse wheel | Zooms continuously from an 8 m chase view to the 30,000 km planetary-scale view while remaining locked to the moving spacecraft. |
 | Safe ground return | `Escape` | Instantly returns the spaceman to the terrain directly below and rematerializes the spacecraft nearby. Press `Escape` again as the spaceman to return to survey. |
 
-Click a flight-navigation marker to engage destination autopilot. Surface routes steer their velocity onto the computed course, brake before arrival, transition through a cinematic descent, land exactly at the destination, and automatically return to spaceman mode. The flight computer compensates for local gravity while piloted, so a nose-up or nose-down trajectory continues along the direction the spacecraft is pointing instead of falling away from it.
+Click a flight-navigation marker to engage destination autopilot. It sustains the full 180 km/s warp-burst speed during cruise. Surface routes steer their velocity onto the computed course, brake before arrival, transition through a cinematic descent, land exactly at the destination, and automatically return to spaceman mode. The flight computer compensates for local gravity while piloted, so a nose-up or nose-down trajectory continues along the direction the spacecraft is pointing instead of falling away from it.
 
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 

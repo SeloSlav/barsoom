@@ -19,6 +19,7 @@ const SHIP_ROLL_RATE_RAD_S = 2.25;
 const SHIP_SHARP_TURN_MULTIPLIER = 1.22;
 const SHIP_MAX_SPEED_M_S = 900_000;
 export const SHIP_WARP_BURST_DELTA_V_M_S = 180_000;
+export const SHIP_AUTOPILOT_WARP_SPEED_M_S = SHIP_WARP_BURST_DELTA_V_M_S;
 const SHIP_WARP_EFFECT_DURATION_S = 1.5;
 const SHIP_AUTOLAND_DURATION_S = 6;
 const SHIP_TRAIL_MAX_POINTS = 420;
@@ -51,6 +52,7 @@ export type SpaceshipFlightInput = {
   aimY: number;
   aimDirection?: Vec3;
   warpBurst?: boolean;
+  sustainedWarp?: boolean;
 };
 
 type TrailPoint = {
@@ -643,9 +645,10 @@ export class SurfaceSpaceship {
     const lift = this.smoothedLift;
     const translationInput = Math.max(Math.abs(thrust), Math.abs(strafe), Math.abs(lift));
     const warpBurst = input.warpBurst === true;
+    const sustainedWarp = input.sustainedWarp === true;
     this.warpEffectSeconds = Math.max(0, this.warpEffectSeconds - delta);
     if (input.brake) this.stationKeeping = true;
-    else if (translationInput > 0.02 || warpBurst) this.stationKeeping = false;
+    else if (translationInput > 0.02 || warpBurst || sustainedWarp) this.stationKeeping = false;
 
     const thrustAcceleration = input.boost ? SHIP_BOOST_THRUST_M_S2 : SHIP_THRUST_M_S2;
     this.radialUp.copy(this.absolute).normalize();
@@ -702,6 +705,26 @@ export class SurfaceSpaceship {
     if (requestedBrakeAccelerationMps2 > 0 && speedBeforeLinearBrakeMps > 0) {
       const nextSpeedMps = Math.max(0, speedBeforeLinearBrakeMps - requestedBrakeAccelerationMps2 * delta);
       this.velocity.multiplyScalar(nextSpeedMps / speedBeforeLinearBrakeMps);
+    }
+    if (sustainedWarp && !input.brake) {
+      const cruiseDirection = input.velocityAssistDirection;
+      if (
+        cruiseDirection &&
+        Number.isFinite(cruiseDirection.x) &&
+        Number.isFinite(cruiseDirection.y) &&
+        Number.isFinite(cruiseDirection.z) &&
+        Math.hypot(cruiseDirection.x, cruiseDirection.y, cruiseDirection.z) > 1e-7
+      ) {
+        this.velocity.set(
+          cruiseDirection.x,
+          cruiseDirection.y,
+          cruiseDirection.z,
+        ).normalize();
+      } else {
+        this.velocity.copy(this.forward);
+      }
+      this.velocity.multiplyScalar(SHIP_AUTOPILOT_WARP_SPEED_M_S);
+      this.warpEffectSeconds = SHIP_WARP_EFFECT_DURATION_S;
     }
     if (this.stationKeeping && this.velocity.lengthSq() < 0.09) this.velocity.set(0, 0, 0);
     const speedMps = this.velocity.length();

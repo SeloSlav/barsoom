@@ -11,6 +11,7 @@ import {
 import { clamp, localEnuBasis } from "./math";
 import type { PlanetControlState } from "./PlanetControls";
 import {
+  SHIP_AUTOPILOT_WARP_SPEED_M_S,
   SHIP_BOARD_DISTANCE_M,
   SurfaceSpaceship,
   spaceshipDampedInput,
@@ -57,7 +58,7 @@ const SHIP_CAMERA_WARP_FOV_DEG = 82;
 const SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S = 1.9;
 const SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S = 1.55;
 const SHIP_FREE_LOOK_RETURN_RATE_S = 7;
-const GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 = 60_000;
+const GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 = 600_000;
 const GROUND_AUTOPILOT_LANDING_RANGE_M = 12_000;
 const GROUND_AUTOPILOT_FINAL_RANGE_M = 5_000;
 const GROUND_AUTOPILOT_LANDING_SPEED_M_S = 300;
@@ -1248,7 +1249,9 @@ export class SurfaceTraverseController {
     const nextPhase = nextGroundAutopilotPhase(
       this.shipAutopilotPhase,
       surfaceRangeM,
-      this.spaceship.getSpeedMps(),
+      this.shipAutopilotPhase === "cruise"
+        ? Math.max(this.spaceship.getSpeedMps(), SHIP_AUTOPILOT_WARP_SPEED_M_S)
+        : this.spaceship.getSpeedMps(),
     );
     if (nextPhase === "landing") {
       if (this.spaceship.beginAutoland(this.shipAutopilotTargetAbsolute)) {
@@ -1303,6 +1306,8 @@ export class SurfaceTraverseController {
     }
     const keyboardAttitude = spaceshipKeyboardAttitudeInput(this.keys);
     const groundAutopilotActive = this.shipAutopilotTargetActive && this.shipAutopilotSurfaceTarget;
+    const destinationWarpCruise = this.shipAutopilotTargetActive &&
+      (!this.shipAutopilotSurfaceTarget || this.shipAutopilotPhase === "cruise");
     const automatedApproach = groundAutopilotActive &&
       (this.shipAutopilotPhase === "braking" || this.shipAutopilotPhase === "approach");
     const speedMps = this.spaceship.getSpeedMps();
@@ -1348,12 +1353,13 @@ export class SurfaceTraverseController {
         ? this.shipAutopilotPhase === "cruise" ? 0.9 : 1.8
         : 0,
       warpBurst,
+      sustainedWarp: destinationWarpCruise,
     };
     this.onAudioEvent({
       type: "flight",
       active: true,
       throttle: brakeRequested ? 0 : flightInput.throttle,
-      boost: flightInput.boost || warpBurst,
+      boost: flightInput.boost || warpBurst || destinationWarpCruise,
       maneuver: Math.max(
         Math.abs(flightInput.strafe),
         Math.abs(flightInput.lift),
