@@ -45,7 +45,11 @@ import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { WeatherRenderer, type MarsWeatherPreset, type MarsWeatherState } from "./render/WeatherRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
 import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
-import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
+import {
+  orbitalAutopilotStandoffM,
+  randomMarsDaylightDirection,
+  SurfaceTraverseController,
+} from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats, type TerrainQualitySettings } from "./terrain/PlanetTerrain";
 import type { DebugFlags, PlanetTelemetry, SurfaceQuery, Vec3 } from "./types";
 
@@ -555,19 +559,40 @@ export class PlanetEngine {
           z: direction.z * radiusM,
         } satisfies Vec3,
         surfaceTarget: true,
+        standoffM: 0,
+        orbitNormal: undefined,
       };
     }
-    const target = kind === "moon"
-      ? this.skyState.moons.find((candidate) => candidate.name === id)
-      : this.skyState.orbiters.find((candidate) => candidate.name === id);
+    if (kind === "moon") {
+      const target = this.skyState.moons.find((candidate) => candidate.name === id);
+      if (!target) return null;
+      return {
+        name: target.name,
+        positionM: target.positionM,
+        surfaceTarget: false,
+        standoffM: orbitalAutopilotStandoffM("moon", Math.max(...target.semiAxesM)),
+        orbitNormal: target.orbitNormal,
+      };
+    }
+    const target = this.skyState.orbiters.find((candidate) => candidate.name === id);
     if (!target) return null;
-    return { name: target.name, positionM: target.positionM, surfaceTarget: false };
+    return {
+      name: target.name,
+      positionM: target.positionM,
+      surfaceTarget: false,
+      standoffM: orbitalAutopilotStandoffM("orbiter", target.modelMaxDimensionM * 0.5),
+      orbitNormal: target.orbitNormal,
+    };
   }
 
   private engageFlightAutopilot(kind: MarsFlightNavigationTargetKind, id: string) {
     if (!this.surfaceTraverse.active || this.surfaceTraverse.mode !== "spaceship") return false;
     const target = this.resolveFlightAutopilotTarget(kind, id);
-    if (!target || !this.surfaceTraverse.engageFlightAutopilot(target.positionM, target.surfaceTarget)) {
+    if (!target || !this.surfaceTraverse.engageFlightAutopilot(target.positionM, {
+      surfaceTarget: target.surfaceTarget,
+      standoffM: target.standoffM,
+      orbitNormal: target.orbitNormal,
+    })) {
       return false;
     }
     this.flightAutopilotTarget = { kind, id, name: target.name };
@@ -575,7 +600,7 @@ export class PlanetEngine {
     return true;
   }
 
-  private refreshFlightAutopilotTarget() {
+  private refreshFlightAutopilotTarget(deltaSeconds: number) {
     if (!this.flightAutopilotTarget) return;
     if (!this.surfaceTraverse.destinationAutopilotActive) {
       this.flightAutopilotTarget = null;
@@ -585,7 +610,13 @@ export class PlanetEngine {
       this.flightAutopilotTarget.kind,
       this.flightAutopilotTarget.id,
     );
-    if (target) this.surfaceTraverse.updateFlightAutopilotTarget(target.positionM);
+    if (target) {
+      this.surfaceTraverse.updateFlightAutopilotTarget(
+        target.positionM,
+        deltaSeconds,
+        target.orbitNormal,
+      );
+    }
   }
 
   private focusBody(body: ObservedBody) {
@@ -692,7 +723,7 @@ export class PlanetEngine {
     // the reconstructed field is phase-locked instead: rotating a directional
     // shadow projection at 60x makes an otherwise stationary ground shimmer.
     this.skyState = calculateMarsSky(simulationUtc);
-    this.refreshFlightAutopilotTarget();
+    this.refreshFlightAutopilotTarget(deltaSeconds);
     const marsControlState = this.surfaceTraverse.active
       ? this.surfaceTraverse.update(deltaSeconds)
       : this.controls.update(deltaSeconds);

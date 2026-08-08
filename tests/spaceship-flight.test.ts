@@ -9,6 +9,7 @@ import {
   SHIP_WARP_BURST_DELTA_V_M_S,
   SURFACE_SPACESHIP_MODEL_PATH,
   spaceshipDampedInput,
+  spaceshipAutolandDurationS,
   spaceshipDirectionalSteer,
   spaceshipPlumeAnimation,
   spaceshipSteerAmount,
@@ -393,6 +394,39 @@ describe("surface spaceship flight", () => {
     }
     expect(craft.getWarpEffectIntensity()).toBe(1);
     craft.dispose();
+  });
+
+  it("adds a fast target's motion to autopilot closing velocity", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    craft.updateFlight(1 / 60, {
+      ...neutralFlightInput,
+      sustainedWarp: true,
+      velocityAssistDirection: { x: 0, y: 0, z: 1 },
+      velocityTargetMps: { x: 0, y: 205_000, z: SHIP_AUTOPILOT_WARP_SPEED_M_S },
+    });
+
+    const velocity = craft.getVelocity(new THREE.Vector3());
+    expect(velocity.y).toBeCloseTo(205_000, 6);
+    expect(velocity.z).toBeCloseTo(SHIP_AUTOPILOT_WARP_SPEED_M_S, 6);
+    expect(velocity.length()).toBeGreaterThan(SHIP_AUTOPILOT_WARP_SPEED_M_S);
+    craft.dispose();
+  });
+
+  it("scales the scripted landing duration to horizontal and vertical distance", () => {
+    expect(spaceshipAutolandDurationS(0, 0)).toBe(6);
+    expect(spaceshipAutolandDurationS(5_000, 750)).toBeGreaterThan(30);
+    expect(spaceshipAutolandDurationS(20_000, 10_000)).toBe(55);
   });
 
   it("completes a cinematic autoland exactly on the selected terrain", () => {

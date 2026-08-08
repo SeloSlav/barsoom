@@ -323,6 +323,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const shipAutoFlightLabel = telemetry.shipAutopilotTargetName
     ? telemetry.shipAutopilotPhase === "landing"
       ? `AUTOLAND / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+      : telemetry.shipAutopilotPhase === "orbit"
+        ? `CLOSE ORBIT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
       : telemetry.shipAutopilotPhase === "braking" || telemetry.shipAutopilotPhase === "approach"
         ? `APPROACH / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
         : `AUTOPILOT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`

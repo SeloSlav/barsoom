@@ -22,6 +22,9 @@ export const SHIP_WARP_BURST_DELTA_V_M_S = 180_000;
 export const SHIP_AUTOPILOT_WARP_SPEED_M_S = SHIP_WARP_BURST_DELTA_V_M_S;
 const SHIP_WARP_EFFECT_DURATION_S = 1.5;
 const SHIP_AUTOLAND_DURATION_S = 6;
+const SHIP_AUTOLAND_HORIZONTAL_SPEED_M_S = 160;
+const SHIP_AUTOLAND_VERTICAL_SPEED_M_S = 36;
+const SHIP_AUTOLAND_MAX_DURATION_S = 55;
 const SHIP_TRAIL_MAX_POINTS = 420;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
@@ -50,6 +53,8 @@ export type SpaceshipFlightInput = {
   brakeAccelerationMps2?: number;
   velocityAssistDirection?: Vec3;
   velocityAssistRateS?: number;
+  velocityTargetMps?: Vec3;
+  velocityTargetResponseS?: number;
   aimX: number;
   aimY: number;
   aimDirection?: Vec3;
@@ -151,6 +156,23 @@ export function spaceshipDampedInput(current: number, target: number, responsePe
   return current + (target - current) * alpha;
 }
 
+export function spaceshipAutolandDurationS(surfaceRangeM: number, verticalDistanceM: number) {
+  return clamp(
+    Math.max(
+      SHIP_AUTOLAND_DURATION_S,
+      Math.max(0, surfaceRangeM) / SHIP_AUTOLAND_HORIZONTAL_SPEED_M_S,
+      Math.max(0, verticalDistanceM) / SHIP_AUTOLAND_VERTICAL_SPEED_M_S,
+    ),
+    SHIP_AUTOLAND_DURATION_S,
+    SHIP_AUTOLAND_MAX_DURATION_S,
+  );
+}
+
+function smootherStep01(value: number) {
+  const t = clamp(value, 0, 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
 /**
  * A small free-flight craft rendered in the same camera-relative frame as the
  * astronaut. Its physics consumes real frame seconds and never the accelerated
@@ -209,7 +231,8 @@ export class SurfaceSpaceship {
   private smoothedRoll = 0;
   private warpEffectSeconds = 0;
   private autolandElapsedSeconds = 0;
-  private autolandLoftM = 0;
+  private autolandDurationSeconds = SHIP_AUTOLAND_DURATION_S;
+  private autolandStartClearanceM = SHIP_GROUND_CLEARANCE_M;
   private autolandActive = false;
   private model: THREE.Object3D | null = null;
   private disposed = false;
@@ -521,7 +544,15 @@ export class SurfaceSpaceship {
       -1,
       1,
     ));
-    this.autolandLoftM = clamp(angularDistanceRad * MARS_REFERENCE_RADIUS_M * 0.08, 45, 420);
+    const startSurface = this.terrainSurface(this.autolandStartDirection);
+    this.autolandStartClearanceM = Math.max(
+      SHIP_GROUND_CLEARANCE_M,
+      this.autolandStartAbsolute.length() - MARS_REFERENCE_RADIUS_M - startSurface.heightM,
+    );
+    this.autolandDurationSeconds = spaceshipAutolandDurationS(
+      angularDistanceRad * MARS_REFERENCE_RADIUS_M,
+      this.autolandStartClearanceM - SHIP_GROUND_CLEARANCE_M,
+    );
     this.autolandElapsedSeconds = 0;
     this.autolandActive = true;
     this.stationKeeping = true;
@@ -543,17 +574,22 @@ export class SurfaceSpaceship {
     if (!this.autolandActive) return false;
     const delta = clamp(deltaSeconds, 0, 0.05);
     this.autolandElapsedSeconds += delta;
-    const progress = clamp(this.autolandElapsedSeconds / SHIP_AUTOLAND_DURATION_S, 0, 1);
-    const eased = progress * progress * (3 - 2 * progress);
+    const progress = clamp(this.autolandElapsedSeconds / this.autolandDurationSeconds, 0, 1);
+    const eased = smootherStep01(progress);
     this.autolandPreviousAbsolute.copy(this.absolute);
     this.surfaceDirection
       .lerpVectors(this.autolandStartDirection, this.autolandTargetDirection, eased)
       .normalize();
-    const radiusM = THREE.MathUtils.lerp(
-      this.autolandStartAbsolute.length(),
-      this.autolandTargetAbsolute.length(),
+    // The world frame is Mars-fixed, so interpolating the ground direction is
+    // also the rotation-aware trajectory. Resolve terrain under every point of
+    // the glide instead of linearly diving toward the destination radius.
+    const routeSurface = this.terrainSurface(this.surfaceDirection);
+    const clearanceM = THREE.MathUtils.lerp(
+      this.autolandStartClearanceM,
+      SHIP_GROUND_CLEARANCE_M,
       eased,
-    ) + Math.sin(progress * Math.PI) * this.autolandLoftM;
+    );
+    const radiusM = MARS_REFERENCE_RADIUS_M + routeSurface.heightM + clearanceM;
     this.absolute.copy(this.surfaceDirection).multiplyScalar(radiusM);
     if (delta > 0) {
       this.velocity.subVectors(this.absolute, this.autolandPreviousAbsolute).multiplyScalar(1 / delta);
@@ -570,8 +606,8 @@ export class SurfaceSpaceship {
     this.right.crossVectors(this.up, this.forward).normalize();
     this.orientation.makeBasis(this.right, this.up, this.forward);
     this.root.quaternion.setFromRotationMatrix(this.orientation);
-    this.thrustVisible = progress < 0.96;
-    this.updateEngineEffect(delta, this.thrustVisible ? 0.42 : 0, false);
+    this.thrustVisible = progress < 0.995;
+    this.updateEngineEffect(delta, this.thrustVisible ? 0.34 : 0, false);
     this.setReverseThrusterEffect(false, 0);
     this.updateTrailLife(delta);
     if (this.thrustVisible) {
@@ -755,9 +791,18 @@ export class SurfaceSpaceship {
       const nextSpeedMps = Math.max(0, speedBeforeLinearBrakeMps - requestedBrakeAccelerationMps2 * delta);
       this.velocity.multiplyScalar(nextSpeedMps / speedBeforeLinearBrakeMps);
     }
+    const velocityTarget = input.velocityTargetMps;
+    const hasVelocityTarget = velocityTarget !== undefined &&
+      Number.isFinite(velocityTarget.x) &&
+      Number.isFinite(velocityTarget.y) &&
+      Number.isFinite(velocityTarget.z);
     if (sustainedWarp && !input.brake) {
       const cruiseDirection = input.velocityAssistDirection;
-      if (
+      if (hasVelocityTarget && velocityTarget) {
+        // Destination cruise is relative to a moving body. Adding its measured
+        // velocity lets the ship retain closing speed even at accelerated time.
+        this.velocity.set(velocityTarget.x, velocityTarget.y, velocityTarget.z);
+      } else if (
         cruiseDirection &&
         Number.isFinite(cruiseDirection.x) &&
         Number.isFinite(cruiseDirection.y) &&
@@ -773,7 +818,17 @@ export class SurfaceSpaceship {
         this.velocity.copy(this.forward);
       }
       this.velocity.multiplyScalar(SHIP_AUTOPILOT_WARP_SPEED_M_S);
+      if (hasVelocityTarget && velocityTarget) {
+        this.velocity.set(velocityTarget.x, velocityTarget.y, velocityTarget.z);
+      }
       this.warpEffectSeconds = SHIP_WARP_EFFECT_DURATION_S;
+    } else if (hasVelocityTarget && velocityTarget) {
+      const responseS = Math.max(0, input.velocityTargetResponseS ?? 0);
+      this.assistedVelocityTarget.set(velocityTarget.x, velocityTarget.y, velocityTarget.z);
+      this.velocity.lerp(
+        this.assistedVelocityTarget,
+        1 - Math.exp(-responseS * delta),
+      );
     }
     if (this.stationKeeping && this.velocity.lengthSq() < 0.09) this.velocity.set(0, 0, 0);
     const speedMps = this.velocity.length();

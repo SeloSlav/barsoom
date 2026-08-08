@@ -13,6 +13,7 @@ import {
   applyWowCameraZoom,
   crossedLoopingAnimationPhase,
   findSuitThrusterFootBone,
+  groundAutopilotGlideAltitudeM,
   groundAutopilotStoppingDistanceM,
   isWowAutoRunKey,
   isSpaceshipManualFlightControlKey,
@@ -21,6 +22,7 @@ import {
   nextWowAutoMoveMode,
   nextSpaceshipAutoFlightMode,
   nextGroundAutopilotPhase,
+  nextOrbitalAutopilotPhase,
   normalizeMarsSurfaceDirection,
   randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
@@ -32,6 +34,7 @@ import {
   spaceshipMouseForward,
   surfaceCameraRight,
   suitThrusterLocalDirection,
+  orbitalAutopilotStandoffM,
   wowCameraOrbitDistances,
   wowMouseAutoRun,
   wowStrafeInput,
@@ -217,9 +220,28 @@ describe("surface traverse physics", () => {
     expect(groundAutopilotStoppingDistanceM(180_000)).toBeGreaterThan(28_000);
     expect(groundAutopilotStoppingDistanceM(180_000)).toBeLessThan(30_000);
     expect(nextGroundAutopilotPhase("cruise", 25_000, 180_000)).toBe("braking");
-    expect(nextGroundAutopilotPhase("braking", 20_000, 250)).toBe("approach");
-    expect(nextGroundAutopilotPhase("braking", 8_000, 250)).toBe("landing");
-    expect(nextGroundAutopilotPhase("approach", 4_000, 250)).toBe("landing");
+    expect(nextGroundAutopilotPhase("braking", 20_000, 60)).toBe("approach");
+    expect(nextGroundAutopilotPhase("braking", 8_000, 60)).toBe("landing");
+    expect(nextGroundAutopilotPhase("approach", 3_000, 60)).toBe("landing");
+  });
+
+  it("follows a long rotation-aware glideslope before the final autoland", () => {
+    expect(groundAutopilotGlideAltitudeM(4_000_000)).toBe(200_000);
+    expect(groundAutopilotGlideAltitudeM(100_000)).toBe(8_000);
+    expect(groundAutopilotGlideAltitudeM(3_000)).toBe(850);
+  });
+
+  it("uses body-scaled visual standoffs and captures a relative orbit", () => {
+    const phobosStandoffM = orbitalAutopilotStandoffM("moon", 13_400);
+    const odysseyStandoffM = orbitalAutopilotStandoffM("orbiter", 2.85);
+    expect(phobosStandoffM).toBeCloseTo(31_490);
+    expect(odysseyStandoffM).toBe(12);
+    expect(nextOrbitalAutopilotPhase("cruise", odysseyStandoffM + 20_000, 180_000, odysseyStandoffM))
+      .toBe("braking");
+    expect(nextOrbitalAutopilotPhase("braking", odysseyStandoffM + 2_000, 4_000, odysseyStandoffM))
+      .toBe("approach");
+    expect(nextOrbitalAutopilotPhase("approach", odysseyStandoffM + 0.2, 2, odysseyStandoffM))
+      .toBe("orbit");
   });
 
   it("orbits the physical camera vertically around the character", () => {
