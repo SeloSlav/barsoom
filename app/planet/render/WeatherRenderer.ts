@@ -85,10 +85,6 @@ const cloudFragment = /* glsl */ `
   }
 
   void main() {
-    float layerRadius = ${MARS_REFERENCE_RADIUS_M.toFixed(1)} + mix(${WATER_ICE_ALTITUDE_M.toFixed(1)}, ${CO2_ICE_ALTITUDE_M.toFixed(1)}, uLayerKind);
-    bool cameraOutside = uCameraRadius > layerRadius;
-    if ((cameraOutside && !gl_FrontFacing) || (!cameraOutside && gl_FrontFacing)) discard;
-
     vec3 radial = normalize(vRadial);
     vec3 sun = normalize(uSunDirection);
     vec3 viewRay = normalize(vWorldPosition);
