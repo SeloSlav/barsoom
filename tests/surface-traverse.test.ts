@@ -12,9 +12,11 @@ import {
   applyWowCameraDrag,
   applyWowCameraZoom,
   isWowAutoRunKey,
+  isSpaceshipManualFlightControlKey,
   marsJumpApexHeight,
   marsJumpPoseWeights,
   nextWowAutoMoveMode,
+  nextSpaceshipAutoFlightMode,
   normalizeMarsSurfaceDirection,
   randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
@@ -144,6 +146,24 @@ describe("surface traverse physics", () => {
     expect(walking).toBe("walk");
     expect(running).toBe("run");
     expect(stopped).toBe("off");
+  });
+
+  it("cycles spacecraft R through cruise, full thrust, and coast", () => {
+    const cruise = nextSpaceshipAutoFlightMode("off");
+    const full = nextSpaceshipAutoFlightMode(cruise);
+    const coast = nextSpaceshipAutoFlightMode(full);
+
+    expect(cruise).toBe("cruise");
+    expect(full).toBe("full");
+    expect(coast).toBe("off");
+  });
+
+  it("distinguishes manual flight input from camera-only controls", () => {
+    expect(isSpaceshipManualFlightControlKey("KeyW")).toBe(true);
+    expect(isSpaceshipManualFlightControlKey("KeyF")).toBe(true);
+    expect(isSpaceshipManualFlightControlKey("ArrowUp")).toBe(true);
+    expect(isSpaceshipManualFlightControlKey("AltLeft")).toBe(false);
+    expect(isSpaceshipManualFlightControlKey("KeyR")).toBe(false);
   });
 
   it("orbits the physical camera vertically around the character", () => {

@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import {
   SurfaceSpaceship,
+  SHIP_WARP_BURST_DELTA_V_M_S,
   SURFACE_SPACESHIP_MODEL_PATH,
   spaceshipDampedInput,
   spaceshipDirectionalSteer,
@@ -140,7 +141,7 @@ describe("surface spaceship flight", () => {
     craft.dispose();
   });
 
-  it("turns existing momentum with the hull instead of sliding along the old line", () => {
+  it("keeps existing momentum in world space while the hull turns", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
       scene,
@@ -163,8 +164,8 @@ describe("surface spaceship flight", () => {
 
     const velocityDirection = craft.getVelocity(new THREE.Vector3()).normalize();
     const hullDirection = craft.getForward(new THREE.Vector3());
-    expect(velocityDirection.dot(hullDirection)).toBeGreaterThan(0.995);
-    expect(velocityDirection.dot(oldCourse)).toBeLessThan(0.7);
+    expect(velocityDirection.dot(oldCourse)).toBeGreaterThan(0.999);
+    expect(velocityDirection.dot(hullDirection)).toBeLessThan(0.7);
     craft.dispose();
   });
 
@@ -233,7 +234,7 @@ describe("surface spaceship flight", () => {
     eCraft.dispose();
   });
 
-  it("brakes hard and remains fixed after parking in place", () => {
+  it("coasts naturally, then eases into a stable position hold", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
       scene,
@@ -250,8 +251,18 @@ describe("surface spaceship flight", () => {
       craft.updateFlight(1 / 60, { ...neutralFlightInput, throttle: 1 });
     }
     const cruiseSpeedMps = craft.getSpeedMps();
-    craft.updateFlight(1 / 60, { ...neutralFlightInput, brake: true });
     for (let frame = 0; frame < 120; frame += 1) {
+      craft.updateFlight(1 / 60, neutralFlightInput);
+    }
+    expect(craft.getSpeedMps()).toBeGreaterThan(cruiseSpeedMps * 0.88);
+
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, brake: true });
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, neutralFlightInput);
+    }
+    expect(craft.getSpeedMps()).toBeGreaterThan(cruiseSpeedMps * 0.1);
+    expect(craft.getSpeedMps()).toBeLessThan(cruiseSpeedMps * 0.6);
+    for (let frame = 0; frame < 900; frame += 1) {
       craft.updateFlight(1 / 60, neutralFlightInput);
     }
     expect(craft.getSpeedMps()).toBeLessThan(cruiseSpeedMps * 0.001);
@@ -267,6 +278,29 @@ describe("surface spaceship flight", () => {
     craft.updateFlight(1, { ...neutralFlightInput, throttle: 1, boost: true });
     expect(craft.getSpeedMps()).toBe(0);
     expect(craft.getAbsolute(new THREE.Vector3()).distanceTo(parkedPosition)).toBe(0);
+    craft.dispose();
+  });
+
+  it("applies an ultra warp impulse along the spacecraft nose", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    const nose = craft.getForward(new THREE.Vector3()).clone();
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, warpBurst: true });
+
+    const velocity = craft.getVelocity(new THREE.Vector3());
+    expect(velocity.length()).toBeGreaterThan(SHIP_WARP_BURST_DELTA_V_M_S * 0.99);
+    expect(velocity.clone().normalize().dot(nose)).toBeGreaterThan(0.9999);
+    expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(true);
     craft.dispose();
   });
 

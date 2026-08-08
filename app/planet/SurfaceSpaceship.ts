@@ -12,12 +12,14 @@ const SHIP_THRUST_M_S2 = 76;
 const SHIP_BOOST_THRUST_M_S2 = 260;
 const SHIP_MANEUVER_THRUST_M_S2 = 52;
 const SHIP_VERTICAL_THRUST_M_S2 = 86;
-const SHIP_BRAKE_RATE_S = 5.8;
+const SHIP_BRAKE_RATE_S = 0.85;
 const SHIP_YAW_RATE_RAD_S = 1.85;
 const SHIP_PITCH_RATE_RAD_S = 1.55;
 const SHIP_ROLL_RATE_RAD_S = 2.25;
 const SHIP_SHARP_TURN_MULTIPLIER = 1.85;
-const SHIP_MAX_SPEED_M_S = 12_000;
+const SHIP_MAX_SPEED_M_S = 40_000;
+export const SHIP_WARP_BURST_DELTA_V_M_S = 8_000;
+const SHIP_WARP_EFFECT_DURATION_S = 0.9;
 const SHIP_TRAIL_MAX_POINTS = 420;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
@@ -44,6 +46,7 @@ export type SpaceshipFlightInput = {
   aimX: number;
   aimY: number;
   aimDirection?: Vec3;
+  warpBurst?: boolean;
 };
 
 type TrailPoint = {
@@ -152,8 +155,6 @@ export class SurfaceSpaceship {
   private readonly radialUp = new THREE.Vector3(1, 0, 0);
   private readonly orientation = new THREE.Matrix4();
   private readonly rotationStep = new THREE.Quaternion();
-  private readonly previousRotation = new THREE.Quaternion();
-  private readonly velocityRotation = new THREE.Quaternion();
   private readonly rotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
   private readonly aimForward = new THREE.Vector3();
   private readonly aimAxis = new THREE.Vector3();
@@ -184,6 +185,7 @@ export class SurfaceSpaceship {
   private smoothedYaw = 0;
   private smoothedPitch = 0;
   private smoothedRoll = 0;
+  private warpEffectSeconds = 0;
   private model: THREE.Object3D | null = null;
   private disposed = false;
 
@@ -374,6 +376,7 @@ export class SurfaceSpaceship {
     this.trailPoints = [];
     this.trailEmitCountdownS = 0;
     this.effectTimeSeconds = 0;
+    this.warpEffectSeconds = 0;
     this.setEngineEffect(false, false);
     this.prefetch(this.surfaceDirection);
   }
@@ -387,6 +390,7 @@ export class SurfaceSpaceship {
     this.leftTrailGeometry.setDrawRange(0, 0);
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
+    this.warpEffectSeconds = 0;
   }
 
   board() {
@@ -394,6 +398,7 @@ export class SurfaceSpaceship {
     this.groundAnchored = false;
     this.stationKeeping = true;
     this.velocity.set(0, 0, 0);
+    this.warpEffectSeconds = 0;
     this.resetInputSmoothing();
   }
 
@@ -410,6 +415,7 @@ export class SurfaceSpaceship {
     this.leftTrailGeometry.setDrawRange(0, 0);
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
+    this.warpEffectSeconds = 0;
   }
 
   updateParkedPosition() {
@@ -443,7 +449,6 @@ export class SurfaceSpaceship {
       SHIP_ROTATION_RESPONSE_S,
       delta,
     );
-    this.previousRotation.copy(this.root.quaternion);
     const manualSteering = Math.abs(keyboardYaw) > 0.001 ||
       Math.abs(keyboardPitch) > 0.001 ||
       Math.abs(this.smoothedYaw) > 0.02 ||
@@ -486,14 +491,6 @@ export class SurfaceSpaceship {
     this.rotationStep.setFromEuler(this.rotationEuler);
     this.root.quaternion.multiply(this.rotationStep).normalize();
 
-    // This is an intentionally assisted, game-feel flight model: the craft's
-    // existing momentum follows the same world-space rotation as its hull.
-    // Without it, yaw only rotates the mesh while inertia keeps carrying the
-    // ship along its old line, which feels like steering a detached camera.
-    this.previousRotation.invert();
-    this.velocityRotation.copy(this.root.quaternion).multiply(this.previousRotation).normalize();
-    this.velocity.applyQuaternion(this.velocityRotation);
-
     this.forward.set(0, 0, 1).applyQuaternion(this.root.quaternion).normalize();
     this.right.set(1, 0, 0).applyQuaternion(this.root.quaternion).normalize();
     this.up.set(0, 1, 0).applyQuaternion(this.root.quaternion).normalize();
@@ -525,8 +522,10 @@ export class SurfaceSpaceship {
     const strafe = this.smoothedStrafe;
     const lift = this.smoothedLift;
     const translationInput = Math.max(Math.abs(thrust), Math.abs(strafe), Math.abs(lift));
+    const warpBurst = input.warpBurst === true;
+    this.warpEffectSeconds = Math.max(0, this.warpEffectSeconds - delta);
     if (input.brake) this.stationKeeping = true;
-    else if (translationInput > 0.02) this.stationKeeping = false;
+    else if (translationInput > 0.02 || warpBurst) this.stationKeeping = false;
 
     const thrustAcceleration = input.boost ? SHIP_BOOST_THRUST_M_S2 : SHIP_THRUST_M_S2;
     this.radialUp.copy(this.absolute).normalize();
@@ -534,6 +533,10 @@ export class SurfaceSpaceship {
       this.velocity.addScaledVector(this.forward, thrust * thrustAcceleration * delta);
       this.velocity.addScaledVector(this.right, strafe * SHIP_MANEUVER_THRUST_M_S2 * delta);
       this.velocity.addScaledVector(this.radialUp, lift * SHIP_VERTICAL_THRUST_M_S2 * delta);
+    }
+    if (warpBurst) {
+      this.velocity.addScaledVector(this.forward, SHIP_WARP_BURST_DELTA_V_M_S);
+      this.warpEffectSeconds = SHIP_WARP_EFFECT_DURATION_S;
     }
 
     const radiusM = Math.max(MARS_REFERENCE_RADIUS_M, this.absolute.length());
@@ -561,9 +564,14 @@ export class SurfaceSpaceship {
     }
     if (this.absolute.length() - minimumRadiusM < 50_000) this.prefetch(this.surfaceDirection);
 
-    this.thrustVisible = !this.stationKeeping && Math.abs(thrust) > 0.04;
-    const boostVisible = this.thrustVisible && input.boost && thrust > 0;
-    this.updateEngineEffect(delta, this.thrustVisible ? Math.abs(thrust) : 0, boostVisible);
+    const warpEffectActive = this.warpEffectSeconds > 0;
+    this.thrustVisible = !this.stationKeeping && (Math.abs(thrust) > 0.04 || warpEffectActive);
+    const boostVisible = this.thrustVisible && (warpEffectActive || (input.boost && thrust > 0));
+    this.updateEngineEffect(
+      delta,
+      this.thrustVisible ? (warpEffectActive ? 1 : Math.abs(thrust)) : 0,
+      boostVisible,
+    );
     this.updateTrailLife(delta);
     if (this.thrustVisible) {
       const trailStyle = spaceshipTrailStyle(boostVisible);

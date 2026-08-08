@@ -46,7 +46,7 @@ import { selectionReticleWorldScale } from "./selectionReticle";
 import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
 import { PlanetTerrain, type TerrainFrameStats, type TerrainQualitySettings } from "./terrain/PlanetTerrain";
-import type { DebugFlags, PlanetTelemetry, SurfaceQuery } from "./types";
+import type { DebugFlags, PlanetTelemetry, SurfaceQuery, Vec3 } from "./types";
 
 export type ObservedBody = "Mars" | MarsMoonState["name"] | MarsOrbiterName;
 
@@ -86,6 +86,8 @@ export type MarsFlightNavigationMarker = {
   occulted: boolean;
 };
 
+export type MarsFlightNavigationTargetKind = MarsFlightNavigationMarker["kind"];
+
 type SurfaceSelectionPosition = {
   x: number;
   y: number;
@@ -115,6 +117,7 @@ export type PlanetEngineApi = {
   setGraphicsPreference: (preference: GraphicsPreference) => GraphicsRuntimeState;
   setNarrationActive: (active: boolean) => void;
   focusBody: (body: ObservedBody) => void;
+  engageFlightAutopilot: (kind: MarsFlightNavigationTargetKind, id: string) => boolean;
 };
 
 declare global {
@@ -187,6 +190,11 @@ export class PlanetEngine {
   private orbitalMarkerSignature = "";
   private lastFlightNavigationTime = -Infinity;
   private flightNavigationSignature = "";
+  private flightAutopilotTarget: {
+    kind: MarsFlightNavigationTargetKind;
+    id: string;
+    name: string;
+  } | null = null;
   private controlState!: PlanetControlState;
   private skyState: MarsSkyState;
   private simulationStartUtc: Date;
@@ -462,6 +470,7 @@ export class PlanetEngine {
       setGraphicsPreference: (preference) => this.setGraphicsPreference(preference),
       setNarrationActive: (active) => this.audio.setNarrationActive(active),
       focusBody: (body) => this.focusBody(body),
+      engageFlightAutopilot: (kind, id) => this.engageFlightAutopilot(kind, id),
     };
     this.onGraphicsSettingsChange(this.graphicsState);
     this.renderer.setAnimationLoop(this.animate);
@@ -521,6 +530,53 @@ export class PlanetEngine {
     this.simulationStartPerformance = rebased.simulationStartPerformance;
     this.simulationRate = rebased.simulationRate;
     this.skyState = calculateMarsSky(this.simulationStartUtc);
+  }
+
+  private resolveFlightAutopilotTarget(kind: MarsFlightNavigationTargetKind, id: string) {
+    if (kind === "landmark" || kind === "rover") {
+      const landmark = MARS_LANDMARKS.find((candidate) => candidate.id === id);
+      const direction = this.landmarkDirections.get(id);
+      if (!landmark || !direction) return null;
+      const radiusM = MARS_REFERENCE_RADIUS_M + this.terrain.sampleHeight(direction);
+      return {
+        name: landmark.name,
+        positionM: {
+          x: direction.x * radiusM,
+          y: direction.y * radiusM,
+          z: direction.z * radiusM,
+        } satisfies Vec3,
+        surfaceTarget: true,
+      };
+    }
+    const target = kind === "moon"
+      ? this.skyState.moons.find((candidate) => candidate.name === id)
+      : this.skyState.orbiters.find((candidate) => candidate.name === id);
+    if (!target) return null;
+    return { name: target.name, positionM: target.positionM, surfaceTarget: false };
+  }
+
+  private engageFlightAutopilot(kind: MarsFlightNavigationTargetKind, id: string) {
+    if (!this.surfaceTraverse.active || this.surfaceTraverse.mode !== "spaceship") return false;
+    const target = this.resolveFlightAutopilotTarget(kind, id);
+    if (!target || !this.surfaceTraverse.engageFlightAutopilot(target.positionM, target.surfaceTarget)) {
+      return false;
+    }
+    this.flightAutopilotTarget = { kind, id, name: target.name };
+    this.lastTelemetryTime = -Infinity;
+    return true;
+  }
+
+  private refreshFlightAutopilotTarget() {
+    if (!this.flightAutopilotTarget) return;
+    if (!this.surfaceTraverse.destinationAutopilotActive) {
+      this.flightAutopilotTarget = null;
+      return;
+    }
+    const target = this.resolveFlightAutopilotTarget(
+      this.flightAutopilotTarget.kind,
+      this.flightAutopilotTarget.id,
+    );
+    if (target) this.surfaceTraverse.updateFlightAutopilotTarget(target.positionM);
   }
 
   private focusBody(body: ObservedBody) {
@@ -617,9 +673,6 @@ export class PlanetEngine {
     this.audio.update(deltaSeconds);
     this.smoothedFrameMs += (frameMs - this.smoothedFrameMs) * 0.06;
     this.framesSinceQualityChange += 1;
-    const marsControlState = this.surfaceTraverse.active
-      ? this.surfaceTraverse.update(deltaSeconds)
-      : this.controls.update(deltaSeconds);
     const simulationUtc = new Date(simulationUtcMsAt(
       this.simulationStartUtc.getTime(),
       this.simulationStartPerformance,
@@ -630,6 +683,10 @@ export class PlanetEngine {
     // the reconstructed field is phase-locked instead: rotating a directional
     // shadow projection at 60x makes an otherwise stationary ground shimmer.
     this.skyState = calculateMarsSky(simulationUtc);
+    this.refreshFlightAutopilotTarget();
+    const marsControlState = this.surfaceTraverse.active
+      ? this.surfaceTraverse.update(deltaSeconds)
+      : this.controls.update(deltaSeconds);
     this.controlState = this.observedBody === "Mars"
       ? marsControlState
       : this.updateOrbitalObservation(this.observedBody);
@@ -803,6 +860,12 @@ export class PlanetEngine {
       shipSpeedMps: this.surfaceTraverse.active
         ? spaceshipInteraction.speedMps
         : 0,
+      shipAutoFlightMode: this.surfaceTraverse.active
+        ? spaceshipInteraction.autoFlightMode
+        : "off",
+      shipAutopilotTargetName: this.surfaceTraverse.destinationAutopilotActive
+        ? this.flightAutopilotTarget?.name ?? null
+        : null,
     };
     this.onTelemetry(this.telemetry);
   }
@@ -1346,6 +1409,7 @@ export class PlanetEngine {
       event.preventDefault();
       if (this.surfaceTraverse.mode === "spaceship") {
         this.surfaceTraverse.disembarkSpaceship();
+        this.flightAutopilotTarget = null;
         this.lastTelemetryTime = -Infinity;
       } else {
         this.exitSurfaceTraverse();
@@ -1384,6 +1448,7 @@ export class PlanetEngine {
     const direction = this.surfaceTraverse.getSurfaceDirection();
     const location = cartesianToLatLonElevation(direction, 1);
     this.surfaceTraverse.deactivate();
+    this.flightAutopilotTarget = null;
     this.localLightingPhaseLock.reset();
     this.audio.setSurfaceMode(false);
     this.audio.playObserverTransition(false);

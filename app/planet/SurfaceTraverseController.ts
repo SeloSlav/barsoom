@@ -202,6 +202,24 @@ export function nextWowAutoMoveMode(mode: WowAutoMoveMode): WowAutoMoveMode {
   return "off";
 }
 
+export type SpaceshipAutoFlightMode = "off" | "cruise" | "full";
+
+export function nextSpaceshipAutoFlightMode(mode: SpaceshipAutoFlightMode): SpaceshipAutoFlightMode {
+  if (mode === "off") return "cruise";
+  if (mode === "cruise") return "full";
+  return "off";
+}
+
+const SPACESHIP_MANUAL_CONTROL_KEYS = new Set([
+  "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyZ", "KeyC", "KeyX", "KeyF",
+  "Space", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight",
+  "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+]);
+
+export function isSpaceshipManualFlightControlKey(code: string) {
+  return SPACESHIP_MANUAL_CONTROL_KEYS.has(code);
+}
+
 export function applyWowCameraZoom(cameraDistanceM: number, wheelDeltaPixels: number) {
   if (!Number.isFinite(cameraDistanceM) || !Number.isFinite(wheelDeltaPixels) || wheelDeltaPixels === 0) {
     return clamp(cameraDistanceM, CAMERA_FIRST_PERSON_DISTANCE_M, CAMERA_MAX_DISTANCE_M);
@@ -404,6 +422,10 @@ export class SurfaceTraverseController {
   private readonly shipViewRight = new THREE.Vector3();
   private readonly shipViewUp = new THREE.Vector3();
   private readonly shipViewRotation = new THREE.Quaternion();
+  private readonly shipAutopilotTargetAbsolute = new THREE.Vector3();
+  private readonly shipAutopilotTargetDirection = new THREE.Vector3();
+  private readonly shipAutopilotTangent = new THREE.Vector3();
+  private readonly shipAutopilotAimDirection = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
   private readonly poseEuler = new THREE.Euler();
   private readonly poseQuaternion = new THREE.Quaternion();
@@ -461,7 +483,11 @@ export class SurfaceTraverseController {
   private shipLookYawRad = 0;
   private shipLookPitchRad = 0;
   private shipBrakeRequested = false;
-  private shipCruiseThrust = false;
+  private shipAutoFlightMode: SpaceshipAutoFlightMode = "off";
+  private shipAutopilotTargetActive = false;
+  private shipAutopilotSurfaceTarget = false;
+  private shipAutopilotCruiseRadiusM = MARS_REFERENCE_RADIUS_M;
+  private shipWarpBurstRequested = false;
   private disposed = false;
   active = false;
 
@@ -590,7 +616,9 @@ export class SurfaceTraverseController {
     this.shipLookYawRad = 0;
     this.shipLookPitchRad = 0;
     this.shipBrakeRequested = false;
-    this.shipCruiseThrust = false;
+    this.shipAutoFlightMode = "off";
+    this.shipAutopilotTargetActive = false;
+    this.shipWarpBurstRequested = false;
     this.active = true;
     this.root.visible = true;
     this.localFill.visible = true;
@@ -641,7 +669,39 @@ export class SurfaceTraverseController {
       distanceM: this.shipDistanceM,
       canBoard: this.shipCanBoard,
       speedMps: this.traverseMode === "spaceship" ? this.spaceship.getSpeedMps() : 0,
+      autoFlightMode: this.traverseMode === "spaceship" ? this.shipAutoFlightMode : "off",
     };
+  }
+
+  get destinationAutopilotActive() {
+    return this.traverseMode === "spaceship" &&
+      this.shipAutopilotTargetActive &&
+      this.shipAutoFlightMode !== "off";
+  }
+
+  engageFlightAutopilot(targetPositionM: Vec3, surfaceTarget: boolean) {
+    if (!this.active || this.traverseMode !== "spaceship") return false;
+    this.shipAutopilotTargetAbsolute.set(targetPositionM.x, targetPositionM.y, targetPositionM.z);
+    if (this.shipAutopilotTargetAbsolute.lengthSq() <= 1e-8) return false;
+    this.spaceship.getAbsolute(this.shipAbsolute);
+    this.shipAutopilotSurfaceTarget = surfaceTarget;
+    this.shipAutopilotCruiseRadiusM = surfaceTarget
+      ? Math.max(this.shipAbsolute.length(), this.shipAutopilotTargetAbsolute.length() + 750)
+      : this.shipAutopilotTargetAbsolute.length();
+    this.shipAutopilotTargetActive = true;
+    this.shipAutoFlightMode = "full";
+    this.shipBrakeRequested = false;
+    return true;
+  }
+
+  updateFlightAutopilotTarget(targetPositionM: Vec3) {
+    if (!this.destinationAutopilotActive) return;
+    this.shipAutopilotTargetAbsolute.set(targetPositionM.x, targetPositionM.y, targetPositionM.z);
+  }
+
+  private cancelSpaceshipAutomation() {
+    this.shipAutoFlightMode = "off";
+    this.shipAutopilotTargetActive = false;
   }
 
   get surfaceReady() {
@@ -919,7 +979,9 @@ export class SurfaceTraverseController {
     this.shipLookYawRad = 0;
     this.shipLookPitchRad = 0;
     this.shipBrakeRequested = false;
-    this.shipCruiseThrust = false;
+    this.shipAutoFlightMode = "off";
+    this.shipAutopilotTargetActive = false;
+    this.shipWarpBurstRequested = false;
     this.cameraCollisionFraction = 1;
     this.keys.clear();
     this.mouseButtons.clear();
@@ -1004,7 +1066,9 @@ export class SurfaceTraverseController {
     this.shipAimX = 0;
     this.shipAimY = 0;
     this.shipBrakeRequested = false;
-    this.shipCruiseThrust = false;
+    this.shipAutoFlightMode = "off";
+    this.shipAutopilotTargetActive = false;
+    this.shipWarpBurstRequested = false;
     this.shipLookYawRad = 0;
     this.shipLookPitchRad = 0;
     this.keys.clear();
@@ -1047,9 +1111,59 @@ export class SurfaceTraverseController {
     this.shipViewUp.applyQuaternion(this.shipViewRotation).normalize();
   }
 
+  private resolveSpaceshipAimDirection() {
+    if (!this.shipAutopilotTargetActive) return this.shipCameraForward;
+    this.spaceship.getAbsolute(this.shipAbsolute);
+    if (!this.shipAutopilotSurfaceTarget) {
+      this.shipAutopilotAimDirection
+        .copy(this.shipAutopilotTargetAbsolute)
+        .sub(this.shipAbsolute);
+      if (this.shipAutopilotAimDirection.lengthSq() > 1e-8) {
+        return this.shipAutopilotAimDirection.normalize();
+      }
+      return this.shipCameraForward;
+    }
+
+    this.shipRadialUp.copy(this.shipAbsolute).normalize();
+    this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
+    const targetDot = clamp(this.shipRadialUp.dot(this.shipAutopilotTargetDirection), -1, 1);
+    const angularDistanceRad = Math.acos(targetDot);
+    if (angularDistanceRad <= 0.001) {
+      this.shipAutopilotAimDirection
+        .copy(this.shipAutopilotTargetDirection)
+        .multiplyScalar(this.shipAutopilotCruiseRadiusM)
+        .sub(this.shipAbsolute);
+      if (this.shipAutopilotAimDirection.lengthSq() > 1e-8) {
+        return this.shipAutopilotAimDirection.normalize();
+      }
+      return this.shipCameraForward;
+    }
+
+    this.shipAutopilotTangent
+      .copy(this.shipAutopilotTargetDirection)
+      .addScaledVector(this.shipRadialUp, -targetDot);
+    if (this.shipAutopilotTangent.lengthSq() <= 1e-8) {
+      this.spaceship.getForward(this.shipAutopilotTangent)
+        .addScaledVector(this.shipRadialUp, -this.shipAutopilotTangent.dot(this.shipRadialUp));
+    }
+    if (this.shipAutopilotTangent.lengthSq() <= 1e-8) return this.shipCameraForward;
+    this.shipAutopilotTangent.normalize();
+    const radialCorrection = clamp(
+      (this.shipAutopilotCruiseRadiusM - this.shipAbsolute.length()) / 2_000,
+      -0.45,
+      0.65,
+    );
+    return this.shipAutopilotAimDirection
+      .copy(this.shipAutopilotTangent)
+      .addScaledVector(this.shipRadialUp, radialCorrection)
+      .normalize();
+  }
+
   private updateSpaceship(delta: number): PlanetControlState {
     const brakeRequested = this.shipBrakeRequested || this.keys.has("KeyX");
     this.shipBrakeRequested = false;
+    const warpBurst = this.shipWarpBurstRequested;
+    this.shipWarpBurstRequested = false;
     const mouseForward = spaceshipMouseForward(
       this.mouseButtons.has(0),
       this.mouseButtons.has(2),
@@ -1075,24 +1189,28 @@ export class SurfaceTraverseController {
     this.updateShipCameraFrame();
     this.updateShipViewFrame();
     const keyboardAttitude = spaceshipKeyboardAttitudeInput(this.keys);
+    const autoThrusting = this.shipAutoFlightMode !== "off";
+    const aimDirection = this.resolveSpaceshipAimDirection();
     const flightInput: SpaceshipFlightInput = {
-      throttle: Number(this.shipCruiseThrust || this.keys.has("KeyW") || mouseForward)
+      throttle: Number(autoThrusting || this.keys.has("KeyW") || mouseForward)
         - Number(this.keys.has("KeyS")),
       ...keyboardAttitude,
+      boost: keyboardAttitude.boost || this.shipAutoFlightMode === "full",
       brake: brakeRequested,
       aimX: 0,
       aimY: 0,
       aimDirection: {
-        x: this.shipCameraForward.x,
-        y: this.shipCameraForward.y,
-        z: this.shipCameraForward.z,
+        x: aimDirection.x,
+        y: aimDirection.y,
+        z: aimDirection.z,
       },
+      warpBurst,
     };
     this.onAudioEvent({
       type: "flight",
       active: true,
       throttle: brakeRequested ? 0 : flightInput.throttle,
-      boost: flightInput.boost,
+      boost: flightInput.boost || warpBurst,
       maneuver: Math.max(
         Math.abs(flightInput.strafe),
         Math.abs(flightInput.lift),
@@ -1340,19 +1458,24 @@ export class SurfaceTraverseController {
     if (this.traverseMode === "spaceship") {
       if (event.code === "KeyR" && !event.repeat) {
         event.preventDefault();
-        this.shipCruiseThrust = !this.shipCruiseThrust;
+        this.shipAutoFlightMode = nextSpaceshipAutoFlightMode(this.shipAutoFlightMode);
+        if (this.shipAutoFlightMode === "off") this.shipAutopilotTargetActive = false;
+        this.shipBrakeRequested = false;
         return;
       }
       if ([
-        "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyZ", "KeyC", "KeyX", "Space",
+        "KeyW", "KeyA", "KeyS", "KeyD", "KeyQ", "KeyE", "KeyZ", "KeyC", "KeyX", "KeyF", "Space",
         "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight",
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
       ].includes(event.code)) event.preventDefault();
+      if (isSpaceshipManualFlightControlKey(event.code)) this.cancelSpaceshipAutomation();
+      if (event.code === "KeyF" && !event.repeat) {
+        this.shipWarpBurstRequested = true;
+        return;
+      }
       if (event.code === "KeyX" && !event.repeat) {
         this.shipBrakeRequested = true;
-        this.shipCruiseThrust = false;
       }
-      if (event.code === "KeyS") this.shipCruiseThrust = false;
       this.keys.add(event.code);
       return;
     }
@@ -1405,7 +1528,8 @@ export class SurfaceTraverseController {
     this.shipAimX = 0;
     this.shipAimY = 0;
     this.shipBrakeRequested = false;
-    this.shipCruiseThrust = false;
+    this.cancelSpaceshipAutomation();
+    this.shipWarpBurstRequested = false;
     this.shipLookYawRad = 0;
     this.shipLookPitchRad = 0;
   };
@@ -1420,6 +1544,9 @@ export class SurfaceTraverseController {
       event.preventDefault();
       this.canvas.focus({ preventScroll: true });
       this.mouseButtons.add(event.button);
+      if (spaceshipMouseForward(this.mouseButtons.has(0), this.mouseButtons.has(2))) {
+        this.cancelSpaceshipAutomation();
+      }
       this.pointerId = event.pointerId;
       this.pointerX = event.clientX;
       this.pointerY = event.clientY;

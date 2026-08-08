@@ -64,6 +64,8 @@ export type PlanetTelemetry = {
   shipDistanceM: number | null;
   shipCanBoard: boolean;
   shipSpeedMps: number;
+  shipAutoFlightMode: "off" | "cruise" | "full";
+  shipAutopilotTargetName: string | null;
 };
 
 export type DebugFlags = {
