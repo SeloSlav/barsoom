@@ -22,6 +22,8 @@ const SHIP_TRAIL_MAX_POINTS = 240;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
 const SHIP_TRANSLATION_RESPONSE_S = 16;
+const SHIP_AIM_RESPONSE_S = 9;
+const SHIP_AIM_MAX_RATE_RAD_S = 2.8;
 const SHIP_MODEL_LENGTH_M = 9.2;
 
 export const SHIP_BOARD_DISTANCE_M = 5.5;
@@ -38,8 +40,7 @@ export type SpaceshipFlightInput = {
   brake: boolean;
   aimX: number;
   aimY: number;
-  aimRight?: Vec3;
-  aimUp?: Vec3;
+  aimDirection?: Vec3;
 };
 
 type TrailPoint = {
@@ -112,9 +113,7 @@ export class SurfaceSpaceship {
   private readonly previousRotation = new THREE.Quaternion();
   private readonly velocityRotation = new THREE.Quaternion();
   private readonly rotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
-  private readonly aimRight = new THREE.Vector3();
-  private readonly aimUp = new THREE.Vector3();
-  private readonly aimTangent = new THREE.Vector3();
+  private readonly aimForward = new THREE.Vector3();
   private readonly aimAxis = new THREE.Vector3();
   private readonly engineLeft = new THREE.Vector3(-3.25, 0.05, -4.55);
   private readonly engineRight = new THREE.Vector3(3.25, 0.05, -4.55);
@@ -345,8 +344,13 @@ export class SurfaceSpaceship {
     // opposite screen edge must never cancel or reverse a keyboard command.
     const keyboardYaw = clamp(input.yaw, -1, 1);
     const keyboardPitch = clamp(input.pitch, -1, 1);
-    const yawInput = spaceshipDirectionalSteer(input.aimX, keyboardYaw);
-    const pitchInput = spaceshipDirectionalSteer(input.aimY, keyboardPitch);
+    const hasCameraAim = input.aimDirection !== undefined &&
+      Number.isFinite(input.aimDirection.x) &&
+      Number.isFinite(input.aimDirection.y) &&
+      Number.isFinite(input.aimDirection.z) &&
+      Math.hypot(input.aimDirection.x, input.aimDirection.y, input.aimDirection.z) > 1e-7;
+    const yawInput = hasCameraAim ? keyboardYaw : spaceshipDirectionalSteer(input.aimX, keyboardYaw);
+    const pitchInput = hasCameraAim ? keyboardPitch : spaceshipDirectionalSteer(input.aimY, keyboardPitch);
     this.smoothedYaw = spaceshipDampedInput(this.smoothedYaw, yawInput, SHIP_ROTATION_RESPONSE_S, delta);
     this.smoothedPitch = spaceshipDampedInput(this.smoothedPitch, pitchInput, SHIP_ROTATION_RESPONSE_S, delta);
     this.smoothedRoll = spaceshipDampedInput(
@@ -356,44 +360,43 @@ export class SurfaceSpaceship {
       delta,
     );
     this.previousRotation.copy(this.root.quaternion);
-    const pointerYaw = Math.abs(keyboardYaw) <= 0.001 && input.aimRight;
-    const pointerPitch = Math.abs(keyboardPitch) <= 0.001 && input.aimUp;
-    if (pointerYaw || pointerPitch) {
+    const manualSteering = Math.abs(keyboardYaw) > 0.001 ||
+      Math.abs(keyboardPitch) > 0.001 ||
+      Math.abs(this.smoothedYaw) > 0.02 ||
+      Math.abs(this.smoothedPitch) > 0.02;
+    if (hasCameraAim && input.aimDirection && !manualSteering) {
       this.forward.set(0, 0, 1).applyQuaternion(this.root.quaternion).normalize();
-      this.aimTangent.set(0, 0, 0);
-      if (pointerYaw && input.aimRight) {
-        this.aimRight.set(input.aimRight.x, input.aimRight.y, input.aimRight.z).normalize();
-        this.aimTangent.addScaledVector(
-          this.aimRight,
-          this.smoothedYaw * SHIP_YAW_RATE_RAD_S,
-        );
-      }
-      if (pointerPitch && input.aimUp) {
-        this.aimUp.set(input.aimUp.x, input.aimUp.y, input.aimUp.z).normalize();
-        this.aimTangent.addScaledVector(
-          this.aimUp,
-          this.smoothedPitch * SHIP_PITCH_RATE_RAD_S,
-        );
-      }
-      this.aimTangent.addScaledVector(this.forward, -this.aimTangent.dot(this.forward));
-      const turnRateRadS = this.aimTangent.length();
-      if (turnRateRadS > 1e-7) {
-        this.aimTangent.multiplyScalar(1 / turnRateRadS);
-        this.aimAxis.crossVectors(this.forward, this.aimTangent).normalize();
+      this.aimForward.set(
+        input.aimDirection.x,
+        input.aimDirection.y,
+        input.aimDirection.z,
+      ).normalize();
+      const aimDot = clamp(this.forward.dot(this.aimForward), -1, 1);
+      const aimAngleRad = Math.acos(aimDot);
+      if (aimAngleRad > 1e-7) {
+        this.aimAxis.crossVectors(this.forward, this.aimForward);
+        if (this.aimAxis.lengthSq() <= 1e-10) {
+          this.aimAxis.set(0, 1, 0).applyQuaternion(this.root.quaternion);
+        } else {
+          this.aimAxis.normalize();
+        }
+        const easedStepRad = aimAngleRad * (1 - Math.exp(-SHIP_AIM_RESPONSE_S * delta));
+        const maxStepRad = SHIP_AIM_MAX_RATE_RAD_S * turnMultiplier * delta;
         this.rotationStep.setFromAxisAngle(
           this.aimAxis,
-          turnRateRadS * turnMultiplier * delta,
+          Math.min(aimAngleRad, easedStepRad, maxStepRad),
         );
         this.root.quaternion.premultiply(this.rotationStep).normalize();
       }
     }
 
-    // Keyboard steering remains craft-relative and authoritative on its axis.
-    // Mouse steering above is camera-relative, so screen-right stays right even
-    // after the chase camera has orbited around or over the hull.
+    // Keyboard steering remains craft-relative and temporarily overrides the
+    // camera aim. Releasing it lets the nose ease back onto the camera's
+    // independent centreline instead of feeding the ship's own turn back into
+    // the target direction.
     this.rotationEuler.set(
-      pointerPitch ? 0 : -this.smoothedPitch * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
-      pointerYaw ? 0 : -this.smoothedYaw * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
+      -this.smoothedPitch * SHIP_PITCH_RATE_RAD_S * turnMultiplier * delta,
+      -this.smoothedYaw * SHIP_YAW_RATE_RAD_S * turnMultiplier * delta,
       this.smoothedRoll * SHIP_ROLL_RATE_RAD_S * turnMultiplier * delta,
     );
     this.rotationStep.setFromEuler(this.rotationEuler);

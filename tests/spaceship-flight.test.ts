@@ -109,7 +109,7 @@ describe("surface spaceship flight", () => {
     craft.dispose();
   });
 
-  it("turns the nose toward the pointer's camera-relative screen direction", () => {
+  it("converges the nose onto the camera aim direction and stops there", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
       scene,
@@ -122,17 +122,20 @@ describe("surface spaceship flight", () => {
       new THREE.Vector3(0, -1, 0),
     );
     craft.board();
-    const screenRight = new THREE.Vector3(-1, 0, 0);
-    for (let frame = 0; frame < 60; frame += 1) {
+    const cameraDirection = new THREE.Vector3(0, -1, 0);
+    for (let frame = 0; frame < 120; frame += 1) {
       craft.updateFlight(1 / 60, {
         ...neutralFlightInput,
-        aimX: 1,
-        aimRight: screenRight,
-        aimUp: new THREE.Vector3(0, 1, 0),
+        aimDirection: cameraDirection,
       });
     }
 
-    expect(craft.getForward(new THREE.Vector3()).dot(screenRight)).toBeGreaterThan(0.9);
+    const alignedNose = craft.getForward(new THREE.Vector3()).clone();
+    expect(alignedNose.dot(cameraDirection)).toBeGreaterThan(0.9999);
+    for (let frame = 0; frame < 60; frame += 1) {
+      craft.updateFlight(1 / 60, { ...neutralFlightInput, aimDirection: cameraDirection });
+    }
+    expect(craft.getForward(new THREE.Vector3()).distanceTo(alignedNose)).toBeLessThan(0.001);
     craft.dispose();
   });
 

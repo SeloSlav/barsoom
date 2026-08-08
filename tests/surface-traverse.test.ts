@@ -6,6 +6,7 @@ import {
 } from "../app/planet/constants";
 import {
   MARS_JUMP_ANTICIPATION_DURATION_S,
+  applySpaceshipCameraPointerSteer,
   applySpaceshipCameraOrbitDrag,
   applySpaceshipCameraZoom,
   applyWowCameraDrag,
@@ -189,6 +190,16 @@ describe("surface traverse physics", () => {
     expect(spaceshipMouseForward(true, true)).toBe(true);
     expect(spaceshipMouseForward(true, false)).toBe(false);
     expect(spaceshipMouseForward(false, true)).toBe(false);
+  });
+
+  it("turns the independent camera aim frame toward the mouse", () => {
+    const right = applySpaceshipCameraPointerSteer(0, 0, 1, 0, 1 / 60);
+    const up = applySpaceshipCameraPointerSteer(0, 0, 0, 1, 1 / 60);
+    const centred = applySpaceshipCameraPointerSteer(2, -1, 0, 0, 1 / 60);
+
+    expect(right.cameraYawRad).toBeLessThan(0);
+    expect(up.cameraPitchRad).toBeGreaterThan(0);
+    expect(centred).toEqual({ cameraYawRad: 2, cameraPitchRad: -1 });
   });
 
   it("rebases the camera with large streamed terrain changes without chasing ordinary slopes", () => {

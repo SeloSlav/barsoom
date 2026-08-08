@@ -13,6 +13,7 @@ import type { PlanetControlState } from "./PlanetControls";
 import {
   SHIP_BOARD_DISTANCE_M,
   SurfaceSpaceship,
+  spaceshipSteerAmount,
   type SpaceshipFlightInput,
 } from "./SurfaceSpaceship";
 import type { Vec3 } from "./types";
@@ -49,7 +50,9 @@ const JUMP_LANDING_POSE_DURATION_S = 0.28;
 const SHIP_CAMERA_DEFAULT_DISTANCE_M = 24;
 const SHIP_CAMERA_MIN_DISTANCE_M = 8;
 const SHIP_CAMERA_MAX_DISTANCE_M = CAMERA_MAX_DISTANCE_M;
-const SHIP_CAMERA_DEFAULT_PITCH_RAD = THREE.MathUtils.degToRad(-14);
+const SHIP_CAMERA_DEFAULT_PITCH_RAD = 0;
+const SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S = 1.9;
+const SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S = 1.55;
 const SHIP_EXIT_OFFSET_M = 4.2;
 const SHIP_EXIT_GROUND_SNAP_M = 6;
 
@@ -248,6 +251,22 @@ export function spaceshipMouseForward(leftButton: boolean, rightButton: boolean)
   return leftButton && rightButton;
 }
 
+export function applySpaceshipCameraPointerSteer(
+  cameraYawRad: number,
+  cameraPitchRad: number,
+  aimX: number,
+  aimY: number,
+  deltaSeconds: number,
+) {
+  const delta = clamp(deltaSeconds, 0, 0.05);
+  return {
+    cameraYawRad: cameraYawRad
+      - spaceshipSteerAmount(aimX) * SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S * delta,
+    cameraPitchRad: cameraPitchRad
+      + spaceshipSteerAmount(aimY) * SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S * delta,
+  };
+}
+
 export function rebaseCameraAnchorForTerrainChange(
   cameraAnchorHeightM: number,
   desiredCameraAnchorHeightM: number,
@@ -345,9 +364,11 @@ export class SurfaceTraverseController {
   private readonly shipRadialUp = new THREE.Vector3();
   private readonly shipOrbitForward = new THREE.Vector3();
   private readonly shipOrbitRight = new THREE.Vector3();
+  private readonly shipCameraBaseForward = new THREE.Vector3();
+  private readonly shipCameraBaseRight = new THREE.Vector3();
+  private readonly shipCameraBaseUp = new THREE.Vector3();
+  private readonly shipCameraForward = new THREE.Vector3();
   private readonly shipCameraUp = new THREE.Vector3();
-  private readonly shipAimRight = new THREE.Vector3();
-  private readonly shipAimUp = new THREE.Vector3();
   private readonly orientation = new THREE.Matrix4();
   private readonly poseEuler = new THREE.Euler();
   private readonly poseQuaternion = new THREE.Quaternion();
@@ -861,6 +882,10 @@ export class SurfaceTraverseController {
     this.mouseButtons.clear();
     this.autoMoveMode = "off";
     this.root.visible = false;
+    this.spaceship.getForward(this.shipCameraBaseForward);
+    this.spaceship.getRight(this.shipCameraBaseRight);
+    this.spaceship.getUp(this.shipCameraBaseUp);
+    this.updateShipCameraFrame();
     this.spaceship.board();
     this.camera.fov = 58;
     this.camera.updateProjectionMatrix();
@@ -908,16 +933,16 @@ export class SurfaceTraverseController {
       this.shipOrbitForward.dot(this.east),
       this.shipOrbitForward.dot(this.north),
     );
-    this.shipOrbitRight.crossVectors(this.direction, this.shipOrbitForward).normalize();
-    this.shipOrbitForward.multiplyScalar(Math.cos(this.shipCameraYawRad))
-      .addScaledVector(this.shipOrbitRight, Math.sin(this.shipCameraYawRad))
-      .normalize();
+    this.shipOrbitForward.copy(this.shipCameraForward)
+      .addScaledVector(this.direction, -this.shipCameraForward.dot(this.direction));
+    if (this.shipOrbitForward.lengthSq() <= 1e-8) this.shipOrbitForward.copy(this.north);
+    this.shipOrbitForward.normalize();
     this.cameraYawRad = Math.atan2(
       this.shipOrbitForward.dot(this.east),
       this.shipOrbitForward.dot(this.north),
     );
     this.cameraPitchRad = clamp(
-      this.shipCameraPitchRad,
+      Math.asin(clamp(this.shipCameraForward.dot(this.direction), -1, 1)),
       CAMERA_MIN_PITCH_RAD,
       CAMERA_MAX_PITCH_RAD,
     );
@@ -950,6 +975,21 @@ export class SurfaceTraverseController {
     return true;
   }
 
+  private updateShipCameraFrame() {
+    this.shipOrbitForward.copy(this.shipCameraBaseForward)
+      .multiplyScalar(Math.cos(this.shipCameraYawRad))
+      .addScaledVector(this.shipCameraBaseRight, Math.sin(this.shipCameraYawRad))
+      .normalize();
+    this.shipCameraForward.copy(this.shipOrbitForward)
+      .multiplyScalar(Math.cos(this.shipCameraPitchRad))
+      .addScaledVector(this.shipCameraBaseUp, Math.sin(this.shipCameraPitchRad))
+      .normalize();
+    this.shipCameraUp.copy(this.shipCameraBaseUp)
+      .multiplyScalar(Math.cos(this.shipCameraPitchRad))
+      .addScaledVector(this.shipOrbitForward, -Math.sin(this.shipCameraPitchRad))
+      .normalize();
+  }
+
   private updateSpaceship(delta: number): PlanetControlState {
     const brakeRequested = this.shipBrakeRequested || this.keys.has("KeyX");
     this.shipBrakeRequested = false;
@@ -959,8 +999,18 @@ export class SurfaceTraverseController {
     );
     const cameraOrbiting = (this.mouseButtons.has(0) && !this.mouseButtons.has(2)) ||
       this.mouseButtons.has(1);
-    this.shipAimRight.set(1, 0, 0).applyQuaternion(this.camera.quaternion).normalize();
-    this.shipAimUp.set(0, 1, 0).applyQuaternion(this.camera.quaternion).normalize();
+    if (!cameraOrbiting) {
+      const cameraAim = applySpaceshipCameraPointerSteer(
+        this.shipCameraYawRad,
+        this.shipCameraPitchRad,
+        this.shipAimX,
+        this.shipAimY,
+        delta,
+      );
+      this.shipCameraYawRad = cameraAim.cameraYawRad;
+      this.shipCameraPitchRad = cameraAim.cameraPitchRad;
+    }
+    this.updateShipCameraFrame();
     const flightInput: SpaceshipFlightInput = {
       throttle: Number(this.shipCruiseThrust || this.keys.has("KeyW") || mouseForward)
         - Number(this.keys.has("KeyS")),
@@ -973,17 +1023,12 @@ export class SurfaceTraverseController {
       roll: Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ")),
       boost: this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"),
       brake: brakeRequested,
-      aimX: cameraOrbiting ? 0 : this.shipAimX,
-      aimY: cameraOrbiting ? 0 : this.shipAimY,
-      aimRight: {
-        x: this.shipAimRight.x,
-        y: this.shipAimRight.y,
-        z: this.shipAimRight.z,
-      },
-      aimUp: {
-        x: this.shipAimUp.x,
-        y: this.shipAimUp.y,
-        z: this.shipAimUp.z,
+      aimX: 0,
+      aimY: 0,
+      aimDirection: {
+        x: this.shipCameraForward.x,
+        y: this.shipCameraForward.y,
+        z: this.shipCameraForward.z,
       },
     };
     this.spaceship.updateFlight(delta, flightInput);
@@ -996,21 +1041,9 @@ export class SurfaceTraverseController {
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
 
-    this.shipOrbitForward.copy(this.shipForward);
-    this.shipOrbitRight.copy(this.shipRight);
-    this.shipOrbitForward.multiplyScalar(Math.cos(this.shipCameraYawRad))
-      .addScaledVector(this.shipOrbitRight, Math.sin(this.shipCameraYawRad))
-      .normalize();
-
-    const orbit = wowCameraOrbitDistances(this.shipCameraPitchRad, this.shipCameraDistanceM);
-    this.shipCameraUp.copy(this.shipUp)
-      .multiplyScalar(Math.cos(this.shipCameraPitchRad))
-      .addScaledVector(this.shipOrbitForward, -Math.sin(this.shipCameraPitchRad))
-      .normalize();
     this.targetAbsolute.copy(this.shipAbsolute).addScaledVector(this.shipRadialUp, 1.5);
-    this.desiredCameraAbsolute.copy(this.shipAbsolute)
-      .addScaledVector(this.shipOrbitForward, -orbit.horizontalM)
-      .addScaledVector(this.shipUp, orbit.verticalM);
+    this.desiredCameraAbsolute.copy(this.targetAbsolute)
+      .addScaledVector(this.shipCameraForward, -this.shipCameraDistanceM);
     const safeCollisionFraction = this.safeCameraCollisionFraction(this.desiredCameraAbsolute);
     if (safeCollisionFraction < this.cameraCollisionFraction) {
       this.cameraCollisionFraction = safeCollisionFraction;
@@ -1316,6 +1349,8 @@ export class SurfaceTraverseController {
       this.pointerId = event.pointerId;
       this.pointerX = event.clientX;
       this.pointerY = event.clientY;
+      this.shipAimX = 0;
+      this.shipAimY = 0;
       try {
         this.canvas.setPointerCapture(event.pointerId);
       } catch {
@@ -1411,8 +1446,10 @@ export class SurfaceTraverseController {
   };
 
   private onPointerLeave = () => {
-    // Keep the last intentional steering vector. Crossing the canvas edge
-    // must not abruptly centre the controls or snap the nose straight ahead.
+    if (this.traverseMode === "spaceship" && this.pointerId === null) {
+      this.shipAimX = 0;
+      this.shipAimY = 0;
+    }
   };
 
   private updateShipAimFromPointer(clientX: number, clientY: number) {
