@@ -107,7 +107,7 @@ const cloudFragment = /* glsl */ `
     float pathLength = clamp(0.24 / max(facing, 0.10), 0.38, 2.15);
 
     vec3 waterShadow = vec3(0.37, 0.34, 0.33);
-    vec3 waterLight = vec3(0.98, 0.93, 0.86);
+    vec3 waterLight = vec3(0.82, 0.79, 0.75);
     vec3 colour = mix(waterShadow, waterLight, 0.22 + daylight * 0.70);
     float visibility = 0.32 + daylight * 0.68;
 
@@ -140,13 +140,13 @@ export function createMarsCloudMaterial(layerKind: "water" | "co2") {
       uTime: { value: 0 },
       uCoverage: { value: water ? 0.48 : 0.18 },
       uScale: { value: water ? 7.2 : 10.5 },
-      uOpacity: { value: water ? 0.52 : 0.28 },
+      uOpacity: { value: water ? 0.32 : 0.22 },
       uLayerKind: { value: water ? 0 : 1 },
     },
     transparent: true,
     depthWrite: false,
     depthTest: true,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     blending: THREE.NormalBlending,
     toneMapped: true,
   }) as CloudMaterial;
@@ -306,13 +306,13 @@ export class WeatherRenderer {
       cameraDirection.x * 19.7 + cameraDirection.y * 31.1 - cameraDirection.z * 13.3,
     );
     const slowWeather = 0.5 + 0.5 * Math.sin(elapsedSeconds * 0.0017 + locationPattern * 5.1);
-    let cloudCover = clamp(0.38 + locationPattern * 0.22 + slowWeather * 0.12, 0, 1);
+    let cloudCover = clamp(0.24 + locationPattern * 0.16 + slowWeather * 0.08, 0, 1);
     let dustActivity = clamp(0.16 + (1 - locationPattern) * 0.24 + slowWeather * 0.14, 0, 1);
     if (this.preset === "clear") {
       cloudCover = 0.08;
       dustActivity = 0.08;
     } else if (this.preset === "cloudy") {
-      cloudCover = 0.95;
+      cloudCover = 0.68;
       dustActivity = 0.24;
     } else if (this.preset === "dust-storm") {
       cloudCover = 0.22;
@@ -321,15 +321,19 @@ export class WeatherRenderer {
     const windSpeedMps = 3.5 + dustActivity * 18 + slowWeather * 4;
     this.state = { preset: this.preset, cloudCover, dustActivity, windSpeedMps };
 
-    for (const [mesh, coverage] of [
-      [this.waterClouds, cloudCover],
-      [this.co2Clouds, clamp((cloudCover - 0.32) * 0.36 + 0.10, 0.06, 0.32)],
+    const cameraRadius = Math.hypot(cameraAbsolute.x, cameraAbsolute.y, cameraAbsolute.z);
+    for (const [mesh, coverage, layerAltitudeM] of [
+      [this.waterClouds, cloudCover, WATER_ICE_ALTITUDE_M],
+      [this.co2Clouds, clamp((cloudCover - 0.32) * 0.36 + 0.10, 0.06, 0.32), CO2_ICE_ALTITUDE_M],
     ] as const) {
       mesh.position.set(-cameraAbsolute.x, -cameraAbsolute.y, -cameraAbsolute.z);
-      mesh.material.uniforms.uCameraRadius.value = Math.hypot(cameraAbsolute.x, cameraAbsolute.y, cameraAbsolute.z);
+      mesh.material.uniforms.uCameraRadius.value = cameraRadius;
       mesh.material.uniforms.uSunDirection.value.set(sunDirection.x, sunDirection.y, sunDirection.z);
       mesh.material.uniforms.uTime.value = elapsedSeconds;
       mesh.material.uniforms.uCoverage.value = coverage;
+      mesh.material.side = cameraRadius > MARS_REFERENCE_RADIUS_M + layerAltitudeM
+        ? THREE.FrontSide
+        : THREE.BackSide;
       mesh.visible = detailLevel > 0;
     }
 
