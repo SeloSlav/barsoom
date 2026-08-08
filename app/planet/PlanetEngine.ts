@@ -21,6 +21,13 @@ import {
   type GraphicsPreset,
   type GraphicsRuntimeState,
 } from "./graphicsSettings";
+import {
+  distributeFlightHudEdges,
+  marsSurfaceRangeM,
+  projectFlightHudTarget,
+  type FlightHudEdge,
+  type FlightHudInsets,
+} from "./flightNavigation";
 import { PlanetControls, type PlanetControlState } from "./PlanetControls";
 import {
   DEFAULT_ORBITAL_STANDOFF_RADII,
@@ -62,6 +69,20 @@ export type MarsOrbitalMarker = {
   x: number;
   y: number;
   radiusPx: number;
+};
+
+export type MarsFlightNavigationMarker = {
+  id: string;
+  name: string;
+  shortName: string;
+  featureType: string;
+  kind: "landmark" | "rover" | "moon" | "orbiter";
+  x: number;
+  y: number;
+  edge: FlightHudEdge | null;
+  angleRad: number;
+  rangeM: number;
+  occulted: boolean;
 };
 
 type SurfaceSelectionPosition = {
@@ -149,6 +170,11 @@ export class PlanetEngine {
   private readonly moonTargetRelative = new THREE.Vector3();
   private readonly moonViewUp = new THREE.Vector3();
   private readonly orbitalProjection = new THREE.Vector3();
+  private readonly flightNavigationAbsolute = new THREE.Vector3();
+  private readonly flightNavigationRelative = new THREE.Vector3();
+  private readonly flightNavigationView = new THREE.Vector3();
+  private readonly flightNavigationToCamera = new THREE.Vector3();
+  private readonly flightCameraInverse = new THREE.Quaternion();
   private selectionDirection: THREE.Vector3 | null = null;
   private selectionHeadingRad: number | undefined;
   private pointerDown: { x: number; y: number } | null = null;
@@ -158,6 +184,8 @@ export class PlanetEngine {
   private landmarkMarkerSignature = "";
   private lastOrbitalMarkerTime = -Infinity;
   private orbitalMarkerSignature = "";
+  private lastFlightNavigationTime = -Infinity;
+  private flightNavigationSignature = "";
   private controlState!: PlanetControlState;
   private skyState: MarsSkyState;
   private simulationStartUtc: Date;
@@ -203,6 +231,7 @@ export class PlanetEngine {
     graphicsPreference: GraphicsPreference = "auto",
     private readonly onGraphicsSettingsChange: (settings: GraphicsRuntimeState) => void = () => {},
     private readonly onObservedBodyChange: (body: ObservedBody) => void = () => {},
+    private readonly onFlightNavigationChange: (markers: readonly MarsFlightNavigationMarker[]) => void = () => {},
   ) {
     const requestedEpoch = initialSimulationUtc instanceof Date
       ? new Date(initialSimulationUtc)
@@ -646,6 +675,7 @@ export class PlanetEngine {
     this.updateSelection();
     this.updateLandmarkMarkers(time);
     this.updateOrbitalMarkers(time);
+    this.updateFlightNavigation(time);
     this.skyCamera.quaternion.copy(this.camera.quaternion);
     this.skyCamera.updateMatrixWorld(true);
     this.celestial.update(
@@ -1117,6 +1147,146 @@ export class PlanetEngine {
     this.onOrbitalMarkersChange(markers);
   }
 
+  private flightNavigationInsets(bounds: DOMRect): FlightHudInsets {
+    const compact = bounds.width <= 760;
+    return {
+      top: compact ? 126 : 154,
+      right: compact ? 22 : 34,
+      bottom: compact ? 52 : 62,
+      left: compact ? 22 : 34,
+    };
+  }
+
+  private projectFlightNavigationTarget(
+    positionM: { x: number; y: number; z: number },
+    bounds: DOMRect,
+    insets: FlightHudInsets,
+    forceEdge: boolean,
+  ) {
+    this.flightNavigationRelative.set(
+      positionM.x - this.controlState.cameraAbsolute.x,
+      positionM.y - this.controlState.cameraAbsolute.y,
+      positionM.z - this.controlState.cameraAbsolute.z,
+    );
+    this.flightNavigationView
+      .copy(this.flightNavigationRelative)
+      .applyQuaternion(this.flightCameraInverse);
+    return projectFlightHudTarget({
+      viewX: this.flightNavigationView.x,
+      viewY: this.flightNavigationView.y,
+      viewZ: this.flightNavigationView.z,
+      viewportWidth: bounds.width,
+      viewportHeight: bounds.height,
+      verticalFovRad: THREE.MathUtils.degToRad(this.camera.fov),
+      aspect: this.camera.aspect,
+      insets,
+      forceEdge,
+    });
+  }
+
+  private updateFlightNavigation(time: number) {
+    if (time - this.lastFlightNavigationTime < 40) return;
+    this.lastFlightNavigationTime = time;
+    const markers: MarsFlightNavigationMarker[] = [];
+    if (
+      this.surfaceTraverse.active &&
+      this.surfaceTraverse.mode === "spaceship" &&
+      this.observedBody === "Mars"
+    ) {
+      const bounds = this.canvas.getBoundingClientRect();
+      const insets = this.flightNavigationInsets(bounds);
+      this.flightCameraInverse.copy(this.camera.quaternion).invert();
+
+      for (const landmark of MARS_LANDMARKS) {
+        const direction = this.landmarkDirections.get(landmark.id);
+        if (!direction) continue;
+        const radiusM = MARS_REFERENCE_RADIUS_M + this.terrain.sampleHeight(direction);
+        this.flightNavigationAbsolute.copy(direction).multiplyScalar(radiusM);
+        this.flightNavigationRelative
+          .copy(this.flightNavigationAbsolute)
+          .sub(this.controlState.cameraAbsolute);
+        this.flightNavigationToCamera.copy(this.flightNavigationRelative).multiplyScalar(-1);
+        const occulted = direction.dot(this.flightNavigationToCamera) <= 0;
+        const projection = this.projectFlightNavigationTarget(
+          this.flightNavigationAbsolute,
+          bounds,
+          insets,
+          occulted,
+        );
+        const surfaceRangeM = marsSurfaceRangeM(
+          this.controlState.cameraAbsolute,
+          direction,
+          MARS_REFERENCE_RADIUS_M,
+        );
+        markers.push({
+          id: landmark.id,
+          name: landmark.name,
+          shortName: landmark.name.toUpperCase(),
+          featureType: landmark.featureType,
+          kind: landmark.kind === "retired-rover" ? "rover" : "landmark",
+          ...projection,
+          rangeM: Math.hypot(surfaceRangeM, Math.max(0, this.controlState.altitudeM)),
+          occulted,
+        });
+      }
+
+      for (const moon of this.skyState.moons) {
+        const occulted = this.orbitalTargetIsOcculted(moon.positionM);
+        markers.push({
+          id: moon.name,
+          name: moon.name,
+          shortName: moon.name.toUpperCase(),
+          featureType: "Natural satellite",
+          kind: "moon",
+          ...this.projectFlightNavigationTarget(moon.positionM, bounds, insets, occulted),
+          rangeM: Math.hypot(
+            moon.positionM.x - this.controlState.cameraAbsolute.x,
+            moon.positionM.y - this.controlState.cameraAbsolute.y,
+            moon.positionM.z - this.controlState.cameraAbsolute.z,
+          ),
+          occulted,
+        });
+      }
+
+      for (const orbiter of this.skyState.orbiters) {
+        const occulted = this.orbitalTargetIsOcculted(orbiter.positionM);
+        markers.push({
+          id: orbiter.name,
+          name: orbiter.name,
+          shortName: orbiter.shortName,
+          featureType: "Active Mars orbiter",
+          kind: "orbiter",
+          ...this.projectFlightNavigationTarget(orbiter.positionM, bounds, insets, occulted),
+          rangeM: Math.hypot(
+            orbiter.positionM.x - this.controlState.cameraAbsolute.x,
+            orbiter.positionM.y - this.controlState.cameraAbsolute.y,
+            orbiter.positionM.z - this.controlState.cameraAbsolute.z,
+          ),
+          occulted,
+        });
+      }
+
+      const distributed = distributeFlightHudEdges(
+        markers,
+        bounds.width,
+        bounds.height,
+        insets,
+        bounds.width <= 760 ? 40 : 74,
+      );
+      markers.splice(0, markers.length, ...distributed.map((marker) => ({
+        ...marker,
+        x: marker.x + bounds.left,
+        y: marker.y + bounds.top,
+      })));
+    }
+    const signature = markers
+      .map((marker) => `${marker.id}:${Math.round(marker.x)}:${Math.round(marker.y)}:${marker.edge ?? "view"}:${Math.round(marker.rangeM / 100)}`)
+      .join("|");
+    if (signature === this.flightNavigationSignature) return;
+    this.flightNavigationSignature = signature;
+    this.onFlightNavigationChange(markers);
+  }
+
   private clearLandmarkHover() {
     if (this.hoveredLandmarkId === null) return;
     this.hoveredLandmarkId = null;
@@ -1261,6 +1431,7 @@ export class PlanetEngine {
     this.renderer.dispose();
     this.onLandmarkMarkersChange([]);
     this.onOrbitalMarkersChange([]);
+    this.onFlightNavigationChange([]);
     this.canvas.removeEventListener("pointerdown", this.onSelectionPointerDown);
     this.canvas.removeEventListener("pointermove", this.onLandmarkPointerMove);
     this.canvas.removeEventListener("pointerleave", this.onLandmarkPointerLeave);

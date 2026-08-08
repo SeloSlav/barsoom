@@ -13,6 +13,7 @@ import {
 } from "../planet/graphicsSettings";
 import {
   PlanetEngine,
+  type MarsFlightNavigationMarker,
   type MarsLandmarkHover,
   type MarsLandmarkMarker,
   type MarsOrbitalMarker,
@@ -148,6 +149,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [hoveredLandmark, setHoveredLandmark] = useState<PresentedLandmark | null>(null);
   const [landmarkMarkers, setLandmarkMarkers] = useState<readonly MarsLandmarkMarker[]>([]);
   const [orbitalMarkers, setOrbitalMarkers] = useState<readonly MarsOrbitalMarker[]>([]);
+  const [flightNavigationMarkers, setFlightNavigationMarkers] = useState<readonly MarsFlightNavigationMarker[]>([]);
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
@@ -179,6 +181,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         loadGraphicsPreference(),
         setGraphicsState,
         setObservedBody,
+        setFlightNavigationMarkers,
       );
       setAudioMuted(engine.getAudioMuted());
       const sharedLocation = parseSpacemanShareLocation(window.location.search);
@@ -243,6 +246,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
     setHoveredLandmark(null);
     setLandmarkMarkers([]);
     setOrbitalMarkers([]);
+    setFlightNavigationMarkers([]);
     window.__BARSOOM__?.focusBody(body);
     canvasRef.current?.focus();
   };
@@ -304,6 +308,32 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <strong>{telemetry.shipCanBoard ? <><kbd>E</kbd> BOARD SPACECRAFT</> : "APPROACH TO BOARD"}</strong>
       </aside>}
       {spaceshipMode && <div className="ship-flight-reticle" aria-hidden="true"><i /><span /></div>}
+      {spaceshipMode && flightNavigationMarkers.length > 0 && <>
+        <aside className="flight-nav-status" aria-label={`${flightNavigationMarkers.filter((marker) => marker.kind === "landmark" || marker.kind === "rover").length} surface destinations and ${flightNavigationMarkers.filter((marker) => marker.kind === "moon" || marker.kind === "orbiter").length} orbital destinations highlighted`}>
+          <span>NAV / ALL TARGETS</span>
+          <small><i className="surface" /> SURFACE <i className="orbital" /> ORBITAL</small>
+        </aside>
+        <div className="flight-nav-layer" aria-label="Spacecraft navigation highlights">
+          {flightNavigationMarkers.map((marker, index) => <div
+            key={`${marker.kind}-${marker.id}`}
+            className={`flight-nav-marker ${marker.kind}${marker.edge ? ` offscreen edge-${marker.edge}` : " in-view"}${marker.occulted ? " occulted" : ""}`}
+            style={{
+              left: marker.x,
+              top: marker.y,
+              animationDelay: `${-(index % 7) * 0.31}s`,
+            }}
+            role="img"
+            aria-label={`${marker.name}, ${marker.featureType}, ${formatDistance(marker.rangeM, 0)} away${marker.edge ? ", outside the current view" : ""}`}
+          >
+            {marker.edge && <i className="flight-nav-pointer" style={{ transform: `rotate(${marker.angleRad}rad)` }} aria-hidden="true" />}
+            <i className="flight-nav-sight" aria-hidden="true"><b /></i>
+            <span className="flight-nav-copy">
+              <strong>{marker.shortName}</strong>
+              <small>{marker.kind === "orbiter" ? "ORBITER" : marker.kind === "moon" ? "MOON" : marker.kind === "rover" ? "ROVER" : "LANDMARK"} / {formatDistance(marker.rangeM, 0)}{marker.occulted ? " / MASKED" : ""}</small>
+            </span>
+          </div>)}
+        </div>
+      </>}
       <header className="mission-header">
         <div className="mission-identity">
           <div className="brand-lockup" ref={bodyMenuRef}>
@@ -584,8 +614,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </div>}
         {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
           {spaceshipMode ? <>
-            <dl><div><dt>Aim camera + nose</dt><dd>Move mouse</dd></div><div><dt>Mouse thrust</dt><dd>Hold left + right</dd></div><div><dt>Turn left / right</dt><dd>A / D</dd></div><div><dt>Pitch nose up / down</dt><dd>↑ / ↓</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Toggle cruise thrust</dt><dd>R</dd></div><div><dt>Boost + sharp turn</dt><dd>Hold Shift</dd></div><div><dt>Auto-brake + position hold</dt><dd>X</dd></div><div><dt>Roll left / right</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Infinite aim turn</dt><dd>Left / middle drag</dd></div><div><dt>Free-look around ship</dt><dd>Hold Alt + drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Stop + disembark here</dt><dd>Escape</dd></div></dl>
-            <p>The nose smoothly converges on the camera aim through unlimited horizontal and vertical turns. Hold Alt while left- or middle-dragging to orbit freely around the ship without changing its heading; release Alt and the view smoothly returns behind it. Ordinary clicks never lock or hide the pointer. Hold both mouse buttons to thrust along the aimed direction; directional keys temporarily override the camera follower. Shift boosts, while X brakes to a stable position hold.</p>
+            <dl><div><dt>Navigation highlights</dt><dd>Always on</dd></div><div><dt>Aim camera + nose</dt><dd>Move mouse</dd></div><div><dt>Mouse thrust</dt><dd>Hold left + right</dd></div><div><dt>Turn left / right</dt><dd>A / D</dd></div><div><dt>Pitch nose up / down</dt><dd>↑ / ↓</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Toggle cruise thrust</dt><dd>R</dd></div><div><dt>Boost + sharp turn</dt><dd>Hold Shift</dd></div><div><dt>Auto-brake + position hold</dt><dd>X</dd></div><div><dt>Roll left / right</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Infinite aim turn</dt><dd>Left / middle drag</dd></div><div><dt>Free-look around ship</dt><dd>Hold Alt + drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Stop + disembark here</dt><dd>Escape</dd></div></dl>
+            <p>Major landmarks, rover sites, both moons, and active Mars orbiters remain highlighted throughout flight. An edge arrow means the destination is outside the current view or behind Mars; its live readout gives the range. The nose smoothly converges on the camera aim through unlimited horizontal and vertical turns. Hold Alt while left- or middle-dragging to orbit freely around the ship without changing its heading; release Alt and the view smoothly returns behind it. Ordinary clicks never lock or hide the pointer. Hold both mouse buttons to thrust along the aimed direction; directional keys temporarily override the camera follower. Shift boosts, while X brakes to a stable position hold.</p>
           </> : <>
             <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Board spacecraft</dt><dd>Approach + E</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
             <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². A spacecraft is instantiated nearby at every landing site.</p>
