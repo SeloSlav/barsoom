@@ -293,36 +293,71 @@ const terrainFragment = /* glsl */ `
 
   vec2 surfaceVariantUv(vec2 projectedMetres, vec4 variant) {
     float turn = floor(variant.z * 4.0);
-    float scaleM = mix(3.0, 6.4, variant.w);
-    return surfaceQuarterTurn(projectedMetres, turn) / scaleM + variant.xy * 37.0;
+    // Keep one source image physically larger than the old gravel map. At the
+    // closest camera distances a full repeat is wider than the view, while
+    // the scattered centimetre-scale stones retain a believable Mars scale.
+    float scaleM = mix(7.6, 11.8, variant.w);
+    return surfaceQuarterTurn(projectedMetres, turn) / scaleM + variant.xy * 89.0;
+  }
+
+  void surfaceTriangleGrid(
+    vec2 projectedMetres,
+    out vec2 cell0,
+    out vec2 cell1,
+    out vec2 cell2,
+    out vec3 weights
+  ) {
+    // A triangular lattice avoids the regular horizontal/vertical blend bands
+    // produced by the previous four-corner square patches. Neighbouring
+    // triangles share hashed vertices, so all transitions remain continuous.
+    vec2 lattice = vec2(
+      projectedMetres.x - projectedMetres.y * 0.577350269,
+      projectedMetres.y * 1.154700538
+    ) / 18.7;
+    vec2 base = floor(lattice);
+    vec2 local = fract(lattice);
+    float diagonal = 1.0 - local.x - local.y;
+    if (diagonal > 0.0) {
+      cell0 = base;
+      cell1 = base + vec2(0.0, 1.0);
+      cell2 = base + vec2(1.0, 0.0);
+      weights = vec3(diagonal, local.y, local.x);
+    } else {
+      cell0 = base + vec2(1.0, 1.0);
+      cell1 = base + vec2(1.0, 0.0);
+      cell2 = base + vec2(0.0, 1.0);
+      weights = vec3(-diagonal, 1.0 - local.y, 1.0 - local.x);
+    }
+    // Concentrating the barycentric weights preserves the photographed
+    // contrast instead of making every patch boundary look pale and blurry.
+    weights *= weights;
+    weights /= max(weights.x + weights.y + weights.z, 0.0001);
   }
 
   vec4 sampleStochasticSurfaceMap(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
-    // Each 5.3 m world cell blends the four variants anchored at its corners.
-    // Adjacent cells share corner variants, so the result is seamless, while
-    // every cell receives new phase, quarter-turn and physical scale choices.
-    // Unlike two globally repeated UVs, this has no short repeating lattice.
-    vec2 patchUv = projectedMetres / 5.3 - 0.5;
-    vec2 cell = floor(patchUv);
-    vec2 blendWeight = fract(patchUv);
-    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight);
-    vec4 variant00 = surfaceVariantHash(cell, seed);
-    vec4 variant10 = surfaceVariantHash(cell + vec2(1.0, 0.0), seed);
-    vec4 variant01 = surfaceVariantHash(cell + vec2(0.0, 1.0), seed);
-    vec4 variant11 = surfaceVariantHash(cell + vec2(1.0, 1.0), seed);
-    vec4 sample00 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant00));
-    vec4 sample10 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant10));
-    vec4 sample01 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant01));
-    vec4 sample11 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, variant11));
-    return mix(
-      mix(sample00, sample10, blendWeight.x),
-      mix(sample01, sample11, blendWeight.x),
-      blendWeight.y
-    );
+    vec2 cell0;
+    vec2 cell1;
+    vec2 cell2;
+    vec3 weights;
+    surfaceTriangleGrid(projectedMetres, cell0, cell1, cell2, weights);
+    vec4 sample0 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, surfaceVariantHash(cell0, seed)));
+    vec4 sample1 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, surfaceVariantHash(cell1, seed)));
+    vec4 sample2 = texture2D(surfaceMap, surfaceVariantUv(projectedMetres, surfaceVariantHash(cell2, seed)));
+    return sample0 * weights.x + sample1 * weights.y + sample2 * weights.z;
   }
 
   vec3 sampleSurfaceDiffuseProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
-    return sampleStochasticSurfaceMap(surfaceMap, projectedMetres, seed).rgb;
+    vec3 regolith = sampleStochasticSurfaceMap(surfaceMap, projectedMetres, seed).rgb;
+    // A much broader, independently rotated read acts as a thin dust veil.
+    // The two incommensurate physical scales only meet again far beyond a
+    // close-view frame, removing the last recognisable source-image cadence.
+    vec3 broadDust = sampleStochasticSurfaceMap(
+      surfaceMap,
+      projectedMetres * 0.37 + vec2(31.7, -19.3),
+      seed + 12.71
+    ).rgb;
+    float dustLuma = dot(broadDust, vec3(0.2126, 0.7152, 0.0722));
+    return regolith * mix(0.92, 1.075, smoothstep(0.12, 0.52, dustLuma));
   }
 
   float sampleSurfaceRoughnessProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
@@ -337,19 +372,18 @@ const terrainFragment = /* glsl */ `
   }
 
   vec3 sampleSurfaceNormalProjection(sampler2D surfaceMap, vec2 projectedMetres, float seed) {
-    vec2 patchUv = projectedMetres / 5.3 - 0.5;
-    vec2 cell = floor(patchUv);
-    vec2 blendWeight = fract(patchUv);
-    blendWeight = blendWeight * blendWeight * (3.0 - 2.0 * blendWeight);
-    vec3 sample00 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell, seed));
-    vec3 sample10 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(1.0, 0.0), seed));
-    vec3 sample01 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(0.0, 1.0), seed));
-    vec3 sample11 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell + vec2(1.0, 1.0), seed));
-    return normalize(mix(
-      mix(sample00, sample10, blendWeight.x),
-      mix(sample01, sample11, blendWeight.x),
-      blendWeight.y
-    ));
+    vec2 cell0;
+    vec2 cell1;
+    vec2 cell2;
+    vec3 weights;
+    surfaceTriangleGrid(projectedMetres, cell0, cell1, cell2, weights);
+    vec3 sample0 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell0, seed));
+    vec3 sample1 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell1, seed));
+    vec3 sample2 = sampleSurfaceNormalVariant(surfaceMap, projectedMetres, surfaceVariantHash(cell2, seed));
+    vec3 mapped = normalize(sample0 * weights.x + sample1 * weights.y + sample2 * weights.z);
+    // The legacy relief map remains useful for grit, but its large terrestrial
+    // slabs must not emboss the new dust-dominant albedo.
+    return normalize(vec3(mapped.xy * 0.30, max(mapped.z, 0.35)));
   }
 
   vec3 sampleSurfaceDiffuse(sampler2D surfaceMap, vec3 metres, vec3 weights) {
@@ -444,29 +478,51 @@ const terrainFragment = /* glsl */ `
     float surfaceMaterialResponse = 0.0;
     float mappedRoughness = 0.94;
     vec3 mappedNormal = normal;
-    if (uCameraAltitude < 68.0) {
+    if (uCameraAltitude < 220.0) {
       // Material visibility depends on continuous camera/fragment metrics,
       // never streamed LOD. This prevents a close PBR field from pulsing as
       // geometry refines beneath it.
-      float surfaceAlbedoVisibility = 1.0 - smoothstep(24.0, 68.0, uCameraAltitude);
+      // Keep the photographic regolith present through the 50-100 m survey
+      // view. The old 68 m cutoff put the closest overview exactly inside a
+      // conspicuous material handoff and revealed the red procedural base.
+      float surfaceAlbedoVisibility = 1.0 - smoothstep(92.0, 220.0, uCameraAltitude);
       surfacePbrBlend = surfaceAlbedoVisibility *
         (1.0 - smoothstep(2.5, 48.0, pixelFootprintM));
       surfaceMaterialResponse = surfacePbrBlend * (1.0 - smoothstep(9.0, 34.0, uCameraAltitude));
       vec3 textureWeights = triplanarWeights(normal);
       vec3 photographedRock = sampleSurfaceDiffuse(uSurfaceDiffuse, vStableMetres, textureWeights);
-      vec3 martianRock = photographedRock * vec3(1.10, 0.67, 0.46);
-      martianRock *= 0.88 + macro * 0.22;
-      vec3 photographedIce = sampleSurfaceDiffuse(uIceSurfaceDiffuse, vStableMetres, textureWeights);
-      float iceLuminance = dot(photographedIce, vec3(0.2126, 0.7152, 0.0722));
-      vec3 martianIce = mix(photographedIce, vec3(iceLuminance), 0.34) * vec3(1.04, 1.02, 0.98);
-      martianIce = mix(martianIce, frost, 0.22);
+      vec3 martianRock = photographedRock * vec3(1.02, 0.90, 0.82);
+      martianRock *= 0.93 + macro * 0.14;
+      // Mipmapping correctly averages the centimetre grains in a 50-100 m
+      // overview, but Mars is not a featureless orange plane. Carry the
+      // planet-anchored dust sorting back over the scan at several physical
+      // scales; these fields are aperiodic inside the 4 km stable coordinate
+      // window and cannot reveal the source image's repeat interval.
+      martianRock *= mix(1.0, 0.90 + metreVariation * 0.20, metreVisibility);
+      martianRock += vec3((fineGrain - 0.5) * 0.024 * grainVisibility);
+      martianRock = mix(
+        martianRock,
+        martianRock * vec3(0.58, 0.52, 0.49),
+        pebbles * grainVisibility * 0.28
+      );
+      vec3 martianIce = frost;
+      if (frostWeight > 0.001) {
+        vec3 photographedIce = sampleSurfaceDiffuse(uIceSurfaceDiffuse, vStableMetres, textureWeights);
+        float iceLuminance = dot(photographedIce, vec3(0.2126, 0.7152, 0.0722));
+        martianIce = mix(photographedIce, vec3(iceLuminance), 0.34) * vec3(1.04, 1.02, 0.98);
+        martianIce = mix(martianIce, frost, 0.22);
+      }
       albedo = mix(albedo, mix(martianRock, martianIce, frostWeight), surfacePbrBlend);
       if (surfaceMaterialResponse > 0.001) {
         float rockRoughness = sampleSurfaceRoughness(uSurfaceRoughness, vStableMetres, textureWeights);
-        float iceRoughness = sampleSurfaceRoughness(uIceSurfaceRoughness, vStableMetres, textureWeights);
-        mappedRoughness = mix(rockRoughness, iceRoughness, frostWeight);
         vec3 rockNormal = sampleSurfaceNormal(uSurfaceNormal, vStableMetres, normal, textureWeights);
-        vec3 iceNormal = sampleSurfaceNormal(uIceSurfaceNormal, vStableMetres, normal, textureWeights);
+        float iceRoughness = rockRoughness;
+        vec3 iceNormal = rockNormal;
+        if (frostWeight > 0.001) {
+          iceRoughness = sampleSurfaceRoughness(uIceSurfaceRoughness, vStableMetres, textureWeights);
+          iceNormal = sampleSurfaceNormal(uIceSurfaceNormal, vStableMetres, normal, textureWeights);
+        }
+        mappedRoughness = mix(rockRoughness, iceRoughness, frostWeight);
         mappedNormal = normalize(mix(rockNormal, iceNormal, frostWeight));
       }
     }
@@ -590,8 +646,8 @@ const terrainFragment = /* glsl */ `
 export function createTerrainMaterial(): TerrainMaterial {
   const orbitalTexture = createMarsOrbitalTexture();
   const surfaceDiffuse = createMarsSurfaceTexture(
-    "/textures/mars-rock-diffuse.jpg?revision=polyhaven-rocks-ground-02-1k",
-    "Poly Haven rocks ground 02 diffuse, Mars colour grade",
+    "/textures/mars-regolith-diffuse-v2.jpg?revision=perseverance-regolith-2026-08",
+    "NASA Perseverance-referenced Martian regolith diffuse v2",
     [128, 78, 48, 255],
     true,
   );

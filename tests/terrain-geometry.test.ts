@@ -292,7 +292,7 @@ describe("terrain worker geometry", () => {
     expect(material.lights).toBe(true);
     expect("directionalLightShadows" in material.uniforms).toBe(true);
     expect(material.uniforms.uOrbitalTexture.value.name).toContain("USGS Viking MDIM 2.1");
-    expect(material.uniforms.uSurfaceDiffuse.value.name).toContain("rocks ground 02 diffuse");
+    expect(material.uniforms.uSurfaceDiffuse.value.name).toContain("Perseverance-referenced Martian regolith");
     expect(material.uniforms.uSurfaceNormal.value.name).toContain("OpenGL normal");
     expect(material.uniforms.uSurfaceRoughness.value.name).toContain("roughness");
     expect(material.uniforms.uIceSurfaceDiffuse.value.name).toContain("Ice 001 diffuse");
@@ -304,6 +304,8 @@ describe("terrain worker geometry", () => {
     expect(material.fragmentShader).toContain("texture2D(uOrbitalTexture");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuse");
     expect(material.fragmentShader).toContain("sampleStochasticSurfaceMap");
+    expect(material.fragmentShader).toContain("surfaceTriangleGrid");
+    expect(material.fragmentShader).toContain("broadDust");
     expect(material.fragmentShader).toContain("surfaceVariantHash");
     expect(material.fragmentShader).toContain("surfaceQuarterTurn");
     expect(material.fragmentShader).toContain("sampleSurfaceDiffuseProjection");
