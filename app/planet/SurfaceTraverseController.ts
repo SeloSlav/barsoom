@@ -252,6 +252,19 @@ export function spaceshipMouseForward(leftButton: boolean, rightButton: boolean)
   return leftButton && rightButton;
 }
 
+export function spaceshipKeyboardAttitudeInput(keys: ReadonlySet<string>) {
+  return {
+    strafe: Number(keys.has("KeyC")) - Number(keys.has("KeyZ")),
+    lift: Number(keys.has("Space")) - Number(keys.has("ControlLeft") || keys.has("ControlRight")),
+    // Heading belongs to the camera aim. Flat A/D or arrow-key yaw made the
+    // craft swivel laterally without first pointing its nose at the turn.
+    yaw: 0,
+    pitch: Number(keys.has("ArrowUp")) - Number(keys.has("ArrowDown")),
+    roll: Number(keys.has("KeyE")) - Number(keys.has("KeyQ")),
+    boost: keys.has("ShiftLeft") || keys.has("ShiftRight"),
+  };
+}
+
 export function applySpaceshipCameraPointerSteer(
   cameraYawRad: number,
   cameraPitchRad: number,
@@ -601,6 +614,7 @@ export class SurfaceTraverseController {
     this.root.visible = false;
     this.localFill.visible = false;
     this.spaceship.deactivate();
+    this.onAudioEvent({ type: "flight", active: false, throttle: 0, boost: false, maneuver: 0 });
     this.keys.clear();
     this.mouseButtons.clear();
     this.shipLookYawRad = 0;
@@ -924,6 +938,7 @@ export class SurfaceTraverseController {
     if (!this.active || this.traverseMode !== "spaceship") return false;
 
     this.spaceship.stopAndPark();
+    this.onAudioEvent({ type: "flight", active: false, throttle: 0, boost: false, maneuver: 0 });
     this.spaceship.getAbsolute(this.shipAbsolute);
     this.spaceship.getForward(this.shipForward);
     this.spaceship.getRight(this.shipRight);
@@ -1059,17 +1074,11 @@ export class SurfaceTraverseController {
     }
     this.updateShipCameraFrame();
     this.updateShipViewFrame();
+    const keyboardAttitude = spaceshipKeyboardAttitudeInput(this.keys);
     const flightInput: SpaceshipFlightInput = {
       throttle: Number(this.shipCruiseThrust || this.keys.has("KeyW") || mouseForward)
         - Number(this.keys.has("KeyS")),
-      strafe: Number(this.keys.has("KeyC")) - Number(this.keys.has("KeyZ")),
-      lift: Number(this.keys.has("Space"))
-        - Number(this.keys.has("ControlLeft") || this.keys.has("ControlRight")),
-      yaw: Number(this.keys.has("KeyD") || this.keys.has("ArrowRight"))
-        - Number(this.keys.has("KeyA") || this.keys.has("ArrowLeft")),
-      pitch: Number(this.keys.has("ArrowUp")) - Number(this.keys.has("ArrowDown")),
-      roll: Number(this.keys.has("KeyE")) - Number(this.keys.has("KeyQ")),
-      boost: this.keys.has("ShiftLeft") || this.keys.has("ShiftRight"),
+      ...keyboardAttitude,
       brake: brakeRequested,
       aimX: 0,
       aimY: 0,
@@ -1079,6 +1088,18 @@ export class SurfaceTraverseController {
         z: this.shipCameraForward.z,
       },
     };
+    this.onAudioEvent({
+      type: "flight",
+      active: true,
+      throttle: brakeRequested ? 0 : flightInput.throttle,
+      boost: flightInput.boost,
+      maneuver: Math.max(
+        Math.abs(flightInput.strafe),
+        Math.abs(flightInput.lift),
+        Math.abs(flightInput.pitch),
+        Math.abs(flightInput.roll),
+      ),
+    });
     this.spaceship.updateFlight(delta, flightInput);
     this.spaceship.getAbsolute(this.shipAbsolute);
     this.spaceship.getForward(this.shipForward);

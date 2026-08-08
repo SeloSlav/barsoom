@@ -22,6 +22,7 @@ import {
   recenterSpaceshipFreeLook,
   smoothCameraHeight,
   spaceshipAltFreeLook,
+  spaceshipKeyboardAttitudeInput,
   spaceshipMouseForward,
   surfaceCameraRight,
   wowCameraOrbitDistances,
@@ -212,6 +213,16 @@ describe("surface traverse physics", () => {
     expect(spaceshipMouseForward(true, true)).toBe(true);
     expect(spaceshipMouseForward(true, false)).toBe(false);
     expect(spaceshipMouseForward(false, true)).toBe(false);
+  });
+
+  it("keeps A/D and left/right arrows from yawing the spacecraft laterally", () => {
+    const left = spaceshipKeyboardAttitudeInput(new Set(["KeyA", "ArrowLeft"]));
+    const right = spaceshipKeyboardAttitudeInput(new Set(["KeyD", "ArrowRight"]));
+
+    expect(left.yaw).toBe(0);
+    expect(right.yaw).toBe(0);
+    expect(spaceshipKeyboardAttitudeInput(new Set(["KeyQ"])).roll).toBe(-1);
+    expect(spaceshipKeyboardAttitudeInput(new Set(["KeyC"])).strafe).toBe(1);
   });
 
   it("turns the independent camera aim frame toward the mouse", () => {

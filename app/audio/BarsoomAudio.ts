@@ -1,16 +1,34 @@
 export type TraverseAudioEvent =
   | { type: "step"; running: boolean }
   | { type: "jump" }
-  | { type: "land" };
+  | { type: "land" }
+  | { type: "flight"; active: boolean; throttle: number; boost: boolean; maneuver: number };
+
+export type FlightAudioState = {
+  active: boolean;
+  throttle: number;
+  boost: boolean;
+};
+
+export function flightAudioTargets(state: FlightAudioState) {
+  if (!state.active) return { engine: 0, booster: 0 };
+  const thrust = Math.max(0, Math.min(1, Math.abs(state.throttle)));
+  return {
+    engine: 0.055 + thrust * 0.2,
+    booster: state.boost && thrust > 0.04 ? 0.46 : 0,
+  };
+}
 
 type StepEffectId = "stepA" | "stepB" | "stepC" | "stepD" | "stepE" | "stepF";
-type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition";
+type EffectId = StepEffectId | "jump" | "land" | "phaseLock" | "observerTransition" | "boostIgnite" | "thrusterBurst";
 
 const STEP_EFFECT_IDS: StepEffectId[] = ["stepA", "stepB", "stepC", "stepD", "stepE", "stepF"];
 
 const AUDIO_PATHS = {
   wind: "/audio/mars-wind-loop.mp3",
   score: "/audio/barsoom-survey-score.mp3",
+  engine: "/audio/spacecraft-engine-loop.mp3",
+  booster: "/audio/spacecraft-boost-loop.mp3",
   stepA: "/audio/boot-step-a.mp3",
   stepB: "/audio/boot-step-b.mp3",
   stepC: "/audio/boot-step-c.mp3",
@@ -21,6 +39,8 @@ const AUDIO_PATHS = {
   land: "/audio/suit-land.mp3",
   phaseLock: "/audio/phase-lock.mp3",
   observerTransition: "/audio/observer-transition.mp3",
+  boostIgnite: "/audio/spacecraft-boost-ignite.mp3",
+  thrusterBurst: "/audio/spacecraft-thruster-burst.mp3",
 } as const;
 
 const MUTE_STORAGE_KEY = "barsoom.audio-muted";
@@ -40,6 +60,8 @@ function createAudio(source: string, loop = false) {
 export class BarsoomAudio {
   private readonly wind = createAudio(AUDIO_PATHS.wind, true);
   private readonly score = createAudio(AUDIO_PATHS.score, true);
+  private readonly engine = createAudio(AUDIO_PATHS.engine, true);
+  private readonly booster = createAudio(AUDIO_PATHS.booster, true);
   private readonly effects: Record<EffectId, HTMLAudioElement[]> = {
     stepA: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.stepA)),
     stepB: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.stepB)),
@@ -51,6 +73,8 @@ export class BarsoomAudio {
     land: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.land)),
     phaseLock: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.phaseLock)),
     observerTransition: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.observerTransition)),
+    boostIgnite: Array.from({ length: 2 }, () => createAudio(AUDIO_PATHS.boostIgnite)),
+    thrusterBurst: Array.from({ length: 3 }, () => createAudio(AUDIO_PATHS.thrusterBurst)),
   };
   private readonly effectIndices: Record<EffectId, number> = {
     stepA: 0,
@@ -63,6 +87,8 @@ export class BarsoomAudio {
     land: 0,
     phaseLock: 0,
     observerTransition: 0,
+    boostIgnite: 0,
+    thrusterBurst: 0,
   };
   private unlocked = false;
   private muted = false;
@@ -72,6 +98,12 @@ export class BarsoomAudio {
   private lastStep: StepEffectId | null = null;
   private windVolume = 0;
   private scoreVolume = 0;
+  private engineVolume = 0;
+  private boosterVolume = 0;
+  private flightActive = false;
+  private flightThrottle = 0;
+  private flightBoost = false;
+  private flightManeuver = false;
   private disposed = false;
 
   constructor() {
@@ -82,6 +114,8 @@ export class BarsoomAudio {
     }
     this.wind.volume = 0;
     this.score.volume = 0;
+    this.engine.volume = 0;
+    this.booster.volume = 0;
     window.addEventListener("pointerdown", this.onFirstInteraction, { capture: true });
     window.addEventListener("keydown", this.onFirstInteraction, { capture: true });
     document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -118,15 +152,38 @@ export class BarsoomAudio {
     if (this.muted || !this.unlocked || document.hidden) return;
     const blend = 1 - Math.exp(-Math.max(0, deltaSeconds) * 1.8);
     const narrationDuck = this.narrationActive ? 0.08 : 1;
-    const windTarget = (this.surfaceMode ? 0.26 : 0.075) * narrationDuck;
-    const scoreTarget = (this.surfaceMode ? 0.085 : 0.135) * narrationDuck;
+    const windTarget = (this.flightActive ? 0.025 : this.surfaceMode ? 0.26 : 0.075) * narrationDuck;
+    const scoreTarget = (this.flightActive ? 0.055 : this.surfaceMode ? 0.085 : 0.135) * narrationDuck;
+    const flightTargets = flightAudioTargets({
+      active: this.flightActive,
+      throttle: this.flightThrottle,
+      boost: this.flightBoost,
+    });
     this.windVolume += (windTarget - this.windVolume) * blend;
     this.scoreVolume += (scoreTarget - this.scoreVolume) * blend;
+    this.engineVolume += (flightTargets.engine * narrationDuck - this.engineVolume) * blend;
+    this.boosterVolume += (flightTargets.booster * narrationDuck - this.boosterVolume) * blend;
     this.wind.volume = this.windVolume;
     this.score.volume = this.scoreVolume;
+    this.engine.volume = this.engineVolume;
+    this.booster.volume = this.boosterVolume;
+    this.engine.playbackRate = 0.88 + Math.min(1, Math.abs(this.flightThrottle)) * 0.22;
+    this.booster.playbackRate = 0.98 + Math.min(1, Math.abs(this.flightThrottle)) * 0.08;
   }
 
   handleTraverseEvent(event: TraverseAudioEvent) {
+    if (event.type === "flight") {
+      const throttle = Math.max(-1, Math.min(1, event.throttle));
+      const boost = event.active && event.boost && Math.abs(throttle) > 0.04;
+      const maneuver = event.active && Math.max(0, Math.min(1, event.maneuver)) > 0.08;
+      if (boost && !this.flightBoost) this.playEffect("boostIgnite", 0.68, 1);
+      if (maneuver && !this.flightManeuver) this.playEffect("thrusterBurst", 0.36, 1);
+      this.flightActive = event.active;
+      this.flightThrottle = event.active ? throttle : 0;
+      this.flightBoost = boost;
+      this.flightManeuver = maneuver;
+      return;
+    }
     if (this.narrationActive) return;
 
     if (event.type === "step") {
@@ -178,7 +235,7 @@ export class BarsoomAudio {
   }
 
   private startLoops() {
-    for (const audio of [this.wind, this.score]) {
+    for (const audio of [this.wind, this.score, this.engine, this.booster]) {
       if (!audio.paused) continue;
       void audio.play().catch(() => {
         // A later user interaction can retry if a browser blocks this gesture.
@@ -213,6 +270,8 @@ export class BarsoomAudio {
   private pauseAll() {
     this.wind.pause();
     this.score.pause();
+    this.engine.pause();
+    this.booster.pause();
     for (const pool of Object.values(this.effects)) {
       for (const audio of pool) audio.pause();
     }
