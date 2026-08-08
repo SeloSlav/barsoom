@@ -11,12 +11,15 @@ import {
   applySpaceshipCameraZoom,
   applyWowCameraDrag,
   applyWowCameraZoom,
+  crossedLoopingAnimationPhase,
+  groundAutopilotStoppingDistanceM,
   isWowAutoRunKey,
   isSpaceshipManualFlightControlKey,
   marsJumpApexHeight,
   marsJumpPoseWeights,
   nextWowAutoMoveMode,
   nextSpaceshipAutoFlightMode,
+  nextGroundAutopilotPhase,
   normalizeMarsSurfaceDirection,
   randomMarsDaylightDirection,
   randomMarsSurfaceDirection,
@@ -59,6 +62,17 @@ describe("surface traverse physics", () => {
     expect(ascending.descent).toBe(0);
     expect(descending.descent).toBeGreaterThan(0.9);
     expect(descending.squat).toBe(0);
+  });
+
+  it("detects foot contacts from looping animation phase without cadence drift", () => {
+    const walkContacts = [0.08, 0.58];
+
+    expect(crossedLoopingAnimationPhase(null, 0.04, walkContacts)).toBe(false);
+    expect(crossedLoopingAnimationPhase(0.04, 0.09, walkContacts)).toBe(true);
+    expect(crossedLoopingAnimationPhase(0.09, 0.55, walkContacts)).toBe(false);
+    expect(crossedLoopingAnimationPhase(0.55, 0.6, walkContacts)).toBe(true);
+    expect(crossedLoopingAnimationPhase(0.96, 0.04, walkContacts)).toBe(false);
+    expect(crossedLoopingAnimationPhase(0.99, 0.02, [0, 0.5])).toBe(true);
   });
 
   it("generates unit-length surface directions across the sphere", () => {
@@ -164,6 +178,14 @@ describe("surface traverse physics", () => {
     expect(isSpaceshipManualFlightControlKey("ArrowUp")).toBe(true);
     expect(isSpaceshipManualFlightControlKey("AltLeft")).toBe(false);
     expect(isSpaceshipManualFlightControlKey("KeyR")).toBe(false);
+  });
+
+  it("brakes ground autopilot early enough for a controlled landing sequence", () => {
+    expect(groundAutopilotStoppingDistanceM(180_000)).toBeGreaterThan(270_000);
+    expect(nextGroundAutopilotPhase("cruise", 250_000, 180_000)).toBe("braking");
+    expect(nextGroundAutopilotPhase("braking", 20_000, 250)).toBe("approach");
+    expect(nextGroundAutopilotPhase("braking", 8_000, 250)).toBe("landing");
+    expect(nextGroundAutopilotPhase("approach", 4_000, 250)).toBe("landing");
   });
 
   it("orbits the physical camera vertically around the character", () => {

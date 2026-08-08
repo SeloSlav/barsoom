@@ -42,6 +42,7 @@ import { MoonRenderer } from "./render/MoonRenderer";
 import { OrbiterRenderer } from "./render/OrbiterRenderer";
 import { RetiredRoverRenderer } from "./render/RetiredRoverRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
+import { WeatherRenderer, type MarsWeatherPreset, type MarsWeatherState } from "./render/WeatherRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
 import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
 import { randomMarsDaylightDirection, SurfaceTraverseController } from "./SurfaceTraverseController";
@@ -96,7 +97,7 @@ type SurfaceSelectionPosition = {
 };
 
 export type PlanetEngineApi = {
-  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody };
+  getState: () => ReturnType<PlanetControls["getState"]> & { telemetry: PlanetTelemetry | null; controlMode: "survey" | "surface"; observedBody: ObservedBody; weather: MarsWeatherState };
   getSpacemanLocation: () => { latitudeDeg: number; longitudeDeg: number; headingRad: number } | null;
   setLocation: (latitudeDeg: number, longitudeDeg: number, altitudeM?: number) => void;
   setAltitude: (altitudeM: number, immediate?: boolean) => void;
@@ -116,6 +117,7 @@ export type PlanetEngineApi = {
   getGraphicsSettings: () => GraphicsRuntimeState;
   setGraphicsPreference: (preference: GraphicsPreference) => GraphicsRuntimeState;
   setNarrationActive: (active: boolean) => void;
+  setWeatherPreset: (preset: MarsWeatherPreset) => MarsWeatherState;
   focusBody: (body: ObservedBody) => void;
   engageFlightAutopilot: (kind: MarsFlightNavigationTargetKind, id: string) => boolean;
 };
@@ -146,6 +148,7 @@ export class PlanetEngine {
   private readonly terrain: PlanetTerrain;
   private readonly controls: PlanetControls;
   private readonly atmosphere: AtmosphereRenderer;
+  private readonly weather: WeatherRenderer;
   private readonly celestial: CelestialRenderer;
   private readonly moons: MoonRenderer;
   private readonly orbiters: OrbiterRenderer;
@@ -338,6 +341,7 @@ export class PlanetEngine {
     const initialPoint = cartesianToLatLonElevation(composition.focusDirection, 1);
     this.controls.setLocation(initialPoint.latitudeDeg, initialPoint.longitudeDeg, 10_000_000);
     this.atmosphere = new AtmosphereRenderer(this.scene);
+    this.weather = new WeatherRenderer(this.scene);
     this.celestial = new CelestialRenderer(this.skyCamera);
     this.moons = new MoonRenderer(this.scene, this.camera, this.skyState.moons);
     this.orbiters = new OrbiterRenderer(this.scene, this.camera, (message) => this.onError(message));
@@ -393,6 +397,7 @@ export class PlanetEngine {
         telemetry: this.telemetry,
         controlMode: this.surfaceTraverse.active ? "surface" : "survey",
         observedBody: this.observedBody,
+        weather: this.weather.getState(),
       }),
       getSpacemanLocation: () => {
         if (!this.surfaceTraverse.active) return null;
@@ -469,6 +474,10 @@ export class PlanetEngine {
       getGraphicsSettings: () => this.graphicsState,
       setGraphicsPreference: (preference) => this.setGraphicsPreference(preference),
       setNarrationActive: (active) => this.audio.setNarrationActive(active),
+      setWeatherPreset: (preset) => {
+        this.weather.setPreset(preset);
+        return this.weather.getState();
+      },
       focusBody: (body) => this.focusBody(body),
       engageFlightAutopilot: (kind, id) => this.engageFlightAutopilot(kind, id),
     };
@@ -704,6 +713,16 @@ export class PlanetEngine {
     );
     this.updateSurfaceShadows(renderSkyState.sunDirection, daylight);
     const viewport = this.renderer.getDrawingBufferSize(this.viewportSize);
+    this.weather.update(
+      this.controlState.cameraAbsolute,
+      this.controlState.cameraDirection,
+      this.controlState.altitudeM,
+      renderSkyState.sunDirection,
+      time / 1000,
+      this.renderer.getPixelRatio(),
+      this.graphicsPreset.surfaceDetailLevel,
+    );
+    const weatherState = this.weather.getState();
     const terrainStats = this.terrain.update(
       this.controlState.cameraAbsolute,
       this.controlState.focusDirection,
@@ -715,6 +734,7 @@ export class PlanetEngine {
       this.debug,
       this.observedBody !== "Mars",
       this.terrainQuality,
+      weatherState,
     );
     this.surfaceDetails.update(
       this.controlState.cameraAbsolute,
@@ -723,7 +743,13 @@ export class PlanetEngine {
       this.graphicsPreset.surfaceDetailLevel,
     );
     this.retiredRovers.update(this.controlState.cameraAbsolute, this.controlState.altitudeM);
-    this.atmosphere.update(this.controlState.cameraAbsolute, this.controlState.altitudeM, renderSkyState.sunDirection);
+    this.atmosphere.update(
+      this.controlState.cameraAbsolute,
+      this.controlState.altitudeM,
+      renderSkyState.sunDirection,
+      time / 1000,
+      weatherState.dustActivity,
+    );
     this.moons.update(this.skyState, this.controlState.cameraAbsolute);
     this.orbiters.update(
       this.skyState,
@@ -863,6 +889,9 @@ export class PlanetEngine {
       shipAutoFlightMode: this.surfaceTraverse.active
         ? spaceshipInteraction.autoFlightMode
         : "off",
+      shipAutopilotPhase: this.surfaceTraverse.active
+        ? spaceshipInteraction.autopilotPhase
+        : "idle",
       shipAutopilotTargetName: this.surfaceTraverse.destinationAutopilotActive
         ? this.flightAutopilotTarget?.name ?? null
         : null,
@@ -1481,6 +1510,7 @@ export class PlanetEngine {
     this.retiredRovers.dispose();
     this.terrain.dispose();
     this.atmosphere.dispose();
+    this.weather.dispose();
     this.celestial.dispose();
     this.moons.dispose();
     this.orbiters.dispose();

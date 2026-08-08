@@ -13,6 +13,7 @@ import type { PlanetControlState } from "./PlanetControls";
 import {
   SHIP_BOARD_DISTANCE_M,
   SurfaceSpaceship,
+  spaceshipDampedInput,
   spaceshipSteerAmount,
   type SpaceshipFlightInput,
 } from "./SurfaceSpaceship";
@@ -51,13 +52,26 @@ const SHIP_CAMERA_DEFAULT_DISTANCE_M = 24;
 const SHIP_CAMERA_MIN_DISTANCE_M = 8;
 const SHIP_CAMERA_MAX_DISTANCE_M = CAMERA_MAX_DISTANCE_M;
 const SHIP_CAMERA_DEFAULT_PITCH_RAD = 0;
+const SHIP_CAMERA_BASE_FOV_DEG = 58;
+const SHIP_CAMERA_WARP_FOV_DEG = 82;
 const SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S = 1.9;
 const SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S = 1.55;
 const SHIP_FREE_LOOK_RETURN_RATE_S = 7;
-const SHIP_EXIT_OFFSET_M = 4.2;
-const SHIP_EXIT_GROUND_SNAP_M = 6;
+const GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 = 60_000;
+const GROUND_AUTOPILOT_LANDING_RANGE_M = 12_000;
+const GROUND_AUTOPILOT_FINAL_RANGE_M = 5_000;
+const GROUND_AUTOPILOT_LANDING_SPEED_M_S = 300;
 
 type AnimationName = "idle" | "idle_neutral" | "jump_base" | "walk" | "run" | "jump" | "jump_idle" | "jump_land";
+type LocomotionAnimationName = Extract<AnimationName, "walk" | "run">;
+
+// These phases come from the actual astronaut clips: each marker is the frame
+// where a boot reaches the ground. Using clip phase keeps the sound attached to
+// the pose even when frame rate or animation playback speed changes.
+const FOOT_CONTACT_PHASES: Record<LocomotionAnimationName, readonly number[]> = {
+  walk: [0.08, 0.58],
+  run: [0, 0.5],
+};
 
 type JumpPoseWeights = {
   squat: number;
@@ -112,6 +126,29 @@ export function normalizeMarsSurfaceDirection(direction: Vec3): Vec3 {
 
 export function marsJumpApexHeight(launchSpeedMps = MARS_TRAVERSE_JUMP_SPEED_M_S) {
   return (launchSpeedMps * launchSpeedMps) / (2 * MARS_SURFACE_GRAVITY_M_S2);
+}
+
+export function crossedLoopingAnimationPhase(
+  previousPhase: number | null,
+  currentPhase: number,
+  markers: readonly number[],
+) {
+  const current = ((currentPhase % 1) + 1) % 1;
+  if (previousPhase === null) {
+    return markers.some((marker) => ((marker % 1) + 1) % 1 <= current);
+  }
+
+  const previous = ((previousPhase % 1) + 1) % 1;
+  if (current >= previous) {
+    return markers.some((marker) => {
+      const phase = ((marker % 1) + 1) % 1;
+      return phase > previous && phase <= current;
+    });
+  }
+  return markers.some((marker) => {
+    const phase = ((marker % 1) + 1) % 1;
+    return phase > previous || phase <= current;
+  });
 }
 
 function smoothStep01(value: number) {
@@ -203,11 +240,41 @@ export function nextWowAutoMoveMode(mode: WowAutoMoveMode): WowAutoMoveMode {
 }
 
 export type SpaceshipAutoFlightMode = "off" | "cruise" | "full";
+export type GroundAutopilotPhase = "idle" | "cruise" | "braking" | "approach" | "landing";
 
 export function nextSpaceshipAutoFlightMode(mode: SpaceshipAutoFlightMode): SpaceshipAutoFlightMode {
   if (mode === "off") return "cruise";
   if (mode === "cruise") return "full";
   return "off";
+}
+
+export function groundAutopilotStoppingDistanceM(
+  speedMps: number,
+  decelerationMps2 = GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2,
+) {
+  const speed = Math.max(0, speedMps);
+  const deceleration = Math.max(1, decelerationMps2);
+  return speed * speed / (2 * deceleration) + 2_000;
+}
+
+export function nextGroundAutopilotPhase(
+  phase: GroundAutopilotPhase,
+  surfaceRangeM: number,
+  speedMps: number,
+): GroundAutopilotPhase {
+  const range = Math.max(0, surfaceRangeM);
+  const speed = Math.max(0, speedMps);
+  if (phase === "cruise" && range <= groundAutopilotStoppingDistanceM(speed)) return "braking";
+  if (phase === "braking" && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
+    return range <= GROUND_AUTOPILOT_LANDING_RANGE_M ? "landing" : "approach";
+  }
+  if (phase === "approach") {
+    if (range <= GROUND_AUTOPILOT_FINAL_RANGE_M && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
+      return "landing";
+    }
+    if (speed > GROUND_AUTOPILOT_LANDING_SPEED_M_S * 1.5) return "braking";
+  }
+  return phase;
 }
 
 const SPACESHIP_MANUAL_CONTROL_KEYS = new Set([
@@ -463,7 +530,8 @@ export class SurfaceTraverseController {
   private jumpAnticipationSeconds = 0;
   private airborneSeconds = 0;
   private landingSeconds = 0;
-  private footstepCountdown = 0;
+  private footstepAnimation: LocomotionAnimationName | null = null;
+  private footstepPhase: number | null = null;
   private groundHeightM = 0;
   private surveyFovDegrees: number;
   private autoMoveMode: WowAutoMoveMode = "off";
@@ -487,6 +555,7 @@ export class SurfaceTraverseController {
   private shipAutopilotTargetActive = false;
   private shipAutopilotSurfaceTarget = false;
   private shipAutopilotCruiseRadiusM = MARS_REFERENCE_RADIUS_M;
+  private shipAutopilotPhase: GroundAutopilotPhase = "idle";
   private shipWarpBurstRequested = false;
   private disposed = false;
   active = false;
@@ -596,7 +665,7 @@ export class SurfaceTraverseController {
     this.jumpAnticipationSeconds = 0;
     this.airborneSeconds = 0;
     this.landingSeconds = 0;
-    this.footstepCountdown = 0;
+    this.resetFootstepSync();
     this.keys.clear();
     this.mouseButtons.clear();
     this.autoMoveMode = "off";
@@ -618,6 +687,7 @@ export class SurfaceTraverseController {
     this.shipBrakeRequested = false;
     this.shipAutoFlightMode = "off";
     this.shipAutopilotTargetActive = false;
+    this.shipAutopilotPhase = "idle";
     this.shipWarpBurstRequested = false;
     this.active = true;
     this.root.visible = true;
@@ -670,6 +740,7 @@ export class SurfaceTraverseController {
       canBoard: this.shipCanBoard,
       speedMps: this.traverseMode === "spaceship" ? this.spaceship.getSpeedMps() : 0,
       autoFlightMode: this.traverseMode === "spaceship" ? this.shipAutoFlightMode : "off",
+      autopilotPhase: this.traverseMode === "spaceship" ? this.shipAutopilotPhase : "idle",
     };
   }
 
@@ -689,6 +760,7 @@ export class SurfaceTraverseController {
       ? Math.max(this.shipAbsolute.length(), this.shipAutopilotTargetAbsolute.length() + 750)
       : this.shipAutopilotTargetAbsolute.length();
     this.shipAutopilotTargetActive = true;
+    this.shipAutopilotPhase = surfaceTarget ? "cruise" : "idle";
     this.shipAutoFlightMode = "full";
     this.shipBrakeRequested = false;
     return true;
@@ -702,6 +774,8 @@ export class SurfaceTraverseController {
   private cancelSpaceshipAutomation() {
     this.shipAutoFlightMode = "off";
     this.shipAutopilotTargetActive = false;
+    this.shipAutopilotPhase = "idle";
+    this.spaceship.cancelAutoland();
   }
 
   get surfaceReady() {
@@ -787,7 +861,7 @@ export class SurfaceTraverseController {
       this.verticalVelocityMps = 0;
       this.airborneSeconds = 0;
       this.landingSeconds = JUMP_LANDING_POSE_DURATION_S;
-      this.footstepCountdown = 0;
+      this.resetFootstepSync();
       this.onAudioEvent({ type: "land" });
       return false;
     }
@@ -923,20 +997,37 @@ export class SurfaceTraverseController {
     }
   }
 
-  private updateFootsteps(speedMps: number, airborne: boolean, deltaSeconds: number) {
+  private resetFootstepSync() {
+    this.footstepAnimation = null;
+    this.footstepPhase = null;
+  }
+
+  private updateFootsteps(speedMps: number, airborne: boolean) {
     if (airborne || this.landingSeconds > 0 || speedMps <= 0) {
-      this.footstepCountdown = 0;
+      this.resetFootstepSync();
       return;
     }
-    this.footstepCountdown -= deltaSeconds;
-    if (this.footstepCountdown > 0) return;
+
     const running = speedMps >= RUN_SPEED_M_S - 0.1;
-    this.onAudioEvent({ type: "step", running });
-    const cadenceSeconds = running ? 0.34 : 0.52;
-    this.footstepCountdown = cadenceSeconds * (0.94 + Math.random() * 0.12);
+    const animation: LocomotionAnimationName = running ? "run" : "walk";
+    const action = this.actions.get(animation) ?? (animation === "run" ? this.actions.get("walk") : undefined);
+    const duration = action?.getClip().duration ?? 0;
+    if (!action || action !== this.currentAction || duration <= 0) {
+      this.resetFootstepSync();
+      return;
+    }
+
+    const phase = action.time / duration;
+    const previousPhase = this.footstepAnimation === animation ? this.footstepPhase : null;
+    if (crossedLoopingAnimationPhase(previousPhase, phase, FOOT_CONTACT_PHASES[animation])) {
+      this.onAudioEvent({ type: "step", running });
+    }
+    this.footstepAnimation = animation;
+    this.footstepPhase = phase;
   }
 
   private playAnimation(name: AnimationName, fadeSeconds = 0.16) {
+    if (name !== "walk" && name !== "run") this.resetFootstepSync();
     const next = this.actions.get(name) ?? this.actions.get(name === "run" ? "walk" : "idle");
     if (!next || next === this.currentAction) return;
     const oneShot = name === "jump" || name === "jump_land";
@@ -981,6 +1072,7 @@ export class SurfaceTraverseController {
     this.shipBrakeRequested = false;
     this.shipAutoFlightMode = "off";
     this.shipAutopilotTargetActive = false;
+    this.shipAutopilotPhase = "idle";
     this.shipWarpBurstRequested = false;
     this.cameraCollisionFraction = 1;
     this.keys.clear();
@@ -992,37 +1084,17 @@ export class SurfaceTraverseController {
     this.spaceship.getUp(this.shipCameraBaseUp);
     this.updateShipCameraFrame();
     this.spaceship.board();
-    this.camera.fov = 58;
+    this.camera.fov = SHIP_CAMERA_BASE_FOV_DEG;
     this.camera.updateProjectionMatrix();
   }
 
-  disembarkSpaceship() {
-    if (!this.active || this.traverseMode !== "spaceship") return false;
-
-    this.spaceship.stopAndPark();
+  private returnToSpacemanAtGround(groundDirection: THREE.Vector3) {
     this.onAudioEvent({ type: "flight", active: false, throttle: 0, boost: false, maneuver: 0 });
-    this.spaceship.getAbsolute(this.shipAbsolute);
     this.spaceship.getForward(this.shipForward);
-    this.spaceship.getRight(this.shipRight);
-    const shipRadiusM = this.shipAbsolute.length();
-    this.shipRadialUp.copy(this.shipAbsolute).normalize();
-    this.shipOrbitRight.copy(this.shipRight)
-      .addScaledVector(this.shipRadialUp, -this.shipRight.dot(this.shipRadialUp));
-    if (this.shipOrbitRight.lengthSq() <= 1e-8) {
-      this.shipOrbitRight.crossVectors(this.shipRadialUp, this.shipForward);
-    }
-    this.shipOrbitRight.normalize();
-    this.direction.copy(this.shipAbsolute)
-      .addScaledVector(this.shipOrbitRight, SHIP_EXIT_OFFSET_M)
-      .normalize();
-
+    this.direction.copy(groundDirection).normalize();
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
-    const groundRadiusM = MARS_REFERENCE_RADIUS_M + this.groundHeightM;
-    const shipAltitudeM = Math.max(0, shipRadiusM - groundRadiusM);
-    this.verticalOffsetM = shipAltitudeM <= SHIP_EXIT_GROUND_SNAP_M
-      ? 0
-      : Math.max(0, shipAltitudeM - BOOT_SOLE_CLEARANCE_M);
+    this.verticalOffsetM = 0;
     this.verticalVelocityMps = 0;
     this.jumpAnticipationSeconds = 0;
     this.airborneSeconds = 0;
@@ -1039,35 +1111,29 @@ export class SurfaceTraverseController {
       this.shipOrbitForward.dot(this.east),
       this.shipOrbitForward.dot(this.north),
     );
-    this.shipOrbitForward.copy(this.shipCameraForward)
-      .addScaledVector(this.direction, -this.shipCameraForward.dot(this.direction));
-    if (this.shipOrbitForward.lengthSq() <= 1e-8) this.shipOrbitForward.copy(this.north);
-    this.shipOrbitForward.normalize();
-    this.cameraYawRad = Math.atan2(
-      this.shipOrbitForward.dot(this.east),
-      this.shipOrbitForward.dot(this.north),
-    );
-    this.cameraPitchRad = clamp(
-      Math.asin(clamp(this.shipCameraForward.dot(this.direction), -1, 1)),
-      CAMERA_MIN_PITCH_RAD,
-      CAMERA_MAX_PITCH_RAD,
-    );
-    this.cameraDistanceM = clamp(
-      this.shipCameraDistanceM,
-      CAMERA_DEFAULT_DISTANCE_M,
-      CAMERA_MAX_DISTANCE_M,
-    );
+    this.cameraYawRad = this.headingRad;
+    this.cameraPitchRad = CAMERA_INITIAL_LOOK_PITCH_RAD;
+    this.cameraDistanceM = CAMERA_DEFAULT_DISTANCE_M;
     this.cameraAnchorInitialized = false;
     this.cameraCollisionFraction = 1;
     this.entryWheelLockSeconds = 0;
+    this.headingVector(this.headingRad, this.forward);
+    const spawnRight = surfaceCameraRight(this.forward, this.up);
+    this.right.set(spawnRight.x, spawnRight.y, spawnRight.z);
+    this.spaceship.spawnNear(this.direction, this.forward, this.right);
+    const groundRadiusM = MARS_REFERENCE_RADIUS_M + this.groundHeightM;
+    this.playerAbsolute.copy(this.direction).multiplyScalar(
+      groundRadiusM + BOOT_SOLE_CLEARANCE_M,
+    );
     this.traverseMode = "spaceman";
-    this.shipDistanceM = SHIP_EXIT_OFFSET_M;
-    this.shipCanBoard = this.verticalOffsetM <= 0.001;
+    this.shipDistanceM = this.spaceship.distanceTo(this.playerAbsolute);
+    this.shipCanBoard = this.shipDistanceM <= SHIP_BOARD_DISTANCE_M;
     this.shipAimX = 0;
     this.shipAimY = 0;
     this.shipBrakeRequested = false;
     this.shipAutoFlightMode = "off";
     this.shipAutopilotTargetActive = false;
+    this.shipAutopilotPhase = "idle";
     this.shipWarpBurstRequested = false;
     this.shipLookYawRad = 0;
     this.shipLookPitchRad = 0;
@@ -1080,8 +1146,14 @@ export class SurfaceTraverseController {
     this.camera.fov = 50;
     this.camera.updateProjectionMatrix();
     this.prefetch(this.direction);
-    this.playAnimation(this.verticalOffsetM > 0 ? "jump_base" : "idle");
+    this.playAnimation("idle");
     return true;
+  }
+
+  disembarkSpaceship() {
+    if (!this.active || this.traverseMode !== "spaceship") return false;
+    this.spaceship.getAbsolute(this.shipAbsolute);
+    return this.returnToSpacemanAtGround(this.shipAbsolute.normalize());
   }
 
   private updateShipCameraFrame() {
@@ -1159,8 +1231,39 @@ export class SurfaceTraverseController {
       .normalize();
   }
 
+  private updateGroundAutopilotPhase() {
+    if (
+      !this.shipAutopilotTargetActive ||
+      !this.shipAutopilotSurfaceTarget ||
+      this.shipAutopilotPhase === "landing"
+    ) return;
+    this.spaceship.getAbsolute(this.shipAbsolute);
+    this.shipRadialUp.copy(this.shipAbsolute).normalize();
+    this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
+    const surfaceRangeM = Math.acos(clamp(
+      this.shipRadialUp.dot(this.shipAutopilotTargetDirection),
+      -1,
+      1,
+    )) * MARS_REFERENCE_RADIUS_M;
+    const nextPhase = nextGroundAutopilotPhase(
+      this.shipAutopilotPhase,
+      surfaceRangeM,
+      this.spaceship.getSpeedMps(),
+    );
+    if (nextPhase === "landing") {
+      if (this.spaceship.beginAutoland(this.shipAutopilotTargetAbsolute)) {
+        this.shipAutopilotPhase = "landing";
+      } else {
+        this.shipAutopilotPhase = "approach";
+      }
+      return;
+    }
+    this.shipAutopilotPhase = nextPhase;
+  }
+
   private updateSpaceship(delta: number): PlanetControlState {
-    const brakeRequested = this.shipBrakeRequested || this.keys.has("KeyX");
+    const manualStopRequested = this.keys.has("KeyS") || this.keys.has("ArrowDown");
+    const holdRequested = this.shipBrakeRequested || this.keys.has("KeyX");
     this.shipBrakeRequested = false;
     const warpBurst = this.shipWarpBurstRequested;
     this.shipWarpBurstRequested = false;
@@ -1188,15 +1291,47 @@ export class SurfaceTraverseController {
     }
     this.updateShipCameraFrame();
     this.updateShipViewFrame();
+    this.updateGroundAutopilotPhase();
+    if (this.shipAutopilotPhase === "landing") {
+      this.onAudioEvent({ type: "flight", active: true, throttle: 0.32, boost: false, maneuver: 0 });
+      const landed = this.spaceship.updateAutoland(delta);
+      if (landed) {
+        this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
+        this.returnToSpacemanAtGround(this.shipAutopilotTargetDirection);
+        return this.update(0);
+      }
+    }
     const keyboardAttitude = spaceshipKeyboardAttitudeInput(this.keys);
-    const autoThrusting = this.shipAutoFlightMode !== "off";
+    const groundAutopilotActive = this.shipAutopilotTargetActive && this.shipAutopilotSurfaceTarget;
+    const automatedApproach = groundAutopilotActive &&
+      (this.shipAutopilotPhase === "braking" || this.shipAutopilotPhase === "approach");
+    const speedMps = this.spaceship.getSpeedMps();
+    let autopilotThrottle = this.shipAutoFlightMode === "off" ? 0 : 1;
+    let autopilotBrakeAccelerationMps2 = 0;
+    if (groundAutopilotActive && this.shipAutopilotPhase === "braking") {
+      autopilotThrottle = 0;
+      autopilotBrakeAccelerationMps2 = GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2;
+    } else if (groundAutopilotActive && this.shipAutopilotPhase === "approach") {
+      autopilotThrottle = speedMps < 150 ? 0.22 : 0;
+      if (speedMps > GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
+        autopilotBrakeAccelerationMps2 = 8_000;
+      }
+    }
     const aimDirection = this.resolveSpaceshipAimDirection();
+    const brakeAccelerationMps2 = manualStopRequested
+      ? clamp(speedMps * 2.2, 40, 90_000)
+      : autopilotBrakeAccelerationMps2;
+    const brakeRequested = manualStopRequested || holdRequested || brakeAccelerationMps2 > 0;
     const flightInput: SpaceshipFlightInput = {
-      throttle: Number(autoThrusting || this.keys.has("KeyW") || mouseForward)
-        - Number(this.keys.has("KeyS")),
+      throttle: clamp(
+        autopilotThrottle + Number(this.keys.has("KeyW") || mouseForward),
+        0,
+        1,
+      ),
       ...keyboardAttitude,
-      boost: keyboardAttitude.boost || this.shipAutoFlightMode === "full",
+      boost: keyboardAttitude.boost || (this.shipAutoFlightMode === "full" && !automatedApproach),
       brake: brakeRequested,
+      brakeAccelerationMps2,
       aimX: 0,
       aimY: 0,
       aimDirection: {
@@ -1204,6 +1339,14 @@ export class SurfaceTraverseController {
         y: aimDirection.y,
         z: aimDirection.z,
       },
+      velocityAssistDirection: groundAutopilotActive ? {
+        x: aimDirection.x,
+        y: aimDirection.y,
+        z: aimDirection.z,
+      } : undefined,
+      velocityAssistRateS: groundAutopilotActive
+        ? this.shipAutopilotPhase === "cruise" ? 0.9 : 1.8
+        : 0,
       warpBurst,
     };
     this.onAudioEvent({
@@ -1218,7 +1361,7 @@ export class SurfaceTraverseController {
         Math.abs(flightInput.roll),
       ),
     });
-    this.spaceship.updateFlight(delta, flightInput);
+    if (this.shipAutopilotPhase !== "landing") this.spaceship.updateFlight(delta, flightInput);
     this.spaceship.getAbsolute(this.shipAbsolute);
     this.spaceship.getForward(this.shipForward);
     this.spaceship.getRight(this.shipRight);
@@ -1265,6 +1408,13 @@ export class SurfaceTraverseController {
       Math.sqrt(2 * MARS_REFERENCE_RADIUS_M * (cameraAltitudeM + MARS_ATMOSPHERE_TOP_M)) * 3.2,
       this.cameraAbsolute.length() + MARS_MOON_MAX_ORBIT_RADIUS_M + 50_000,
     );
+    const warpIntensity = this.spaceship.getWarpEffectIntensity();
+    this.camera.fov = spaceshipDampedInput(
+      this.camera.fov,
+      THREE.MathUtils.lerp(SHIP_CAMERA_BASE_FOV_DEG, SHIP_CAMERA_WARP_FOV_DEG, warpIntensity),
+      warpIntensity > 0 ? 14 : 4,
+      delta,
+    );
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld(true);
     this.spaceship.syncVisual(this.cameraAbsolute);
@@ -1292,7 +1442,7 @@ export class SurfaceTraverseController {
     this.setLocalBasis();
     const airborne = this.updateJump(delta);
     this.updateAnimation(speedMps, airborne, delta);
-    this.updateFootsteps(speedMps, airborne || this.jumpAnticipationSeconds > 0, delta);
+    this.updateFootsteps(speedMps, airborne || this.jumpAnticipationSeconds > 0);
 
     const surface = this.terrainSurface(this.direction);
     this.groundHeightM = surface.heightM;
@@ -1459,7 +1609,7 @@ export class SurfaceTraverseController {
       if (event.code === "KeyR" && !event.repeat) {
         event.preventDefault();
         this.shipAutoFlightMode = nextSpaceshipAutoFlightMode(this.shipAutoFlightMode);
-        if (this.shipAutoFlightMode === "off") this.shipAutopilotTargetActive = false;
+        if (this.shipAutoFlightMode === "off") this.cancelSpaceshipAutomation();
         this.shipBrakeRequested = false;
         return;
       }
@@ -1471,6 +1621,7 @@ export class SurfaceTraverseController {
       if (isSpaceshipManualFlightControlKey(event.code)) this.cancelSpaceshipAutomation();
       if (event.code === "KeyF" && !event.repeat) {
         this.shipWarpBurstRequested = true;
+        this.onAudioEvent({ type: "warp" });
         return;
       }
       if (event.code === "KeyX" && !event.repeat) {
@@ -1507,7 +1658,7 @@ export class SurfaceTraverseController {
         this.jumpAnticipationSeconds = MARS_JUMP_ANTICIPATION_DURATION_S;
         this.airborneSeconds = 0;
         this.landingSeconds = 0;
-        this.footstepCountdown = 0;
+        this.resetFootstepSync();
       }
     }
     this.keys.add(event.code);

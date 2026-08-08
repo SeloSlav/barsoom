@@ -87,8 +87,8 @@ button { font: inherit; }
 .header-actions { display: grid; justify-items: end; gap: 10px; }
 .array-state { color: rgba(174,225,204,.65); font: 500 8px/1 var(--font-geist-mono), monospace; letter-spacing: .12em; }
 .header-buttons { display: flex; gap: 6px; pointer-events: auto; }
-.help-button, .audio-button, .tutorials-button, .graphics-button { pointer-events: auto; padding: 9px 10px 9px 13px; color: rgba(255,239,228,.68); border: 1px solid rgba(255,255,255,.1); border-radius: 2px; background: rgba(8,8,11,.3); font: 550 9px/1 var(--font-geist-mono), monospace; letter-spacing: .15em; cursor: pointer; }
-.help-button:hover, .audio-button:hover, .tutorials-button:hover, .graphics-button:hover { color: #fff; border-color: var(--hud-border); background: rgba(83,38,23,.3); }
+.help-button, .audio-button, .weather-button, .tutorials-button, .graphics-button { pointer-events: auto; padding: 9px 10px 9px 13px; color: rgba(255,239,228,.68); border: 1px solid rgba(255,255,255,.1); border-radius: 2px; background: rgba(8,8,11,.3); font: 550 9px/1 var(--font-geist-mono), monospace; letter-spacing: .15em; cursor: pointer; }
+.help-button:hover, .audio-button:hover, .weather-button:hover, .tutorials-button:hover, .graphics-button:hover { color: #fff; border-color: var(--hud-border); background: rgba(83,38,23,.3); }
 .tutorials-button[aria-expanded="true"] { color: #dceaff; border-color: rgba(112,177,255,.44); background: rgba(52,77,149,.28); }
 .graphics-button { display: flex; align-items: center; gap: 6px; }
 .graphics-button b { color: rgba(151,235,201,.84); font-size: 7px; font-weight: 650; letter-spacing: .1em; }
@@ -97,6 +97,10 @@ button { font: inherit; }
 .audio-button i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px rgba(140,228,189,.75); }
 .audio-button.muted { color: rgba(255,239,228,.42); }
 .audio-button.muted i { background: rgba(255,155,99,.45); box-shadow: none; }
+.weather-button { display: flex; align-items: center; gap: 6px; }
+.weather-button b { color: rgba(204,220,230,.82); font-size: 7px; font-weight: 650; letter-spacing: .1em; }
+.weather-button.weather-cloudy { border-color: rgba(172,206,224,.28); background: rgba(67,82,93,.22); }
+.weather-button.weather-dust-storm { border-color: rgba(226,131,80,.32); background: rgba(104,49,27,.28); }
 kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px solid rgba(255,155,99,.32); border-radius: 2px; font: inherit; }
 
 .graphics-panel { position: absolute; z-index: 9; top: 118px; right: 28px; width: min(460px, calc(100vw - 56px)); max-height: calc(100vh - 166px); max-height: calc(100dvh - 166px); padding: 20px; overflow-y: auto; overscroll-behavior: contain; color: rgba(245,231,221,.88); border: 1px solid rgba(255,155,99,.34); border-left: 2px solid var(--rust-bright); background: linear-gradient(135deg, rgba(15,10,10,.97), rgba(7,8,11,.96)); box-shadow: 0 24px 70px rgba(0,0,0,.56), 0 0 24px rgba(255,113,57,.09); backdrop-filter: blur(16px); }
@@ -360,8 +364,8 @@ kbd { margin-left: 7px; padding: 2px 4px; color: var(--rust-bright); border: 1px
 
 @media (max-width: 520px) {
   .header-buttons { gap: 4px; }
-  .help-button, .audio-button, .tutorials-button, .graphics-button { padding: 8px 7px; font-size: 7px; letter-spacing: .1em; }
-  .graphics-button b { display: none; }
+  .help-button, .audio-button, .weather-button, .tutorials-button, .graphics-button { padding: 8px 7px; font-size: 7px; letter-spacing: .1em; }
+  .graphics-button b, .weather-button b { display: none; }
   .help-button kbd { display: none; }
   .help-panel { padding: 18px 16px; }
   .help-panel dl { grid-template-columns: 1fr; }

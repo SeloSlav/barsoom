@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
+import { MARS_REFERENCE_RADIUS_M } from "../app/planet/constants";
 import {
   SurfaceSpaceship,
   SHIP_WARP_BURST_DELTA_V_M_S,
@@ -111,7 +112,7 @@ describe("surface spaceship flight", () => {
     craft.dispose();
   });
 
-  it("converges the nose onto the camera aim direction and stops there", () => {
+  it("turns smoothly toward camera aim without snapping laterally", () => {
     const scene = new THREE.Scene();
     const craft = new SurfaceSpaceship(
       scene,
@@ -125,7 +126,15 @@ describe("surface spaceship flight", () => {
     );
     craft.board();
     const cameraDirection = new THREE.Vector3(0, -1, 0);
-    for (let frame = 0; frame < 120; frame += 1) {
+    const initialNose = craft.getForward(new THREE.Vector3()).clone();
+    for (let frame = 0; frame < 30; frame += 1) {
+      craft.updateFlight(1 / 60, {
+        ...neutralFlightInput,
+        aimDirection: cameraDirection,
+      });
+    }
+    expect(craft.getForward(new THREE.Vector3()).dot(initialNose)).toBeGreaterThan(0.92);
+    for (let frame = 0; frame < 270; frame += 1) {
       craft.updateFlight(1 / 60, {
         ...neutralFlightInput,
         aimDirection: cameraDirection,
@@ -300,7 +309,60 @@ describe("surface spaceship flight", () => {
     const velocity = craft.getVelocity(new THREE.Vector3());
     expect(velocity.length()).toBeGreaterThan(SHIP_WARP_BURST_DELTA_V_M_S * 0.99);
     expect(velocity.clone().normalize().dot(nose)).toBeGreaterThan(0.9999);
+    expect(craft.getWarpEffectIntensity()).toBeGreaterThan(0.9);
     expect(scene.getObjectByName("Spacecraft boost plume")?.visible).toBe(true);
+    craft.dispose();
+  });
+
+  it("performs a strong assisted stop even after an ultra warp burst", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    craft.updateFlight(1 / 60, { ...neutralFlightInput, warpBurst: true });
+    for (let frame = 0; frame < 240; frame += 1) {
+      craft.updateFlight(1 / 60, {
+        ...neutralFlightInput,
+        brake: true,
+        brakeAccelerationMps2: 60_000,
+      });
+    }
+    expect(craft.getSpeedMps()).toBe(0);
+    craft.dispose();
+  });
+
+  it("completes a cinematic autoland exactly on the selected terrain", () => {
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: 0, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    expect(craft.beginAutoland({ x: MARS_REFERENCE_RADIUS_M, y: 0, z: 0 })).toBe(true);
+    let landed = false;
+    for (let frame = 0; frame < 370; frame += 1) {
+      landed = craft.updateAutoland(1 / 60) || landed;
+    }
+    const landedPosition = craft.getAbsolute(new THREE.Vector3());
+    expect(landed).toBe(true);
+    expect(landedPosition.clone().normalize().distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(1e-8);
+    expect(landedPosition.length()).toBeGreaterThan(MARS_REFERENCE_RADIUS_M);
+    expect(landedPosition.length()).toBeLessThan(MARS_REFERENCE_RADIUS_M + 2);
+    expect(craft.getSpeedMps()).toBe(0);
     craft.dispose();
   });
 

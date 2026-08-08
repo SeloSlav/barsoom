@@ -65,6 +65,7 @@ export type PlanetTelemetry = {
   shipCanBoard: boolean;
   shipSpeedMps: number;
   shipAutoFlightMode: "off" | "cruise" | "full";
+  shipAutopilotPhase: "idle" | "cruise" | "braking" | "approach" | "landing";
   shipAutopilotTargetName: string | null;
 };
 

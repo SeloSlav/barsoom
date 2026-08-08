@@ -6,9 +6,10 @@ import type { Vec3 } from "../types";
 
 const TAU = Math.PI * 2;
 const SURFACE_DETAIL_MAX_ALTITUDE_M = 8_000;
-const SURFACE_DETAIL_REBUILD_DISTANCE_M = 320;
-const BOULDER_GROUNDING_REFRESH_BUDGET = 128;
-const ROCK_GROUNDING_REFRESH_BUDGET = 384;
+const SURFACE_DETAIL_REBUILD_DISTANCE_M = 180;
+const BOULDER_GROUNDING_REFRESH_BUDGET = 160;
+const ROCK_GROUNDING_REFRESH_BUDGET = 480;
+const CLAST_GROUNDING_REFRESH_BUDGET = 640;
 
 export type SurfaceScatterConfig = {
   radiusM: number;
@@ -88,38 +89,66 @@ export function createSurfaceRockMaterial() {
     // broad faces away from every light source.
     normalScale: new THREE.Vector2(0.2, 0.2),
     roughnessMap: roughness,
-    roughness: 0.9,
+    roughness: 0.94,
     metalness: 0,
     flatShading: true,
     vertexColors: true,
-    // This is the same texture-backed dusty-sky bounce used conceptually by
-    // the terrain shader. White is intentional: emissiveMap already supplies
-    // the rock colour. The former near-black multiplier erased that map.
+    // A restrained texture-coloured bounce keeps shadowed faces legible
+    // without making the separate rock layer glow against the regolith.
     emissive: 0xffffff,
     emissiveMap: diffuse,
-    emissiveIntensity: 0.24,
+    emissiveIntensity: 0.20,
   });
 }
 
 const BOULDER_FIELD: SurfaceScatterConfig = {
   radiusM: 6_000,
-  spacingM: 165,
-  density: 0.2,
-  minimumSizeM: 0.8,
-  maximumSizeM: 9,
-  maximumInstances: 1_100,
+  spacingM: 145,
+  density: 0.32,
+  minimumSizeM: 0.55,
+  maximumSizeM: 8.5,
+  maximumInstances: 2_200,
   seedSalt: 0x626f756c,
 };
 
 const ROCK_FIELD: SurfaceScatterConfig = {
-  radiusM: 850,
-  spacingM: 22,
-  density: 0.42,
-  minimumSizeM: 0.09,
-  maximumSizeM: 1.25,
-  maximumInstances: 2_200,
+  radiusM: 400,
+  spacingM: 10,
+  density: 0.62,
+  minimumSizeM: 0.065,
+  maximumSizeM: 0.95,
+  maximumInstances: 3_400,
   seedSalt: 0x726f636b,
 };
+
+const CLAST_FIELD: SurfaceScatterConfig = {
+  radiusM: 120,
+  spacingM: 3.2,
+  density: 0.72,
+  minimumSizeM: 0.018,
+  maximumSizeM: 0.14,
+  maximumInstances: 4_000,
+  seedSalt: 0x636c6173,
+};
+
+function createIrregularRockGeometry(kind: "boulder" | "rock" | "clast") {
+  const geometry = kind === "boulder"
+    ? new THREE.DodecahedronGeometry(1, 1)
+    : new THREE.IcosahedronGeometry(1, kind === "rock" ? 1 : 0);
+  const positions = geometry.getAttribute("position") as THREE.BufferAttribute;
+  const seed = kind === "boulder" ? 1.73 : kind === "rock" ? 4.91 : 8.37;
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const y = positions.getY(index);
+    const z = positions.getZ(index);
+    const ridge = Math.sin(x * 4.7 + seed) * Math.sin(y * 3.1 - seed * 0.7) * Math.sin(z * 5.3 + seed * 1.4);
+    const scale = 0.91 + ridge * 0.13 + Math.sin((x + z) * 7.9 - seed) * 0.045;
+    positions.setXYZ(index, x * scale, y * scale * (kind === "clast" ? 0.68 : 0.82), z * scale);
+  }
+  positions.needsUpdate = true;
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 function wrapCell(value: number, count: number) {
   return ((value % count) + count) % count;
@@ -232,7 +261,10 @@ export function calculateSurfaceRockPlacement(
   };
   // Keep most of the irregular primitive below its supporting triangle. This
   // prevents a low-poly corner from reading as a hovering contact point.
-  const exposedCenterM = scale.y * 0.32;
+  // Windblown dust commonly mantles the base of Martian clasts. Vary the
+  // burial depth with the stable per-rock tint seed so the field does not sit
+  // on one mathematically perfect contact plane.
+  const exposedCenterM = scale.y * (0.12 + point.tint * 0.40);
   return {
     absolute: {
       x: surface.x + normal.x * exposedCenterM,
@@ -259,6 +291,7 @@ type SurfaceField = {
   maxAltitudeM: number;
   groundingCursor: number;
   groundingRefreshBudget: number;
+  requiredDetailLevel: 1 | 2;
 };
 
 export class SurfaceDetailRenderer {
@@ -281,8 +314,9 @@ export class SurfaceDetailRenderer {
     scene: THREE.Scene,
     private readonly sampleVisibleSurface: (direction: Vec3) => SurfaceRockSupport | null,
   ) {
-    const boulderGeometry = new THREE.DodecahedronGeometry(1, 0);
-    const rockGeometry = new THREE.IcosahedronGeometry(1, 0);
+    const boulderGeometry = createIrregularRockGeometry("boulder");
+    const rockGeometry = createIrregularRockGeometry("rock");
+    const clastGeometry = createIrregularRockGeometry("clast");
     this.rockSkyFill.name = "Mars dusty-sky rock fill";
     this.rockSkyFill.visible = false;
     scene.add(this.rockSkyFill);
@@ -293,26 +327,43 @@ export class SurfaceDetailRenderer {
         instances: [],
         // Instance colours multiply the diffuse map. Keep them light enough
         // to colour-grade the rock without crushing its photographed detail.
-        dark: new THREE.Color(0xc07a59),
-        light: new THREE.Color(0xf0b48b),
+        dark: new THREE.Color(0x725449),
+        light: new THREE.Color(0xb9856c),
         maxAltitudeM: SURFACE_DETAIL_MAX_ALTITUDE_M,
         groundingCursor: 0,
         groundingRefreshBudget: BOULDER_GROUNDING_REFRESH_BUDGET,
+        requiredDetailLevel: 1,
       },
       {
         mesh: new THREE.InstancedMesh(rockGeometry, createSurfaceRockMaterial(), ROCK_FIELD.maximumInstances),
         config: ROCK_FIELD,
         instances: [],
-        dark: new THREE.Color(0xb96f52),
-        light: new THREE.Color(0xeaaa80),
+        dark: new THREE.Color(0x684b42),
+        light: new THREE.Color(0xac7762),
         maxAltitudeM: 1_500,
         groundingCursor: 0,
         groundingRefreshBudget: ROCK_GROUNDING_REFRESH_BUDGET,
+        requiredDetailLevel: 2,
+      },
+      {
+        mesh: new THREE.InstancedMesh(clastGeometry, createSurfaceRockMaterial(), CLAST_FIELD.maximumInstances),
+        config: CLAST_FIELD,
+        instances: [],
+        dark: new THREE.Color(0x5c4942),
+        light: new THREE.Color(0x98705e),
+        maxAltitudeM: 220,
+        groundingCursor: 0,
+        groundingRefreshBudget: CLAST_GROUNDING_REFRESH_BUDGET,
+        requiredDetailLevel: 2,
       },
     ];
 
     for (const [index, field] of this.fields.entries()) {
-      field.mesh.name = index === 0 ? "Mars deterministic boulder field" : "Mars deterministic rock field";
+      field.mesh.name = index === 0
+        ? "Mars deterministic boulder field"
+        : index === 1
+          ? "Mars deterministic rock field"
+          : "Mars deterministic clast field";
       field.mesh.count = 0;
       field.mesh.visible = false;
       field.mesh.frustumCulled = false;
@@ -332,8 +383,8 @@ export class SurfaceDetailRenderer {
     if (detailLevel !== this.detailLevel) {
       this.detailLevel = detailLevel;
       this.hasAnchor = false;
-      for (const [index, field] of this.fields.entries()) {
-        if (index >= detailLevel) {
+      for (const field of this.fields) {
+        if (field.requiredDetailLevel > detailLevel) {
           field.instances = [];
           field.mesh.count = 0;
           field.mesh.visible = false;
@@ -343,8 +394,8 @@ export class SurfaceDetailRenderer {
     const visible = detailLevel > 0 && altitudeM <= SURFACE_DETAIL_MAX_ALTITUDE_M;
     this.rockSkyFill.visible = visible;
     this.rockSkyFill.intensity = 0.32 + 0.26 * (1 - clamp(altitudeM / SURFACE_DETAIL_MAX_ALTITUDE_M, 0, 1));
-    for (const [index, field] of this.fields.entries()) {
-      field.mesh.visible = index < detailLevel && altitudeM <= field.maxAltitudeM;
+    for (const field of this.fields) {
+      field.mesh.visible = field.requiredDetailLevel <= detailLevel && altitudeM <= field.maxAltitudeM;
     }
     if (!visible) return;
 
@@ -415,8 +466,8 @@ export class SurfaceDetailRenderer {
     this.anchorDirection.set(centerDirection.x, centerDirection.y, centerDirection.z).normalize();
     this.hasAnchor = true;
 
-    for (const [fieldIndex, field] of this.fields.entries()) {
-      if (fieldIndex >= this.detailLevel) {
+    for (const field of this.fields) {
+      if (field.requiredDetailLevel > this.detailLevel) {
         field.instances = [];
         field.mesh.count = 0;
         continue;

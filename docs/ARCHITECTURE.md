@@ -33,7 +33,7 @@ All tiles use one fixed grid topology (24×24 cells) and edge skirts. Neighbour 
 1. A depth-independent astronomical pass renders HYG/Hipparcos round point-spread stars and angular Sun/planet points into black space.
 2. Depth is cleared while colour remains.
 3. Camera-relative terrain renders with the shared Sun direction and generated material shader.
-4. A bounded ray-marched atmosphere pass integrates Rayleigh and dust/Mie single scattering, view and solar optical depth, transmittance, and Mars shadowing. The terrain shader applies matching aerial perspective to distant ground.
+4. A bounded ray-marched atmosphere pass integrates Rayleigh and spatially varying dust/Mie single scattering, view and solar optical depth, transmittance, and Mars shadowing. Separate planet-anchored shells carry sparse water-ice cloud bands near 32 km and twilight-weighted carbon-dioxide-ice wisps near 68 km. The terrain shader applies matching aerial perspective plus low-frequency moving cloud and dust attenuation; a bounded local particle field adds windblown dust only near the camera.
 
 The renderer probes `EXT_clip_control` before construction. Supported GPUs use reversed depth; other WebGL 2 devices use logarithmic depth instead, never both simultaneously. Near/far planes change with altitude. Below 80 km on the illuminated side, a 2,048² directional solar shadow map follows the camera; its orthographic centre is snapped in absolute Mars-fixed light-plane coordinates before conversion back to camera-relative space, so floating-origin motion cannot make shadows swim. A morph-aware depth material excludes skirts and follows tile geomorphing. ACES tone mapping and a single exposure preserve a bright Sun, readable day terrain and a dark night side.
 

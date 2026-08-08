@@ -5,6 +5,8 @@ export type TerrainMaterial = THREE.ShaderMaterial & {
   uniforms: {
     uSunDirection: { value: THREE.Vector3 };
     uCameraAltitude: { value: number };
+    uCloudCover: { value: number };
+    uDustActivity: { value: number };
     uOrbitalTexture: { value: THREE.Texture };
     uSurfaceDiffuse: { value: THREE.Texture };
     uSurfaceNormal: { value: THREE.Texture };
@@ -149,6 +151,8 @@ const terrainFragment = /* glsl */ `
 
   uniform vec3 uSunDirection;
   uniform float uCameraAltitude;
+  uniform float uCloudCover;
+  uniform float uDustActivity;
   uniform sampler2D uOrbitalTexture;
   uniform sampler2D uSurfaceDiffuse;
   uniform sampler2D uSurfaceNormal;
@@ -595,7 +599,14 @@ const terrainFragment = /* glsl */ `
     vec3 specular = distribution * geometry * fresnel / max(4.0 * ndv * ndl, 0.001);
     vec3 diffuse = (vec3(1.0) - fresnel) * albedo / 3.14159265;
     float cavity = clamp(0.72 + regional * 0.16 + metreVariation * 0.12, 0.52, 1.0);
-    vec3 direct = (diffuse + specular) * ndl * 2.35 * surfaceShadow;
+    vec3 weatherDrift = vec3(uTime * 0.000075, uTime * -0.000023, uTime * 0.000052);
+    float cloudField = valueNoise(radial * 7.2 + weatherDrift) * 0.72 +
+      valueNoise(radial * 26.0 + weatherDrift * 2.4 + vec3(11.4, -3.1, 7.8)) * 0.28;
+    float cloudThreshold = mix(0.89, 0.53, clamp(uCloudCover, 0.0, 1.0));
+    float cloudShade = smoothstep(cloudThreshold, cloudThreshold + 0.115, cloudField);
+    float weatherSun = mix(1.0, 0.76, cloudShade * daylight);
+    weatherSun *= mix(1.0, 0.90, uDustActivity * (0.35 + regional * 0.65));
+    vec3 direct = (diffuse + specular) * ndl * 2.35 * surfaceShadow * weatherSun;
     // Mars has a bright dusty sky even when the direct sun is low. This fill
     // preserves readable rock and terrain form without flattening cast shadows.
     vec3 skyBounce = albedo * (0.075 + 0.105 * daylight) * cavity;
@@ -684,6 +695,8 @@ export function createTerrainMaterial(): TerrainMaterial {
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.lights, {
       uSunDirection: { value: new THREE.Vector3(1, 0.25, 0.2).normalize() },
       uCameraAltitude: { value: 10_000_000 },
+      uCloudCover: { value: 0.48 },
+      uDustActivity: { value: 0.2 },
       uOrbitalTexture: { value: orbitalTexture },
       uSurfaceDiffuse: { value: surfaceDiffuse },
       uSurfaceNormal: { value: surfaceNormal },
@@ -855,6 +868,8 @@ const atmosphereFragment = /* glsl */ `
   uniform float uCameraRadius;
   uniform float uCameraAltitude;
   uniform float uExposure;
+  uniform float uWeatherTime;
+  uniform float uDustActivity;
   varying vec3 vWorldPosition;
   varying vec3 vRadial;
 
@@ -882,6 +897,32 @@ const atmosphereFragment = /* glsl */ `
     float denominator = max(0.035, 1.0 + g * g - 2.0 * g * cosineAngle);
     return 3.0 * (1.0 - g * g) * (1.0 + cosineAngle * cosineAngle) /
       (8.0 * PI * (2.0 + g * g) * pow(denominator, 1.5));
+  }
+
+  float atmosphereHash31(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+  }
+
+  float atmosphereNoise(vec3 p) {
+    vec3 cell = floor(p);
+    vec3 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(
+      mix(mix(atmosphereHash31(cell), atmosphereHash31(cell + vec3(1,0,0)), f.x),
+          mix(atmosphereHash31(cell + vec3(0,1,0)), atmosphereHash31(cell + vec3(1,1,0)), f.x), f.y),
+      mix(mix(atmosphereHash31(cell + vec3(0,0,1)), atmosphereHash31(cell + vec3(1,0,1)), f.x),
+          mix(atmosphereHash31(cell + vec3(0,1,1)), atmosphereHash31(cell + vec3(1,1,1)), f.x), f.y),
+      f.z
+    );
+  }
+
+  float dustWeatherField(vec3 radial) {
+    vec3 drift = vec3(uWeatherTime * 0.000055, uWeatherTime * -0.000018, uWeatherTime * 0.000041);
+    float broad = atmosphereNoise(radial * 5.2 + drift);
+    float regional = atmosphereNoise(radial * 13.7 + drift * 1.9 + vec3(4.1, -8.3, 2.7));
+    return smoothstep(0.28, 0.78, broad * 0.68 + regional * 0.32);
   }
 
   void main() {
@@ -926,6 +967,11 @@ const atmosphereFragment = /* glsl */ `
       float altitude = max(0.0, length(sampleFromCenter) - PLANET_RADIUS);
       float densityR = exp(-altitude / RAYLEIGH_HEIGHT);
       float densityM = exp(-altitude / DUST_HEIGHT);
+      // Mars' airborne dust is spatially patchy. Broad moving cells create
+      // detached veils and storm fronts without turning clear air into one
+      // uniform orange filter.
+      float dustVeil = dustWeatherField(normalize(sampleFromCenter));
+      densityM *= mix(0.90, mix(0.72, 2.15, dustVeil), uDustActivity);
       opticalViewR += densityR * segmentLength / RAYLEIGH_HEIGHT;
       opticalViewM += densityM * segmentLength / DUST_HEIGHT;
 
@@ -966,8 +1012,13 @@ const atmosphereFragment = /* glsl */ `
     float solarAureole = pow(max(dot(viewRay, sun), 0.0), 18.0);
     vec3 dustySky = mix(vec3(0.13, 0.035, 0.018), vec3(0.70, 0.235, 0.075), horizonGlow);
     dustySky = mix(dustySky, vec3(0.34, 0.43, 0.52), solarAureole * 0.48);
-    colour += dustySky * nearGround * (0.14 + horizonGlow * 0.38) * (0.22 + localDaylight * 0.78);
-    float surfaceAlpha = nearGround * (0.14 + horizonGlow * 0.46) * (0.30 + localDaylight * 0.70);
+    float cameraDustVeil = dustWeatherField(cameraUp);
+    float stormBoost = uDustActivity * cameraDustVeil;
+    dustySky = mix(dustySky, vec3(0.50, 0.14, 0.045), stormBoost * 0.24);
+    colour += dustySky * nearGround * (0.14 + horizonGlow * (0.38 + stormBoost * 0.24)) *
+      (0.22 + localDaylight * 0.78) * (1.0 + stormBoost * 0.32);
+    float surfaceAlpha = nearGround * (0.14 + horizonGlow * (0.46 + stormBoost * 0.20)) *
+      (0.30 + localDaylight * 0.70);
     float alpha = clamp(max(surfaceAlpha, opticalAlpha * 0.92 + dot(colour, vec3(0.22))), 0.0, 0.96);
     float atmosphereLuma = dot(colour, vec3(0.2126, 0.7152, 0.0722));
     float atmosphereDitherMask = smoothstep(0.002, 0.018, atmosphereLuma) *
@@ -987,6 +1038,8 @@ export type AtmosphereMaterial = THREE.ShaderMaterial & {
     uCameraRadius: { value: number };
     uCameraAltitude: { value: number };
     uExposure: { value: number };
+    uWeatherTime: { value: number };
+    uDustActivity: { value: number };
   };
 };
 
@@ -1001,6 +1054,8 @@ export function createAtmosphereMaterial(): AtmosphereMaterial {
       uCameraRadius: { value: MARS_REFERENCE_RADIUS_M + 1_000_000 },
       uCameraAltitude: { value: 1_000_000 },
       uExposure: { value: ATMOSPHERE_CONFIG.exposure },
+      uWeatherTime: { value: 0 },
+      uDustActivity: { value: 0.2 },
     },
     transparent: true,
     depthWrite: false,

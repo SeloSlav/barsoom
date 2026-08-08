@@ -2,6 +2,7 @@ export type TraverseAudioEvent =
   | { type: "step"; running: boolean }
   | { type: "jump" }
   | { type: "land" }
+  | { type: "warp" }
   | { type: "flight"; active: boolean; throttle: number; boost: boolean; maneuver: number };
 
 export type FlightAudioState = {
@@ -184,16 +185,25 @@ export class BarsoomAudio {
       this.flightManeuver = maneuver;
       return;
     }
-    if (this.narrationActive) return;
+    if (event.type === "warp") {
+      this.playEffect("boostIgnite", 0.95, 0.62);
+      this.playEffect("observerTransition", 0.72, 0.55);
+      this.playEffect("thrusterBurst", 0.7, 0.74);
+      return;
+    }
+    // Physical feedback should remain audible during SOVA narration. Duck it
+    // instead of suppressing it entirely, otherwise early jumps have no
+    // touchdown cue while the surface briefing is still playing.
+    const narrationFoleyGain = this.narrationActive ? 0.42 : 1;
 
     if (event.type === "step") {
-      const volume = (event.running ? 0.25 : 0.2) * (0.95 + Math.random() * 0.08);
+      const volume = (event.running ? 0.25 : 0.2) * narrationFoleyGain * (0.95 + Math.random() * 0.08);
       const playbackRate = (event.running ? 1.02 : 0.99) + (Math.random() - 0.5) * 0.025;
       this.playEffect(this.nextStepEffect(), volume, playbackRate);
     } else if (event.type === "jump") {
-      this.playEffect("jump", 0.42, 1);
+      this.playEffect("jump", 0.42 * narrationFoleyGain, 1);
     } else if (event.type === "land") {
-      this.playEffect("land", 0.55, 1);
+      this.playEffect("land", 0.55 * narrationFoleyGain, 1);
     }
   }
 

@@ -42,18 +42,20 @@ A flyable spacecraft is instantiated roughly 20 metres from the spaceman at ever
 | Point spacecraft | Move mouse | Pointer distance from the screen centre controls pitch and yaw. |
 | Turn left / right | `A` / `D` or left / right arrows | Turns toward the side you press, even while the camera is orbiting. Mouse steering likewise turns toward the pointer. |
 | Pitch up / down | Up / down arrows | Points the nose and flight path upward or downward. A pressed direction overrides mouse steering on that axis. |
-| Thrust / reverse | `W` / `S` | Accelerates forward or applies reverse thrust to decelerate and back up. |
-| Toggle cruise thrust | `R` | Locks forward thrust on for long flights. Press `R` again to coast; reverse thrust or auto-brake cancels cruise. |
-| Boost + sharp maneuver | Hold `Shift` | Raises engine thrust and turn rates for climbs, fast acceleration, and tight turns. The exhaust switches to a longer, denser orange boost plume. |
-| Auto-brake / position hold | `X` | Engages flight assist, rapidly cancels momentum, and holds the exact stopped position until the next thrust, strafe, or vertical input. |
+| Thrust | `W` | Accelerates forward; releasing thrust preserves momentum and lets the ship coast. |
+| Assisted full stop | Hold `S` | Commands a strong velocity-aware deceleration, including from ultra-warp speed. |
+| Auto-flight cycle | `R` | Cycles cruise thrust, full thrust, and coast. Any manual flight input cancels automation. |
+| Boost | Hold `Shift` | Raises engine thrust without allowing abrupt camera-led lateral snaps. The exhaust switches to a longer, denser orange boost plume. |
+| Ultra-warp burst | `F` | Adds a 180 km/s forward impulse with a widened field of view, long boost plume, and dedicated sound cue. |
+| Position hold | `X` | Eases into a stable flight-computer hold without erasing coasting momentum instantly. |
 | Roll left / right | `Q` / `E` | `Q` visibly rolls left and `E` visibly rolls right. |
 | Strafe | `Z` / `C` | Applies lateral maneuvering thrust. |
 | Rise / descend | `Space` / `Ctrl` | Applies vertical thrust away from or toward Mars regardless of craft roll. |
 | Orbit camera | Hold left or middle mouse and drag | Orbits freely around the moving spacecraft without turning it; the camera follows the drag direction. |
 | Change follow distance | Mouse wheel | Zooms continuously from an 8 m chase view to the 30,000 km planetary-scale view while remaining locked to the moving spacecraft. |
-| Stop and disembark | `Escape` | Cancels all ship velocity, leaves it parked at its exact position, and restores the spaceman beside it at that location. Press `Escape` again as the spaceman to return to survey. |
+| Safe ground return | `Escape` | Instantly returns the spaceman to the terrain directly below and rematerializes the spacecraft nearby. Press `Escape` again as the spaceman to return to survey. |
 
-The flight computer compensates for local gravity while piloted, so a nose-up or nose-down trajectory continues along the direction the spacecraft is pointing instead of falling away from it.
+Click a flight-navigation marker to engage destination autopilot. Surface routes steer their velocity onto the computed course, brake before arrival, transition through a cinematic descent, land exactly at the destination, and automatically return to spaceman mode. The flight computer compensates for local gravity while piloted, so a nose-up or nose-down trajectory continues along the direction the spacecraft is pointing instead of falling away from it.
 
 The browser context menu is suppressed only over the game canvas. Altitude is always above queried local terrain. The public limits are exactly 0 m and 30,000,000 m AGL; only the invisible collision/render epsilon remains below the displayed value.
 
@@ -73,4 +75,5 @@ window.__BARSOOM__.teleportRandomSurface()
 window.__BARSOOM__.exitSurfaceTraverse()
 window.__BARSOOM__.getAudioMuted()
 window.__BARSOOM__.setAudioMuted(true)
+window.__BARSOOM__.setWeatherPreset("cloudy") // auto | clear | cloudy | dust-storm
 ```

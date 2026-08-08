@@ -33,9 +33,10 @@ The runtime has no terrain API, database, or application backend. Hosting only s
 - Metre-authoritative Mars maths and latitude/longitude, Cartesian, ENU, cube-face, tile, high/low, and camera-relative conversions.
 - Six-face quadtree terrain with screen-space-error selection, frustum and horizon culling, skirts, parent fallback, dithered parent/child morphing, pooled mesh containers, bounded LRU caches, and stale-job cancellation.
 - 2,046 static cube-sphere tiles derived from the official 16-pixel/degree MOLA planetary-radius and areoid MEGDRs. These give complete global coverage and stream real elevation into the terrain vertices by tile.
-- Worker-generated fixed-resolution terrain geometry with continuous planet-space procedural ridges, erosion, rock and regolith detail.
+- Worker-generated fixed-resolution terrain geometry with continuous planet-space procedural ridges, erosion, regolith detail, and three size-sorted fields of dust-mantled clasts and boulders.
 - A data-driven procedural Mars PBR shader with dust, regolith, basalt, light rock, and polar frost blends.
-- Bounded single-scattering integration with Rayleigh and dust/Mie density profiles, view/sun optical depth, transmittance, planetary shadow, a thin limb, horizon haze, and terrain aerial perspective.
+- Bounded single-scattering integration with Rayleigh and spatially varying dust/Mie density profiles, view/sun optical depth, transmittance, planetary shadow, a thin limb, horizon haze, and terrain aerial perspective.
+- Moving planet-anchored water-ice and high-altitude carbon-dioxide-ice cloud layers, cloud-shadow attenuation, regional dust veils, and camera-local surface gusts.
 - 6,682 processed HYG/Hipparcos bright stars with apparent magnitude and colour index, plus Astronomy Engine heliocentric planet vectors transformed into the IAU Mars body frame.
 - Clickable moving highlights for Phobos, Deimos, Mars Odyssey, MRO, and TGO, with Mars occlusion, dropdown fallback, target-lock cameras, and current orbital telemetry.
 - Continuous 60×, 6×, and 1× model-rate selection, plus a wider Deimos lock framing that preserves Mars in the composition.

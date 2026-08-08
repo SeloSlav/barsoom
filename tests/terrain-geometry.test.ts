@@ -33,6 +33,7 @@ import {
   createSurfaceRockMaterial,
   generateSurfaceScatter,
 } from "../app/planet/render/SurfaceDetailRenderer";
+import { createMarsCloudMaterial } from "../app/planet/render/WeatherRenderer";
 
 const MARS_REFERENCE_RADIUS_M = 3_389_500;
 
@@ -107,9 +108,19 @@ describe("terrain worker geometry", () => {
     expect(atmosphere.fragmentShader).toContain("dustySky");
     expect(atmosphere.fragmentShader).toContain("surfaceAlpha");
     expect(atmosphere.fragmentShader).toContain("atmosphereDither");
+    expect(atmosphere.fragmentShader).toContain("dustWeatherField");
     expect(atmosphere.fragmentShader).toContain("tonemapping_fragment");
     expect(atmosphere.fragmentShader).toContain("colorspace_fragment");
     atmosphere.dispose();
+    const waterClouds = createMarsCloudMaterial("water");
+    const co2Clouds = createMarsCloudMaterial("co2");
+    expect(waterClouds.name).toContain("water-ice");
+    expect(co2Clouds.name).toContain("carbon-dioxide ice");
+    expect(waterClouds.fragmentShader).toContain("twilight");
+    expect(waterClouds.uniforms.uLayerKind.value).toBe(0);
+    expect(co2Clouds.uniforms.uLayerKind.value).toBe(1);
+    waterClouds.dispose();
+    co2Clouds.dispose();
   });
   it("generates a deterministic planet-anchored surface rock field", () => {
     const config = {

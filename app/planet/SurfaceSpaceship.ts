@@ -12,20 +12,21 @@ const SHIP_THRUST_M_S2 = 76;
 const SHIP_BOOST_THRUST_M_S2 = 260;
 const SHIP_MANEUVER_THRUST_M_S2 = 52;
 const SHIP_VERTICAL_THRUST_M_S2 = 86;
-const SHIP_BRAKE_RATE_S = 0.85;
+const SHIP_BRAKE_RATE_S = 1.2;
 const SHIP_YAW_RATE_RAD_S = 1.85;
 const SHIP_PITCH_RATE_RAD_S = 1.55;
 const SHIP_ROLL_RATE_RAD_S = 2.25;
-const SHIP_SHARP_TURN_MULTIPLIER = 1.85;
-const SHIP_MAX_SPEED_M_S = 40_000;
-export const SHIP_WARP_BURST_DELTA_V_M_S = 8_000;
-const SHIP_WARP_EFFECT_DURATION_S = 0.9;
+const SHIP_SHARP_TURN_MULTIPLIER = 1.22;
+const SHIP_MAX_SPEED_M_S = 900_000;
+export const SHIP_WARP_BURST_DELTA_V_M_S = 180_000;
+const SHIP_WARP_EFFECT_DURATION_S = 1.5;
+const SHIP_AUTOLAND_DURATION_S = 6;
 const SHIP_TRAIL_MAX_POINTS = 420;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
 const SHIP_TRANSLATION_RESPONSE_S = 16;
-const SHIP_AIM_RESPONSE_S = 9;
-const SHIP_AIM_MAX_RATE_RAD_S = 2.8;
+const SHIP_AIM_RESPONSE_S = 2.2;
+const SHIP_AIM_MAX_RATE_RAD_S = 0.65;
 const SHIP_MODEL_LENGTH_M = 9.2;
 const SHIP_ENGINE_NOZZLE_Z = -4.55;
 const SHIP_ENGINE_FLAME_LENGTH_M = 1.9;
@@ -43,6 +44,9 @@ export type SpaceshipFlightInput = {
   roll: number;
   boost: boolean;
   brake: boolean;
+  brakeAccelerationMps2?: number;
+  velocityAssistDirection?: Vec3;
+  velocityAssistRateS?: number;
   aimX: number;
   aimY: number;
   aimDirection?: Vec3;
@@ -148,6 +152,7 @@ export class SurfaceSpaceship {
   private readonly trailRoot = new THREE.Group();
   private readonly absolute = new THREE.Vector3();
   private readonly velocity = new THREE.Vector3();
+  private readonly assistedVelocityTarget = new THREE.Vector3();
   private readonly surfaceDirection = new THREE.Vector3(1, 0, 0);
   private readonly forward = new THREE.Vector3(0, 0, 1);
   private readonly right = new THREE.Vector3(1, 0, 0);
@@ -158,6 +163,12 @@ export class SurfaceSpaceship {
   private readonly rotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
   private readonly aimForward = new THREE.Vector3();
   private readonly aimAxis = new THREE.Vector3();
+  private readonly autolandStartAbsolute = new THREE.Vector3();
+  private readonly autolandTargetAbsolute = new THREE.Vector3();
+  private readonly autolandStartDirection = new THREE.Vector3();
+  private readonly autolandTargetDirection = new THREE.Vector3();
+  private readonly autolandCourseForward = new THREE.Vector3();
+  private readonly autolandPreviousAbsolute = new THREE.Vector3();
   private readonly engineLeft = new THREE.Vector3(-3.25, 0.05, -4.55);
   private readonly engineRight = new THREE.Vector3(3.25, 0.05, -4.55);
   private readonly leftTrailPositions = new Float32Array(SHIP_TRAIL_MAX_POINTS * 3);
@@ -186,6 +197,9 @@ export class SurfaceSpaceship {
   private smoothedPitch = 0;
   private smoothedRoll = 0;
   private warpEffectSeconds = 0;
+  private autolandElapsedSeconds = 0;
+  private autolandLoftM = 0;
+  private autolandActive = false;
   private model: THREE.Object3D | null = null;
   private disposed = false;
 
@@ -377,6 +391,7 @@ export class SurfaceSpaceship {
     this.trailEmitCountdownS = 0;
     this.effectTimeSeconds = 0;
     this.warpEffectSeconds = 0;
+    this.autolandActive = false;
     this.setEngineEffect(false, false);
     this.prefetch(this.surfaceDirection);
   }
@@ -391,6 +406,7 @@ export class SurfaceSpaceship {
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
     this.warpEffectSeconds = 0;
+    this.autolandActive = false;
   }
 
   board() {
@@ -399,6 +415,7 @@ export class SurfaceSpaceship {
     this.stationKeeping = true;
     this.velocity.set(0, 0, 0);
     this.warpEffectSeconds = 0;
+    this.autolandActive = false;
     this.resetInputSmoothing();
   }
 
@@ -416,6 +433,7 @@ export class SurfaceSpaceship {
     this.rightTrailGeometry.setDrawRange(0, 0);
     this.setEngineEffect(false, false);
     this.warpEffectSeconds = 0;
+    this.autolandActive = false;
   }
 
   updateParkedPosition() {
@@ -426,8 +444,110 @@ export class SurfaceSpaceship {
     );
   }
 
+  beginAutoland(targetGroundPositionM: Vec3) {
+    if (!this.active || this.parked) return false;
+    this.autolandTargetDirection.set(
+      targetGroundPositionM.x,
+      targetGroundPositionM.y,
+      targetGroundPositionM.z,
+    );
+    if (this.autolandTargetDirection.lengthSq() <= 1e-8) return false;
+    this.autolandTargetDirection.normalize();
+    const targetSurface = this.terrainSurface(this.autolandTargetDirection);
+    this.autolandTargetAbsolute.copy(this.autolandTargetDirection).multiplyScalar(
+      MARS_REFERENCE_RADIUS_M + targetSurface.heightM + SHIP_GROUND_CLEARANCE_M,
+    );
+    this.autolandStartAbsolute.copy(this.absolute);
+    this.autolandStartDirection.copy(this.absolute).normalize();
+    this.getForward(this.autolandCourseForward)
+      .addScaledVector(
+        this.autolandTargetDirection,
+        -this.autolandCourseForward.dot(this.autolandTargetDirection),
+      );
+    if (this.autolandCourseForward.lengthSq() <= 1e-8) {
+      this.autolandCourseForward.crossVectors(this.right, this.autolandTargetDirection);
+    }
+    this.autolandCourseForward.normalize();
+    const angularDistanceRad = Math.acos(clamp(
+      this.autolandStartDirection.dot(this.autolandTargetDirection),
+      -1,
+      1,
+    ));
+    this.autolandLoftM = clamp(angularDistanceRad * MARS_REFERENCE_RADIUS_M * 0.08, 45, 420);
+    this.autolandElapsedSeconds = 0;
+    this.autolandActive = true;
+    this.stationKeeping = true;
+    this.velocity.set(0, 0, 0);
+    this.resetInputSmoothing();
+    return true;
+  }
+
+  cancelAutoland() {
+    if (!this.autolandActive) return;
+    this.autolandActive = false;
+    this.stationKeeping = true;
+    this.velocity.set(0, 0, 0);
+    this.setEngineEffect(false, false);
+  }
+
+  updateAutoland(deltaSeconds: number) {
+    if (!this.autolandActive) return false;
+    const delta = clamp(deltaSeconds, 0, 0.05);
+    this.autolandElapsedSeconds += delta;
+    const progress = clamp(this.autolandElapsedSeconds / SHIP_AUTOLAND_DURATION_S, 0, 1);
+    const eased = progress * progress * (3 - 2 * progress);
+    this.autolandPreviousAbsolute.copy(this.absolute);
+    this.surfaceDirection
+      .lerpVectors(this.autolandStartDirection, this.autolandTargetDirection, eased)
+      .normalize();
+    const radiusM = THREE.MathUtils.lerp(
+      this.autolandStartAbsolute.length(),
+      this.autolandTargetAbsolute.length(),
+      eased,
+    ) + Math.sin(progress * Math.PI) * this.autolandLoftM;
+    this.absolute.copy(this.surfaceDirection).multiplyScalar(radiusM);
+    if (delta > 0) {
+      this.velocity.subVectors(this.absolute, this.autolandPreviousAbsolute).multiplyScalar(1 / delta);
+    }
+
+    this.up.copy(this.surfaceDirection);
+    this.forward.copy(this.autolandTargetDirection)
+      .addScaledVector(this.up, -this.autolandTargetDirection.dot(this.up));
+    if (this.forward.lengthSq() <= 1e-8) {
+      this.forward.copy(this.autolandCourseForward)
+        .addScaledVector(this.up, -this.autolandCourseForward.dot(this.up));
+    }
+    this.forward.normalize();
+    this.right.crossVectors(this.up, this.forward).normalize();
+    this.orientation.makeBasis(this.right, this.up, this.forward);
+    this.root.quaternion.setFromRotationMatrix(this.orientation);
+    this.thrustVisible = progress < 0.96;
+    this.updateEngineEffect(delta, this.thrustVisible ? 0.42 : 0, false);
+    this.updateTrailLife(delta);
+    if (this.thrustVisible) {
+      this.trailEmitCountdownS -= delta;
+      if (this.trailEmitCountdownS <= 0) {
+        this.emitTrailPoint(false);
+        this.trailEmitCountdownS = 0.055;
+      }
+    }
+    this.prefetch(this.surfaceDirection);
+
+    if (progress < 1) return false;
+    this.absolute.copy(this.autolandTargetAbsolute);
+    this.surfaceDirection.copy(this.autolandTargetDirection);
+    this.velocity.set(0, 0, 0);
+    this.autolandActive = false;
+    this.parked = true;
+    this.groundAnchored = true;
+    this.stationKeeping = true;
+    this.thrustVisible = false;
+    this.setEngineEffect(false, false);
+    return true;
+  }
+
   updateFlight(deltaSeconds: number, input: SpaceshipFlightInput) {
-    if (!this.active || this.parked) return;
+    if (!this.active || this.parked || this.autolandActive) return;
     const delta = clamp(deltaSeconds, 0, 0.05);
     const turnMultiplier = input.boost ? SHIP_SHARP_TURN_MULTIPLIER : 1;
     // A pressed direction is authoritative on its axis. A stale pointer at the
@@ -538,6 +658,33 @@ export class SurfaceSpaceship {
       this.velocity.addScaledVector(this.forward, SHIP_WARP_BURST_DELTA_V_M_S);
       this.warpEffectSeconds = SHIP_WARP_EFFECT_DURATION_S;
     }
+    const assistDirection = input.velocityAssistDirection;
+    const assistRateS = Math.max(0, input.velocityAssistRateS ?? 0);
+    if (
+      assistDirection &&
+      assistRateS > 0 &&
+      Number.isFinite(assistDirection.x) &&
+      Number.isFinite(assistDirection.y) &&
+      Number.isFinite(assistDirection.z)
+    ) {
+      const assistLength = Math.hypot(
+        assistDirection.x,
+        assistDirection.y,
+        assistDirection.z,
+      );
+      const assistedSpeedMps = this.velocity.length();
+      if (assistLength > 1e-7 && assistedSpeedMps > 0.1) {
+        this.assistedVelocityTarget.set(
+          assistDirection.x / assistLength,
+          assistDirection.y / assistLength,
+          assistDirection.z / assistLength,
+        ).multiplyScalar(assistedSpeedMps);
+        this.velocity.lerp(
+          this.assistedVelocityTarget,
+          1 - Math.exp(-assistRateS * delta),
+        ).setLength(assistedSpeedMps);
+      }
+    }
 
     const radiusM = Math.max(MARS_REFERENCE_RADIUS_M, this.absolute.length());
     // The assisted spacecraft flight computer cancels local gravity. This
@@ -548,6 +695,14 @@ export class SurfaceSpaceship {
     const atmosphericDensity = Math.exp(-Math.max(0, altitudeM) / 11_100);
     const brakeRate = this.stationKeeping ? SHIP_BRAKE_RATE_S : 0;
     this.velocity.multiplyScalar(Math.exp(-delta * (0.002 + atmosphericDensity * 0.038 + brakeRate)));
+    const requestedBrakeAccelerationMps2 = input.brake
+      ? Math.max(0, input.brakeAccelerationMps2 ?? 0)
+      : 0;
+    const speedBeforeLinearBrakeMps = this.velocity.length();
+    if (requestedBrakeAccelerationMps2 > 0 && speedBeforeLinearBrakeMps > 0) {
+      const nextSpeedMps = Math.max(0, speedBeforeLinearBrakeMps - requestedBrakeAccelerationMps2 * delta);
+      this.velocity.multiplyScalar(nextSpeedMps / speedBeforeLinearBrakeMps);
+    }
     if (this.stationKeeping && this.velocity.lengthSq() < 0.09) this.velocity.set(0, 0, 0);
     const speedMps = this.velocity.length();
     if (speedMps > SHIP_MAX_SPEED_M_S) this.velocity.multiplyScalar(SHIP_MAX_SPEED_M_S / speedMps);
@@ -748,6 +903,10 @@ export class SurfaceSpaceship {
 
   getSpeedMps() {
     return this.velocity.length();
+  }
+
+  getWarpEffectIntensity() {
+    return clamp(this.warpEffectSeconds / SHIP_WARP_EFFECT_DURATION_S, 0, 1);
   }
 
   getVelocity(target: THREE.Vector3) {

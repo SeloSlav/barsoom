@@ -16,12 +16,14 @@ export class AtmosphereRenderer {
     scene.add(this.mesh);
   }
 
-  update(cameraAbsolute: Vec3, altitudeM: number, sunDirection: Vec3) {
+  update(cameraAbsolute: Vec3, altitudeM: number, sunDirection: Vec3, elapsedSeconds = 0, dustActivity = 0.2) {
     this.mesh.position.set(-cameraAbsolute.x, -cameraAbsolute.y, -cameraAbsolute.z);
     this.mesh.material.uniforms.uPlanetCenter.value.copy(this.mesh.position);
     this.mesh.material.uniforms.uCameraRadius.value = Math.hypot(cameraAbsolute.x, cameraAbsolute.y, cameraAbsolute.z);
     this.mesh.material.uniforms.uCameraAltitude.value = altitudeM;
     this.mesh.material.uniforms.uSunDirection.value.set(sunDirection.x, sunDirection.y, sunDirection.z);
+    this.mesh.material.uniforms.uWeatherTime.value = elapsedSeconds;
+    this.mesh.material.uniforms.uDustActivity.value = dustActivity;
   }
 
   dispose() {
@@ -30,4 +32,3 @@ export class AtmosphereRenderer {
     this.mesh.material.dispose();
   }
 }
-

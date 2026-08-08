@@ -22,11 +22,19 @@ import {
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
 import { SIMULATION_RATES, type SimulationRate } from "../planet/simulationClock";
 import type { PlanetTelemetry } from "../planet/types";
+import type { MarsWeatherPreset } from "../planet/render/WeatherRenderer";
 import { SovaTutorial } from "./SovaTutorial";
 
 const SIMULATION_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const OBSERVATION_TARGETS: readonly ObservedBody[] = ["Mars", "Phobos", "Deimos", ...MARS_ORBITER_NAMES];
 const GRAPHICS_OPTIONS: readonly GraphicsPreference[] = ["auto", "ultra", "high", "medium", "low"];
+const WEATHER_OPTIONS: readonly MarsWeatherPreset[] = ["auto", "clear", "cloudy", "dust-storm"];
+
+function weatherLabel(preset: MarsWeatherPreset) {
+  if (preset === "dust-storm") return "DUST";
+  if (preset === "cloudy") return "CLOUDS";
+  return preset.toUpperCase();
+}
 
 function targetShortName(body: ObservedBody) {
   if (body === "Mars") return "BARSOOM";
@@ -45,7 +53,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     nearM: 1, farM: 50_000_000, floatingOrigin: { x: 0, y: 0, z: 0 },
     frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", traverseMode: "spaceman", surfaceReady: true,
     shipDistanceM: null, shipCanBoard: false, shipSpeedMps: 0,
-    shipAutoFlightMode: "off", shipAutopilotTargetName: null,
+    shipAutoFlightMode: "off", shipAutopilotPhase: "idle", shipAutopilotTargetName: null,
   };
 }
 
@@ -164,6 +172,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [rateMenuVisible, setRateMenuVisible] = useState(false);
   const [graphicsVisible, setGraphicsVisible] = useState(false);
   const [graphicsState, setGraphicsState] = useState<GraphicsRuntimeState>(() => pendingGraphicsState());
+  const [weatherPreset, setWeatherPreset] = useState<MarsWeatherPreset>("auto");
   const shareStatusTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -312,7 +321,11 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const shipIndicatorVisible = surfaceMode && !spaceshipMode && telemetry.shipDistanceM !== null && telemetry.shipDistanceM <= 36;
   const apertureFill = Math.max(1.5, Math.log10(telemetry.altitudeM + 1) / Math.log10(MAX_CAMERA_ALTITUDE_M + 1) * 100);
   const shipAutoFlightLabel = telemetry.shipAutopilotTargetName
-    ? `AUTOPILOT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+    ? telemetry.shipAutopilotPhase === "landing"
+      ? `AUTOLAND / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+      : telemetry.shipAutopilotPhase === "braking" || telemetry.shipAutopilotPhase === "approach"
+        ? `APPROACH / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+        : `AUTOPILOT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
     : telemetry.shipAutoFlightMode === "full"
       ? "AUTO FLIGHT / FULL THRUST"
       : telemetry.shipAutoFlightMode === "cruise"
@@ -329,9 +342,9 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <span>RESOLVING LOCAL FIELD</span>
         <small>TERRAIN PHASE CONVERGENCE</small>
       </div>}
-      {surfaceMode && <aside className="surface-exit-hint" aria-label={spaceshipMode ? "Press Escape to stop and disembark the spacecraft here." : "Spaceman mode remains active. Press Escape to exit."}>
+      {surfaceMode && <aside className="surface-exit-hint" aria-label={spaceshipMode ? "Press Escape to rematerialize safely on the ground below with the spacecraft nearby." : "Spaceman mode remains active. Press Escape to exit."}>
         <span>{spaceshipMode ? shipAutoFlightLabel : "SPACEMAN MODE LOCKED"}</span>
-        <strong><kbd>ESC</kbd> {spaceshipMode ? "STOP + DISEMBARK" : "TO EXIT"}</strong>
+        <strong><kbd>ESC</kbd> {spaceshipMode ? "GROUND REMATERIALIZE" : "TO EXIT"}</strong>
       </aside>}
       {shipIndicatorVisible && <aside className={`ship-board-indicator${telemetry.shipCanBoard ? " ready" : ""}`} aria-live={telemetry.shipCanBoard ? "polite" : "off"}>
         <span><i aria-hidden="true" /> SPACECRAFT {formatDistance(telemetry.shipDistanceM ?? 0)}</span>
@@ -460,6 +473,18 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
               aria-label={audioMuted ? "Enable Barsoom audio" : "Mute Barsoom audio"}
               aria-pressed={!audioMuted}
             ><i aria-hidden="true" /> AUDIO {audioMuted ? "OFF" : "ON"}</button>
+            <button
+              className={`weather-button weather-${weatherPreset}`}
+              type="button"
+              onClick={() => {
+                const currentIndex = WEATHER_OPTIONS.indexOf(weatherPreset);
+                const next = WEATHER_OPTIONS[(currentIndex + 1) % WEATHER_OPTIONS.length];
+                setWeatherPreset(next);
+                window.__BARSOOM__?.setWeatherPreset(next);
+              }}
+              aria-label={`Mars weather: ${weatherPreset}. Activate next weather regime`}
+              title="Cycle clear air, ice-cloud cover, and dust-storm weather"
+            >WEATHER <b>{weatherLabel(weatherPreset)}</b></button>
             <button
               className="help-button"
               type="button"
@@ -656,8 +681,8 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         </div>}
         {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
           {spaceshipMode ? <>
-            <dl><div><dt>Plot destination</dt><dd>Click HUD marker</dd></div><div><dt>Aim camera + nose</dt><dd>Move mouse</dd></div><div><dt>Mouse thrust</dt><dd>Hold left + right</dd></div><div><dt>Pitch nose up / down</dt><dd>↑ / ↓</dd></div><div><dt>Thrust / reverse</dt><dd>W / S</dd></div><div><dt>Auto-flight cycle</dt><dd>R · cruise / full / coast</dd></div><div><dt>Boost + sharp turn</dt><dd>Hold Shift</dd></div><div><dt>Ultra warp burst</dt><dd>F</dd></div><div><dt>Gliding brake + hold</dt><dd>X</dd></div><div><dt>Roll left / right</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Infinite aim turn</dt><dd>Left / middle drag</dd></div><div><dt>Free-look around ship</dt><dd>Hold Alt + drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Stop + disembark here</dt><dd>Escape</dd></div></dl>
-            <p>Click a navigation marker and choose <strong>Autopilot to here</strong> to lock the course at full thrust. R cycles cruise, full thrust, and coast; any manual flight input cancels automation while camera aim and free-look remain available. F adds a high-speed warp impulse along the nose. Existing momentum now remains in world space when the hull turns, throttle release coasts naturally, and X eases into position hold instead of stopping instantly.</p>
+            <dl><div><dt>Plot destination</dt><dd>Click HUD marker</dd></div><div><dt>Aim camera + nose</dt><dd>Move mouse</dd></div><div><dt>Mouse thrust</dt><dd>Hold left + right</dd></div><div><dt>Pitch nose up / down</dt><dd>↑ / ↓</dd></div><div><dt>Thrust</dt><dd>W</dd></div><div><dt>Assisted full stop</dt><dd>Hold S</dd></div><div><dt>Auto-flight cycle</dt><dd>R · cruise / full / coast</dd></div><div><dt>Boost</dt><dd>Hold Shift</dd></div><div><dt>Ultra warp burst</dt><dd>F</dd></div><div><dt>Position hold</dt><dd>X</dd></div><div><dt>Roll left / right</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Camera-led turn</dt><dd>Left / middle drag</dd></div><div><dt>Free-look around ship</dt><dd>Hold Alt + drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Safe ground return</dt><dd>Escape</dd></div></dl>
+            <p>Destination autopilot flies a corrected course, brakes before arrival, performs a cinematic descent, lands on the selected surface point, and returns you to spaceman mode automatically. R cycles cruise, full thrust, and coast; any manual flight input cancels automation while camera control remains available. F delivers a 180 km/s ultra-warp impulse with expanded field of view and dedicated audio. The craft coasts naturally, S performs a strong assisted stop, and camera-led turns are rate-limited.</p>
           </> : <>
             <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Board spacecraft</dt><dd>Approach + E</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
             <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². A spacecraft is instantiated nearby at every landing site.</p>

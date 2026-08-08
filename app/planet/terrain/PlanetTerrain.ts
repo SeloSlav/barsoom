@@ -400,6 +400,7 @@ export class PlanetTerrain {
     debug: DebugFlags,
     stabilizeOrbitalTerrain = false,
     quality: TerrainQualitySettings = DEFAULT_TERRAIN_QUALITY,
+    weather: { cloudCover: number; dustActivity: number } = { cloudCover: 0.48, dustActivity: 0.2 },
   ): TerrainFrameStats {
     this.frame += 1;
     this.nowS = nowS;
@@ -430,6 +431,8 @@ export class PlanetTerrain {
     this.material.uniforms.uSunDirection.value.set(sunDirection.x, sunDirection.y, sunDirection.z);
     this.material.uniforms.uCameraAltitude.value = cameraAltitudeM;
     this.material.uniforms.uTime.value = nowS;
+    this.material.uniforms.uCloudCover.value = weather.cloudCover;
+    this.material.uniforms.uDustActivity.value = weather.dustActivity;
     this.material.uniforms.uDebugTileBoundaries.value = debug.tileBoundaries ? 1 : 0;
     this.material.uniforms.uDebugCubeFaces.value = debug.cubeFaces ? 1 : 0;
     this.material.uniforms.uDebugLod.value = debug.lodColours ? 1 : 0;
