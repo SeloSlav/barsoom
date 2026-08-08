@@ -593,6 +593,7 @@ export class SurfaceTraverseController {
   private readonly shipAutopilotPreviousTargetAbsolute = new THREE.Vector3();
   private readonly shipAutopilotTargetVelocity = new THREE.Vector3();
   private readonly shipAutopilotMeasuredTargetVelocity = new THREE.Vector3();
+  private readonly shipAutopilotPreviousMeasuredTargetVelocity = new THREE.Vector3();
   private readonly shipAutopilotShipVelocity = new THREE.Vector3();
   private readonly shipAutopilotRelativeVelocity = new THREE.Vector3();
   private readonly shipAutopilotVelocityTarget = new THREE.Vector3();
@@ -669,6 +670,7 @@ export class SurfaceTraverseController {
   private shipAutopilotSurfaceTarget = false;
   private shipAutopilotCruiseRadiusM = MARS_REFERENCE_RADIUS_M;
   private shipAutopilotStandoffM = 0;
+  private shipAutopilotHasVelocitySample = false;
   private shipAutopilotPhase: FlightAutopilotPhase = "idle";
   private shipWarpBurstRequested = false;
   private disposed = false;
@@ -949,6 +951,8 @@ export class SurfaceTraverseController {
       : this.shipAutopilotTargetAbsolute.length();
     this.shipAutopilotPreviousTargetAbsolute.copy(this.shipAutopilotTargetAbsolute);
     this.shipAutopilotTargetVelocity.set(0, 0, 0);
+    this.shipAutopilotPreviousMeasuredTargetVelocity.set(0, 0, 0);
+    this.shipAutopilotHasVelocitySample = false;
     if (profile.orbitNormal) {
       this.shipAutopilotOrbitAxis.set(
         profile.orbitNormal.x,
@@ -971,10 +975,19 @@ export class SurfaceTraverseController {
         .set(targetPositionM.x, targetPositionM.y, targetPositionM.z)
         .sub(this.shipAutopilotPreviousTargetAbsolute)
         .multiplyScalar(1 / deltaSeconds);
-      this.shipAutopilotTargetVelocity.lerp(
+      // A backward difference represents velocity halfway through the prior
+      // frame. Extrapolating half a sample keeps 60x orbiters locked instead
+      // of leaving the ship one fast-moving frame behind them.
+      this.shipAutopilotTargetVelocity.copy(this.shipAutopilotMeasuredTargetVelocity);
+      if (this.shipAutopilotHasVelocitySample) {
+        this.shipAutopilotTargetVelocity
+          .multiplyScalar(1.5)
+          .addScaledVector(this.shipAutopilotPreviousMeasuredTargetVelocity, -0.5);
+      }
+      this.shipAutopilotPreviousMeasuredTargetVelocity.copy(
         this.shipAutopilotMeasuredTargetVelocity,
-        1 - Math.exp(-45 * deltaSeconds),
       );
+      this.shipAutopilotHasVelocitySample = true;
     }
     this.shipAutopilotTargetAbsolute.set(targetPositionM.x, targetPositionM.y, targetPositionM.z);
     this.shipAutopilotPreviousTargetAbsolute.copy(this.shipAutopilotTargetAbsolute);
@@ -989,6 +1002,7 @@ export class SurfaceTraverseController {
     this.shipAutopilotTargetActive = false;
     this.shipAutopilotPhase = "idle";
     this.shipAutopilotTargetVelocity.set(0, 0, 0);
+    this.shipAutopilotHasVelocitySample = false;
     this.spaceship.cancelAutoland();
   }
 

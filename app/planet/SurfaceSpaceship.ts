@@ -802,24 +802,23 @@ export class SurfaceSpaceship {
         // Destination cruise is relative to a moving body. Adding its measured
         // velocity lets the ship retain closing speed even at accelerated time.
         this.velocity.set(velocityTarget.x, velocityTarget.y, velocityTarget.z);
-      } else if (
+      } else {
+        if (
         cruiseDirection &&
         Number.isFinite(cruiseDirection.x) &&
         Number.isFinite(cruiseDirection.y) &&
         Number.isFinite(cruiseDirection.z) &&
         Math.hypot(cruiseDirection.x, cruiseDirection.y, cruiseDirection.z) > 1e-7
-      ) {
-        this.velocity.set(
-          cruiseDirection.x,
-          cruiseDirection.y,
-          cruiseDirection.z,
-        ).normalize();
-      } else {
-        this.velocity.copy(this.forward);
-      }
-      this.velocity.multiplyScalar(SHIP_AUTOPILOT_WARP_SPEED_M_S);
-      if (hasVelocityTarget && velocityTarget) {
-        this.velocity.set(velocityTarget.x, velocityTarget.y, velocityTarget.z);
+        ) {
+          this.velocity.set(
+            cruiseDirection.x,
+            cruiseDirection.y,
+            cruiseDirection.z,
+          ).normalize();
+        } else {
+          this.velocity.copy(this.forward);
+        }
+        this.velocity.multiplyScalar(SHIP_AUTOPILOT_WARP_SPEED_M_S);
       }
       this.warpEffectSeconds = SHIP_WARP_EFFECT_DURATION_S;
     } else if (hasVelocityTarget && velocityTarget) {
