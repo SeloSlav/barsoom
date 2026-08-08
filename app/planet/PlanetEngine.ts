@@ -44,7 +44,11 @@ import { RetiredRoverRenderer } from "./render/RetiredRoverRenderer";
 import { SurfaceDetailRenderer } from "./render/SurfaceDetailRenderer";
 import { WeatherRenderer, type MarsWeatherPreset, type MarsWeatherState } from "./render/WeatherRenderer";
 import { selectionReticleWorldScale } from "./selectionReticle";
-import { rebaseSimulationClock, simulationUtcMsAt } from "./simulationClock";
+import {
+  DEFAULT_SIMULATION_RATE,
+  rebaseSimulationClock,
+  simulationUtcMsAt,
+} from "./simulationClock";
 import {
   orbitalAutopilotStandoffM,
   randomMarsDaylightDirection,
@@ -243,7 +247,7 @@ export class PlanetEngine {
     private readonly onLandmarkHoverChange: (landmark: MarsLandmarkHover | null) => void = () => {},
     private readonly onLandmarkMarkersChange: (markers: readonly MarsLandmarkMarker[]) => void = () => {},
     private readonly onOrbitalMarkersChange: (markers: readonly MarsOrbitalMarker[]) => void = () => {},
-    simulationRate = 60,
+    simulationRate = DEFAULT_SIMULATION_RATE,
     graphicsPreference: GraphicsPreference = "auto",
     private readonly onGraphicsSettingsChange: (settings: GraphicsRuntimeState) => void = () => {},
     private readonly onObservedBodyChange: (body: ObservedBody) => void = () => {},
@@ -254,7 +258,7 @@ export class PlanetEngine {
       : new Date(initialSimulationUtc);
     this.simulationStartUtc = Number.isFinite(requestedEpoch.getTime()) ? requestedEpoch : new Date();
     this.simulationStartPerformance = performance.now();
-    this.simulationRate = Number.isFinite(simulationRate) ? simulationRate : 60;
+    this.simulationRate = Number.isFinite(simulationRate) ? simulationRate : DEFAULT_SIMULATION_RATE;
     const context = canvas.getContext("webgl2", {
       alpha: false,
       antialias: true,
@@ -707,7 +711,8 @@ export class PlanetEngine {
 
   private animate = (time: number) => {
     if (this.disposed || this.paused) return;
-    const deltaSeconds = Math.min(0.1, Math.max(0.001, (time - this.lastFrameTime) / 1000));
+    const elapsedSeconds = Math.max(0, (time - this.lastFrameTime) / 1000);
+    const deltaSeconds = Math.min(0.1, Math.max(0.001, elapsedSeconds));
     this.lastFrameTime = time;
     const frameMs = deltaSeconds * 1000;
     this.audio.update(deltaSeconds);
@@ -725,7 +730,7 @@ export class PlanetEngine {
     this.skyState = calculateMarsSky(simulationUtc);
     this.refreshFlightAutopilotTarget(deltaSeconds);
     const marsControlState = this.surfaceTraverse.active
-      ? this.surfaceTraverse.update(deltaSeconds)
+      ? this.surfaceTraverse.update(deltaSeconds, elapsedSeconds)
       : this.controls.update(deltaSeconds);
     this.controlState = this.observedBody === "Mars"
       ? marsControlState
@@ -925,6 +930,9 @@ export class PlanetEngine {
         : "idle",
       shipAutopilotTargetName: this.surfaceTraverse.destinationAutopilotActive
         ? this.flightAutopilotTarget?.name ?? null
+        : null,
+      shipAutopilotEtaSeconds: this.surfaceTraverse.active
+        ? spaceshipInteraction.autopilotEtaSeconds
         : null,
     };
     this.onTelemetry(this.telemetry);

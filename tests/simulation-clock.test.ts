@@ -6,6 +6,7 @@ import {
   MAX_ORBITAL_STANDOFF_RADII,
 } from "../app/planet/orbitalCamera";
 import {
+  DEFAULT_SIMULATION_RATE,
   isSimulationRate,
   rebaseSimulationClock,
   SIMULATION_RATES,
@@ -15,6 +16,7 @@ import {
 describe("simulation rate control", () => {
   it("offers the requested accelerated and real-time rates", () => {
     expect(SIMULATION_RATES).toEqual([60, 6, 1]);
+    expect(DEFAULT_SIMULATION_RATE).toBe(1);
     expect(SIMULATION_RATES.every(isSimulationRate)).toBe(true);
     expect(isSimulationRate(10)).toBe(false);
   });

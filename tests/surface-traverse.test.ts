@@ -14,6 +14,9 @@ import {
   crossedLoopingAnimationPhase,
   findSuitThrusterFootBone,
   groundAutopilotGlideAltitudeM,
+  groundAutopilotCruiseAltitudeM,
+  groundAutopilotEtaSeconds,
+  groundAutopilotOrbitAltitudeM,
   groundAutopilotStoppingDistanceM,
   isWowAutoRunKey,
   isSpaceshipManualFlightControlKey,
@@ -220,15 +223,41 @@ describe("surface traverse physics", () => {
     expect(groundAutopilotStoppingDistanceM(180_000)).toBeGreaterThan(28_000);
     expect(groundAutopilotStoppingDistanceM(180_000)).toBeLessThan(30_000);
     expect(nextGroundAutopilotPhase("cruise", 25_000, 180_000)).toBe("braking");
-    expect(nextGroundAutopilotPhase("braking", 20_000, 60)).toBe("approach");
+    expect(nextGroundAutopilotPhase("braking", 20_000, 60)).toBe("ascent");
     expect(nextGroundAutopilotPhase("braking", 8_000, 60)).toBe("landing");
     expect(nextGroundAutopilotPhase("approach", 3_000, 60)).toBe("landing");
+    expect(nextGroundAutopilotPhase("ascent", 1_000_000, 60_000, 150_000, 200_000)).toBe("ascent");
+    expect(nextGroundAutopilotPhase("ascent", 1_000_000, 60_000, 195_000, 200_000)).toBe("cruise");
+  });
+
+  it("reports a real-time touchdown estimate throughout surface autopilot", () => {
+    const cruiseEta = groundAutopilotEtaSeconds("cruise", 1_000_000, 180_000, 12_000);
+    const ascentEta = groundAutopilotEtaSeconds("ascent", 1_000_000, 60_000, 0, null, 185_000);
+    const brakingEta = groundAutopilotEtaSeconds("braking", 29_000, 180_000, 2_500);
+    expect(cruiseEta).not.toBeNull();
+    expect(ascentEta).not.toBeNull();
+    expect(brakingEta).not.toBeNull();
+    expect(ascentEta!).toBeGreaterThan(cruiseEta!);
+    expect(cruiseEta!).toBeGreaterThan(brakingEta!);
+    expect(groundAutopilotEtaSeconds("landing", 4_000, 20, 600, 4.25)).toBe(4.25);
+    expect(groundAutopilotEtaSeconds("orbit", 0, 0, 0)).toBeNull();
   });
 
   it("follows a long rotation-aware glideslope before the final autoland", () => {
     expect(groundAutopilotGlideAltitudeM(4_000_000)).toBe(200_000);
     expect(groundAutopilotGlideAltitudeM(100_000)).toBe(8_000);
     expect(groundAutopilotGlideAltitudeM(3_000)).toBe(850);
+  });
+
+  it("launches surface routes above the atmosphere before beginning a distant deorbit", () => {
+    const regionalOrbitM = groundAutopilotOrbitAltitudeM(1_000_000);
+    const farSideOrbitM = groundAutopilotOrbitAltitudeM(10_000_000);
+    expect(regionalOrbitM).toBeGreaterThan(120_000);
+    expect(farSideOrbitM).toBeGreaterThan(regionalOrbitM);
+    expect(farSideOrbitM).toBe(420_000);
+    expect(groundAutopilotCruiseAltitudeM(4_000_000, farSideOrbitM)).toBe(farSideOrbitM);
+    expect(groundAutopilotCruiseAltitudeM(800_000, farSideOrbitM)).toBeLessThan(farSideOrbitM);
+    expect(groundAutopilotCruiseAltitudeM(30_000, farSideOrbitM)).toBeLessThan(5_000);
   });
 
   it("uses body-scaled visual standoffs and captures a relative orbit", () => {

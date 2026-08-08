@@ -1,6 +1,7 @@
 export const SIMULATION_RATES = [60, 6, 1] as const;
 
 export type SimulationRate = (typeof SIMULATION_RATES)[number];
+export const DEFAULT_SIMULATION_RATE: SimulationRate = 1;
 
 export function isSimulationRate(rate: number): rate is SimulationRate {
   return (SIMULATION_RATES as readonly number[]).includes(rate);

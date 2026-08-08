@@ -424,9 +424,10 @@ describe("surface spaceship flight", () => {
   });
 
   it("scales the scripted landing duration to horizontal and vertical distance", () => {
-    expect(spaceshipAutolandDurationS(0, 0)).toBe(6);
-    expect(spaceshipAutolandDurationS(5_000, 750)).toBeGreaterThan(30);
-    expect(spaceshipAutolandDurationS(20_000, 10_000)).toBe(55);
+    expect(spaceshipAutolandDurationS(0, 0)).toBe(5);
+    expect(spaceshipAutolandDurationS(5_000, 750)).toBeGreaterThan(7);
+    expect(spaceshipAutolandDurationS(5_000, 750)).toBeLessThan(8);
+    expect(spaceshipAutolandDurationS(20_000, 10_000)).toBe(18);
   });
 
   it("completes a cinematic autoland exactly on the selected terrain", () => {
@@ -453,6 +454,31 @@ describe("surface spaceship flight", () => {
     expect(landedPosition.length()).toBeGreaterThan(MARS_REFERENCE_RADIUS_M);
     expect(landedPosition.length()).toBeLessThan(MARS_REFERENCE_RADIUS_M + 2);
     expect(craft.getSpeedMps()).toBe(0);
+    craft.dispose();
+  });
+
+  it("uses full real frame time and the latest streamed terrain height at touchdown", () => {
+    let terrainHeightM = 0;
+    const scene = new THREE.Scene();
+    const craft = new SurfaceSpaceship(
+      scene,
+      () => ({ heightM: terrainHeightM, normal: { x: 1, y: 0, z: 0 }, lod: 16 }),
+      () => undefined,
+    );
+    craft.spawnNear(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, -1, 0),
+    );
+    craft.board();
+    expect(craft.beginAutoland({ x: MARS_REFERENCE_RADIUS_M, y: 0, z: 0 })).toBe(true);
+    terrainHeightM = 420;
+    expect(craft.updateAutoland(5.1)).toBe(true);
+    expect(craft.getAutolandRemainingSeconds()).toBeNull();
+    expect(craft.getAbsolute(new THREE.Vector3()).length()).toBeCloseTo(
+      MARS_REFERENCE_RADIUS_M + terrainHeightM + 1.15,
+      6,
+    );
     craft.dispose();
   });
 

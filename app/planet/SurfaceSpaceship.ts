@@ -21,10 +21,10 @@ const SHIP_MAX_SPEED_M_S = 900_000;
 export const SHIP_WARP_BURST_DELTA_V_M_S = 180_000;
 export const SHIP_AUTOPILOT_WARP_SPEED_M_S = SHIP_WARP_BURST_DELTA_V_M_S;
 const SHIP_WARP_EFFECT_DURATION_S = 1.5;
-const SHIP_AUTOLAND_DURATION_S = 6;
-const SHIP_AUTOLAND_HORIZONTAL_SPEED_M_S = 160;
-const SHIP_AUTOLAND_VERTICAL_SPEED_M_S = 36;
-const SHIP_AUTOLAND_MAX_DURATION_S = 55;
+const SHIP_AUTOLAND_DURATION_S = 5;
+const SHIP_AUTOLAND_HORIZONTAL_SPEED_M_S = 650;
+const SHIP_AUTOLAND_VERTICAL_SPEED_M_S = 180;
+const SHIP_AUTOLAND_MAX_DURATION_S = 18;
 const SHIP_TRAIL_MAX_POINTS = 420;
 const SHIP_STEER_DEAD_ZONE = 0.055;
 const SHIP_ROTATION_RESPONSE_S = 16;
@@ -195,7 +195,6 @@ export class SurfaceSpaceship {
   private readonly aimForward = new THREE.Vector3();
   private readonly aimAxis = new THREE.Vector3();
   private readonly autolandStartAbsolute = new THREE.Vector3();
-  private readonly autolandTargetAbsolute = new THREE.Vector3();
   private readonly autolandStartDirection = new THREE.Vector3();
   private readonly autolandTargetDirection = new THREE.Vector3();
   private readonly autolandCourseForward = new THREE.Vector3();
@@ -525,9 +524,7 @@ export class SurfaceSpaceship {
     if (this.autolandTargetDirection.lengthSq() <= 1e-8) return false;
     this.autolandTargetDirection.normalize();
     const targetSurface = this.terrainSurface(this.autolandTargetDirection);
-    this.autolandTargetAbsolute.copy(this.autolandTargetDirection).multiplyScalar(
-      MARS_REFERENCE_RADIUS_M + targetSurface.heightM + SHIP_GROUND_CLEARANCE_M,
-    );
+    const targetRadiusM = MARS_REFERENCE_RADIUS_M + targetSurface.heightM + SHIP_GROUND_CLEARANCE_M;
     this.autolandStartAbsolute.copy(this.absolute);
     this.autolandStartDirection.copy(this.absolute).normalize();
     this.getForward(this.autolandCourseForward)
@@ -551,7 +548,7 @@ export class SurfaceSpaceship {
     );
     this.autolandDurationSeconds = spaceshipAutolandDurationS(
       angularDistanceRad * MARS_REFERENCE_RADIUS_M,
-      this.autolandStartClearanceM - SHIP_GROUND_CLEARANCE_M,
+      Math.abs(this.autolandStartAbsolute.length() - targetRadiusM),
     );
     this.autolandElapsedSeconds = 0;
     this.autolandActive = true;
@@ -559,6 +556,12 @@ export class SurfaceSpaceship {
     this.velocity.set(0, 0, 0);
     this.resetInputSmoothing();
     return true;
+  }
+
+  getAutolandRemainingSeconds() {
+    return this.autolandActive
+      ? Math.max(0, this.autolandDurationSeconds - this.autolandElapsedSeconds)
+      : null;
   }
 
   cancelAutoland() {
@@ -572,8 +575,12 @@ export class SurfaceSpaceship {
 
   updateAutoland(deltaSeconds: number) {
     if (!this.autolandActive) return false;
-    const delta = clamp(deltaSeconds, 0, 0.05);
-    this.autolandElapsedSeconds += delta;
+    // Autoland is a real-time scripted trajectory, not a numerical physics
+    // integration. Consume the full wall-clock interval so a throttled render
+    // or accelerated ephemeris rate cannot stretch the touchdown countdown.
+    const elapsedDelta = Number.isFinite(deltaSeconds) ? Math.max(0, deltaSeconds) : 0;
+    const visualDelta = clamp(elapsedDelta, 0, 0.05);
+    this.autolandElapsedSeconds += elapsedDelta;
     const progress = clamp(this.autolandElapsedSeconds / this.autolandDurationSeconds, 0, 1);
     const eased = smootherStep01(progress);
     this.autolandPreviousAbsolute.copy(this.absolute);
@@ -591,8 +598,8 @@ export class SurfaceSpaceship {
     );
     const radiusM = MARS_REFERENCE_RADIUS_M + routeSurface.heightM + clearanceM;
     this.absolute.copy(this.surfaceDirection).multiplyScalar(radiusM);
-    if (delta > 0) {
-      this.velocity.subVectors(this.absolute, this.autolandPreviousAbsolute).multiplyScalar(1 / delta);
+    if (elapsedDelta > 0) {
+      this.velocity.subVectors(this.absolute, this.autolandPreviousAbsolute).multiplyScalar(1 / elapsedDelta);
     }
 
     this.up.copy(this.surfaceDirection);
@@ -607,11 +614,11 @@ export class SurfaceSpaceship {
     this.orientation.makeBasis(this.right, this.up, this.forward);
     this.root.quaternion.setFromRotationMatrix(this.orientation);
     this.thrustVisible = progress < 0.995;
-    this.updateEngineEffect(delta, this.thrustVisible ? 0.34 : 0, false);
+    this.updateEngineEffect(visualDelta, this.thrustVisible ? 0.34 : 0, false);
     this.setReverseThrusterEffect(false, 0);
-    this.updateTrailLife(delta);
+    this.updateTrailLife(visualDelta);
     if (this.thrustVisible) {
-      this.trailEmitCountdownS -= delta;
+      this.trailEmitCountdownS -= visualDelta;
       if (this.trailEmitCountdownS <= 0) {
         this.emitTrailPoint(false);
         this.trailEmitCountdownS = 0.055;
@@ -620,7 +627,6 @@ export class SurfaceSpaceship {
     this.prefetch(this.surfaceDirection);
 
     if (progress < 1) return false;
-    this.absolute.copy(this.autolandTargetAbsolute);
     this.surfaceDirection.copy(this.autolandTargetDirection);
     this.velocity.set(0, 0, 0);
     this.autolandActive = false;

@@ -14,6 +14,7 @@ import {
   SHIP_AUTOPILOT_WARP_SPEED_M_S,
   SHIP_BOARD_DISTANCE_M,
   SurfaceSpaceship,
+  spaceshipAutolandDurationS,
   spaceshipDampedInput,
   spaceshipSteerAmount,
   type SpaceshipFlightInput,
@@ -59,9 +60,13 @@ const SHIP_MOUSE_CAMERA_YAW_RATE_RAD_S = 1.9;
 const SHIP_MOUSE_CAMERA_PITCH_RATE_RAD_S = 1.55;
 const SHIP_FREE_LOOK_RETURN_RATE_S = 7;
 const GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 = 600_000;
-const GROUND_AUTOPILOT_LANDING_RANGE_M = 8_000;
-const GROUND_AUTOPILOT_FINAL_RANGE_M = 3_500;
+const GROUND_AUTOPILOT_STOP_MARGIN_M = 2_000;
+const GROUND_AUTOPILOT_LANDING_RANGE_M = 12_000;
 const GROUND_AUTOPILOT_LANDING_SPEED_M_S = 80;
+const GROUND_AUTOPILOT_ASCENT_SPEED_M_S = 60_000;
+const GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M = 180_000;
+const GROUND_AUTOPILOT_MAX_ORBIT_ALTITUDE_M = 420_000;
+const GROUND_AUTOPILOT_MIN_DEORBIT_RANGE_M = 700_000;
 const GROUND_AUTOPILOT_MAX_GLIDE_ALTITUDE_M = 200_000;
 const GROUND_AUTOPILOT_MIN_GLIDE_ALTITUDE_M = 850;
 const ORBITAL_AUTOPILOT_BRAKE_ACCELERATION_M_S2 = 600_000;
@@ -286,7 +291,7 @@ export function nextWowAutoMoveMode(mode: WowAutoMoveMode): WowAutoMoveMode {
 }
 
 export type SpaceshipAutoFlightMode = "off" | "cruise" | "full";
-export type GroundAutopilotPhase = "idle" | "cruise" | "braking" | "approach" | "landing";
+export type GroundAutopilotPhase = "idle" | "ascent" | "cruise" | "braking" | "approach" | "landing";
 export type FlightAutopilotPhase = GroundAutopilotPhase | "orbit";
 
 export type FlightAutopilotTargetProfile = {
@@ -307,7 +312,7 @@ export function groundAutopilotStoppingDistanceM(
 ) {
   const speed = Math.max(0, speedMps);
   const deceleration = Math.max(1, decelerationMps2);
-  return speed * speed / (2 * deceleration) + 2_000;
+  return speed * speed / (2 * deceleration) + GROUND_AUTOPILOT_STOP_MARGIN_M;
 }
 
 export function groundAutopilotGlideAltitudeM(surfaceRangeM: number) {
@@ -315,6 +320,38 @@ export function groundAutopilotGlideAltitudeM(surfaceRangeM: number) {
     Math.max(0, surfaceRangeM) * 0.08,
     GROUND_AUTOPILOT_MIN_GLIDE_ALTITUDE_M,
     GROUND_AUTOPILOT_MAX_GLIDE_ALTITUDE_M,
+  );
+}
+
+export function groundAutopilotOrbitAltitudeM(surfaceRangeM: number) {
+  return clamp(
+    150_000 + Math.max(0, surfaceRangeM) * 0.035,
+    GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M,
+    GROUND_AUTOPILOT_MAX_ORBIT_ALTITUDE_M,
+  );
+}
+
+export function groundAutopilotCruiseAltitudeM(surfaceRangeM: number, orbitAltitudeM: number) {
+  const rangeM = Math.max(0, surfaceRangeM);
+  const orbitalAltitudeM = clamp(
+    orbitAltitudeM,
+    GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M,
+    GROUND_AUTOPILOT_MAX_ORBIT_ALTITUDE_M,
+  );
+  const brakingRangeM = groundAutopilotStoppingDistanceM(SHIP_AUTOPILOT_WARP_SPEED_M_S);
+  const deorbitRangeM = Math.max(
+    GROUND_AUTOPILOT_MIN_DEORBIT_RANGE_M,
+    orbitalAltitudeM * 4,
+  );
+  const orbitFraction = smoothStep01(clamp(
+    (rangeM - brakingRangeM) / Math.max(1, deorbitRangeM - brakingRangeM),
+    0,
+    1,
+  ));
+  return THREE.MathUtils.lerp(
+    groundAutopilotGlideAltitudeM(brakingRangeM),
+    orbitalAltitudeM,
+    orbitFraction,
   );
 }
 
@@ -358,20 +395,83 @@ export function nextGroundAutopilotPhase(
   phase: GroundAutopilotPhase,
   surfaceRangeM: number,
   speedMps: number,
+  altitudeM = 0,
+  orbitAltitudeM = GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M,
 ): GroundAutopilotPhase {
   const range = Math.max(0, surfaceRangeM);
   const speed = Math.max(0, speedMps);
+  if (phase === "ascent") {
+    return altitudeM >= Math.max(1, orbitAltitudeM) * 0.97 ? "cruise" : "ascent";
+  }
   if (phase === "cruise" && range <= groundAutopilotStoppingDistanceM(speed)) return "braking";
   if (phase === "braking" && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
-    return range <= GROUND_AUTOPILOT_LANDING_RANGE_M ? "landing" : "approach";
+    // Braking normally ends about 2 km from the target. If a coarse frame or
+    // unusual route leaves us farther out, re-enter orbital ascent instead of
+    // crawling indefinitely near the terrain.
+    return range <= GROUND_AUTOPILOT_LANDING_RANGE_M ? "landing" : "ascent";
   }
   if (phase === "approach") {
-    if (range <= GROUND_AUTOPILOT_FINAL_RANGE_M && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
+    if (range <= GROUND_AUTOPILOT_LANDING_RANGE_M && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
       return "landing";
+    }
+    if (range > GROUND_AUTOPILOT_LANDING_RANGE_M && speed <= GROUND_AUTOPILOT_LANDING_SPEED_M_S) {
+      return "ascent";
     }
     if (speed > GROUND_AUTOPILOT_LANDING_SPEED_M_S * 1.5) return "braking";
   }
   return phase;
+}
+
+export function groundAutopilotEtaSeconds(
+  phase: FlightAutopilotPhase,
+  surfaceRangeM: number,
+  speedMps: number,
+  verticalDistanceM: number,
+  autolandRemainingSeconds: number | null = null,
+  orbitAltitudeM = groundAutopilotOrbitAltitudeM(surfaceRangeM),
+) {
+  if (phase === "idle" || phase === "orbit") return null;
+  if (phase === "landing" && autolandRemainingSeconds !== null) {
+    return Math.max(0, autolandRemainingSeconds);
+  }
+  const rangeM = Math.max(0, surfaceRangeM);
+  const speed = Math.max(0, speedMps);
+  const predictedLandingRangeM = phase === "ascent" || phase === "cruise"
+    ? Math.min(rangeM, GROUND_AUTOPILOT_STOP_MARGIN_M)
+    : phase === "braking"
+      ? Math.min(
+        rangeM,
+        GROUND_AUTOPILOT_LANDING_RANGE_M,
+        Math.abs(rangeM - speed * speed / (2 * GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2)),
+      )
+      : Math.min(rangeM, GROUND_AUTOPILOT_LANDING_RANGE_M);
+  const predictedLandingVerticalM = phase === "ascent" || phase === "cruise" || phase === "braking"
+    ? Math.min(Math.max(0, verticalDistanceM), groundAutopilotGlideAltitudeM(predictedLandingRangeM))
+    : Math.max(0, verticalDistanceM);
+  const descentSeconds = spaceshipAutolandDurationS(
+    predictedLandingRangeM,
+    predictedLandingVerticalM,
+  );
+  if (phase === "ascent") {
+    return Math.max(0, orbitAltitudeM - Math.max(0, verticalDistanceM)) /
+      GROUND_AUTOPILOT_ASCENT_SPEED_M_S +
+      Math.max(0, rangeM - groundAutopilotStoppingDistanceM(SHIP_AUTOPILOT_WARP_SPEED_M_S)) /
+        SHIP_AUTOPILOT_WARP_SPEED_M_S +
+      SHIP_AUTOPILOT_WARP_SPEED_M_S / GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 +
+      descentSeconds;
+  }
+  if (phase === "cruise") {
+    const brakingDistanceM = groundAutopilotStoppingDistanceM(
+      Math.max(speed, SHIP_AUTOPILOT_WARP_SPEED_M_S),
+    );
+    return Math.max(0, rangeM - brakingDistanceM) / SHIP_AUTOPILOT_WARP_SPEED_M_S +
+      SHIP_AUTOPILOT_WARP_SPEED_M_S / GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 +
+      descentSeconds;
+  }
+  if (phase === "braking") {
+    return speed / GROUND_AUTOPILOT_BRAKE_ACCELERATION_M_S2 + descentSeconds;
+  }
+  return descentSeconds;
 }
 
 const SPACESHIP_MANUAL_CONTROL_KEYS = new Set([
@@ -668,7 +768,7 @@ export class SurfaceTraverseController {
   private shipAutoFlightMode: SpaceshipAutoFlightMode = "off";
   private shipAutopilotTargetActive = false;
   private shipAutopilotSurfaceTarget = false;
-  private shipAutopilotCruiseRadiusM = MARS_REFERENCE_RADIUS_M;
+  private shipAutopilotOrbitAltitudeM = GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M;
   private shipAutopilotStandoffM = 0;
   private shipAutopilotHasVelocitySample = false;
   private shipAutopilotPhase: FlightAutopilotPhase = "idle";
@@ -918,12 +1018,36 @@ export class SurfaceTraverseController {
   }
 
   get spaceshipInteraction() {
+    let autopilotEtaSeconds: number | null = null;
+    if (
+      this.traverseMode === "spaceship" &&
+      this.shipAutopilotTargetActive &&
+      this.shipAutopilotSurfaceTarget
+    ) {
+      this.spaceship.getAbsolute(this.shipAbsolute);
+      this.shipRadialUp.copy(this.shipAbsolute).normalize();
+      this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
+      const surfaceRangeM = Math.acos(clamp(
+        this.shipRadialUp.dot(this.shipAutopilotTargetDirection),
+        -1,
+        1,
+      )) * MARS_REFERENCE_RADIUS_M;
+      autopilotEtaSeconds = groundAutopilotEtaSeconds(
+        this.shipAutopilotPhase,
+        surfaceRangeM,
+        this.spaceship.getSpeedMps(),
+        Math.abs(this.shipAbsolute.length() - this.shipAutopilotTargetAbsolute.length()),
+        this.spaceship.getAutolandRemainingSeconds(),
+        this.shipAutopilotOrbitAltitudeM,
+      );
+    }
     return {
       distanceM: this.shipDistanceM,
       canBoard: this.shipCanBoard,
       speedMps: this.traverseMode === "spaceship" ? this.spaceship.getSpeedMps() : 0,
       autoFlightMode: this.traverseMode === "spaceship" ? this.shipAutoFlightMode : "off",
       autopilotPhase: this.traverseMode === "spaceship" ? this.shipAutopilotPhase : "idle",
+      autopilotEtaSeconds,
     };
   }
 
@@ -946,9 +1070,16 @@ export class SurfaceTraverseController {
       : targetProfile;
     this.shipAutopilotSurfaceTarget = profile.surfaceTarget;
     this.shipAutopilotStandoffM = profile.surfaceTarget ? 0 : Math.max(2, profile.standoffM ?? 40);
-    this.shipAutopilotCruiseRadiusM = profile.surfaceTarget
-      ? Math.max(this.shipAbsolute.length(), this.shipAutopilotTargetAbsolute.length() + 750)
-      : this.shipAutopilotTargetAbsolute.length();
+    this.shipRadialUp.copy(this.shipAbsolute).normalize();
+    this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
+    const initialSurfaceRangeM = Math.acos(clamp(
+      this.shipRadialUp.dot(this.shipAutopilotTargetDirection),
+      -1,
+      1,
+    )) * MARS_REFERENCE_RADIUS_M;
+    this.shipAutopilotOrbitAltitudeM = profile.surfaceTarget
+      ? groundAutopilotOrbitAltitudeM(initialSurfaceRangeM)
+      : GROUND_AUTOPILOT_MIN_ORBIT_ALTITUDE_M;
     this.shipAutopilotPreviousTargetAbsolute.copy(this.shipAutopilotTargetAbsolute);
     this.shipAutopilotTargetVelocity.set(0, 0, 0);
     this.shipAutopilotPreviousMeasuredTargetVelocity.set(0, 0, 0);
@@ -962,7 +1093,7 @@ export class SurfaceTraverseController {
       if (this.shipAutopilotOrbitAxis.lengthSq() > 1e-8) this.shipAutopilotOrbitAxis.normalize();
     }
     this.shipAutopilotTargetActive = true;
-    this.shipAutopilotPhase = "cruise";
+    this.shipAutopilotPhase = profile.surfaceTarget ? "ascent" : "cruise";
     this.shipAutoFlightMode = "full";
     this.shipBrakeRequested = false;
     return true;
@@ -1518,19 +1649,6 @@ export class SurfaceTraverseController {
     const targetDot = clamp(this.shipRadialUp.dot(this.shipAutopilotTargetDirection), -1, 1);
     const angularDistanceRad = Math.acos(targetDot);
     const surfaceRangeM = angularDistanceRad * MARS_REFERENCE_RADIUS_M;
-    this.shipAutopilotCruiseRadiusM = this.shipAutopilotTargetAbsolute.length() +
-      groundAutopilotGlideAltitudeM(surfaceRangeM);
-    if (angularDistanceRad <= 0.001) {
-      this.shipAutopilotAimDirection
-        .copy(this.shipAutopilotTargetDirection)
-        .multiplyScalar(this.shipAutopilotCruiseRadiusM)
-        .sub(this.shipAbsolute);
-      if (this.shipAutopilotAimDirection.lengthSq() > 1e-8) {
-        return this.shipAutopilotAimDirection.normalize();
-      }
-      return this.shipCameraForward;
-    }
-
     this.shipAutopilotTangent
       .copy(this.shipAutopilotTargetDirection)
       .addScaledVector(this.shipRadialUp, -targetDot);
@@ -1540,10 +1658,48 @@ export class SurfaceTraverseController {
     }
     if (this.shipAutopilotTangent.lengthSq() <= 1e-8) return this.shipCameraForward;
     this.shipAutopilotTangent.normalize();
+
+    if (this.shipAutopilotPhase === "ascent") {
+      const currentSurface = this.terrainSurface(this.shipRadialUp);
+      const altitudeM = Math.max(
+        0,
+        this.shipAbsolute.length() - MARS_REFERENCE_RADIUS_M - currentSurface.heightM,
+      );
+      const ascentProgress = clamp(
+        altitudeM / Math.max(1, this.shipAutopilotOrbitAltitudeM),
+        0,
+        1,
+      );
+      // Climb nearly vertically through the atmosphere, then roll smoothly
+      // onto the great-circle tangent for orbital insertion near apogee.
+      const insertion = smoothStep01(clamp((ascentProgress - 0.78) / 0.22, 0, 1));
+      return this.shipAutopilotAimDirection
+        .copy(this.shipRadialUp)
+        .multiplyScalar(1 - insertion)
+        .addScaledVector(this.shipAutopilotTangent, insertion)
+        .normalize();
+    }
+
+    const cruiseAltitudeM = this.shipAutopilotPhase === "cruise" ||
+      this.shipAutopilotPhase === "braking"
+      ? groundAutopilotCruiseAltitudeM(surfaceRangeM, this.shipAutopilotOrbitAltitudeM)
+      : groundAutopilotGlideAltitudeM(surfaceRangeM);
+    const cruiseRadiusM = this.shipAutopilotTargetAbsolute.length() + cruiseAltitudeM;
+    if (angularDistanceRad <= 0.001) {
+      this.shipAutopilotAimDirection
+        .copy(this.shipAutopilotTargetDirection)
+        .multiplyScalar(cruiseRadiusM)
+        .sub(this.shipAbsolute);
+      if (this.shipAutopilotAimDirection.lengthSq() > 1e-8) {
+        return this.shipAutopilotAimDirection.normalize();
+      }
+      return this.shipCameraForward;
+    }
+
     const radialCorrection = clamp(
-      (this.shipAutopilotCruiseRadiusM - this.shipAbsolute.length()) / 2_000,
-      -0.08,
-      0.08,
+      (cruiseRadiusM - this.shipAbsolute.length()) / 25_000,
+      -0.42,
+      0.42,
     );
     return this.shipAutopilotAimDirection
       .copy(this.shipAutopilotTangent)
@@ -1600,21 +1756,22 @@ export class SurfaceTraverseController {
       -1,
       1,
     )) * MARS_REFERENCE_RADIUS_M;
+    const currentSurface = this.terrainSurface(this.shipRadialUp);
+    const altitudeM = Math.max(
+      0,
+      this.shipAbsolute.length() - MARS_REFERENCE_RADIUS_M - currentSurface.heightM,
+    );
     const nextPhase = nextGroundAutopilotPhase(
       this.shipAutopilotPhase,
       surfaceRangeM,
       this.shipAutopilotPhase === "cruise"
         ? Math.max(this.spaceship.getSpeedMps(), SHIP_AUTOPILOT_WARP_SPEED_M_S)
         : this.spaceship.getSpeedMps(),
+      altitudeM,
+      this.shipAutopilotOrbitAltitudeM,
     );
     if (nextPhase === "landing") {
-      const targetClearanceM = Math.abs(
-        this.shipAbsolute.length() - this.shipAutopilotTargetAbsolute.length(),
-      );
-      if (
-        targetClearanceM <= 1_600 &&
-        this.spaceship.beginAutoland(this.shipAutopilotTargetAbsolute)
-      ) {
+      if (this.spaceship.beginAutoland(this.shipAutopilotTargetAbsolute)) {
         this.shipAutopilotPhase = "landing";
       } else {
         this.shipAutopilotPhase = "approach";
@@ -1624,7 +1781,7 @@ export class SurfaceTraverseController {
     this.shipAutopilotPhase = nextPhase;
   }
 
-  private updateSpaceship(delta: number): PlanetControlState {
+  private updateSpaceship(delta: number, elapsedDelta = delta): PlanetControlState {
     const manualStopRequested = this.keys.has("KeyS") || this.keys.has("ArrowDown");
     const holdRequested = this.shipBrakeRequested || this.keys.has("KeyX");
     this.shipBrakeRequested = false;
@@ -1657,7 +1814,7 @@ export class SurfaceTraverseController {
     this.updateDestinationAutopilotPhase();
     if (this.shipAutopilotPhase === "landing") {
       this.onAudioEvent({ type: "flight", active: true, throttle: 0.32, boost: false, maneuver: 0 });
-      const landed = this.spaceship.updateAutoland(delta);
+      const landed = this.spaceship.updateAutoland(elapsedDelta);
       if (landed) {
         this.shipAutopilotTargetDirection.copy(this.shipAutopilotTargetAbsolute).normalize();
         this.returnToSpacemanAtGround(this.shipAutopilotTargetDirection);
@@ -1667,6 +1824,7 @@ export class SurfaceTraverseController {
     const keyboardAttitude = spaceshipKeyboardAttitudeInput(this.keys);
     const groundAutopilotActive = this.shipAutopilotTargetActive && this.shipAutopilotSurfaceTarget;
     const orbitalAutopilotActive = this.shipAutopilotTargetActive && !this.shipAutopilotSurfaceTarget;
+    const surfaceAscentActive = groundAutopilotActive && this.shipAutopilotPhase === "ascent";
     const destinationWarpCruise = this.shipAutopilotTargetActive &&
       this.shipAutopilotPhase === "cruise";
     const automatedApproach = this.shipAutopilotTargetActive &&
@@ -1695,7 +1853,8 @@ export class SurfaceTraverseController {
         1,
       ),
       ...keyboardAttitude,
-      boost: keyboardAttitude.boost || (this.shipAutoFlightMode === "full" && !automatedApproach),
+      boost: keyboardAttitude.boost || surfaceAscentActive ||
+        (this.shipAutoFlightMode === "full" && !automatedApproach),
       brake: brakeRequested,
       brakeAccelerationMps2,
       aimX: 0,
@@ -1711,16 +1870,20 @@ export class SurfaceTraverseController {
         z: aimDirection.z,
       } : undefined,
       velocityAssistRateS: groundAutopilotActive
-        ? this.shipAutopilotPhase === "cruise" ? 0.9 : 1.8
+        ? this.shipAutopilotPhase === "cruise" ? 0.9 : surfaceAscentActive ? 5 : 1.8
         : 0,
       velocityTargetMps: orbitalAutopilotActive ? {
         x: this.shipAutopilotVelocityTarget.x,
         y: this.shipAutopilotVelocityTarget.y,
         z: this.shipAutopilotVelocityTarget.z,
+      } : surfaceAscentActive ? {
+        x: aimDirection.x * GROUND_AUTOPILOT_ASCENT_SPEED_M_S,
+        y: aimDirection.y * GROUND_AUTOPILOT_ASCENT_SPEED_M_S,
+        z: aimDirection.z * GROUND_AUTOPILOT_ASCENT_SPEED_M_S,
       } : undefined,
       velocityTargetResponseS: orbitalAutopilotActive
         ? this.shipAutopilotPhase === "orbit" ? 14 : 22
-        : 0,
+        : surfaceAscentActive ? 18 : 0,
       warpBurst,
       sustainedWarp: destinationWarpCruise,
     };
@@ -1808,9 +1971,10 @@ export class SurfaceTraverseController {
     };
   }
 
-  update(deltaSeconds: number): PlanetControlState {
+  update(deltaSeconds: number, elapsedSeconds = deltaSeconds): PlanetControlState {
+    const elapsedDelta = Number.isFinite(elapsedSeconds) ? Math.max(0, elapsedSeconds) : 0;
     const delta = clamp(deltaSeconds, 0, 0.05);
-    if (this.traverseMode === "spaceship") return this.updateSpaceship(delta);
+    if (this.traverseMode === "spaceship") return this.updateSpaceship(delta, elapsedDelta);
     this.entryWheelLockSeconds = Math.max(0, this.entryWheelLockSeconds - delta);
     this.spaceship.updateParkedPosition();
     this.setLocalBasis();

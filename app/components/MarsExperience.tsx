@@ -20,7 +20,11 @@ import {
   type ObservedBody,
 } from "../planet/PlanetEngine";
 import { createSpacemanShareUrl, parseSpacemanShareLocation } from "../planet/shareLocation";
-import { SIMULATION_RATES, type SimulationRate } from "../planet/simulationClock";
+import {
+  DEFAULT_SIMULATION_RATE,
+  SIMULATION_RATES,
+  type SimulationRate,
+} from "../planet/simulationClock";
 import type { PlanetTelemetry } from "../planet/types";
 import type { MarsWeatherPreset } from "../planet/render/WeatherRenderer";
 import { SovaTutorial } from "./SovaTutorial";
@@ -34,6 +38,13 @@ function weatherLabel(preset: MarsWeatherPreset) {
   if (preset === "dust-storm") return "DUST";
   if (preset === "cloudy") return "CLOUDS";
   return preset.toUpperCase();
+}
+
+export function formatCountdown(seconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(Number.isFinite(seconds) ? seconds : 0));
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainder = totalSeconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`;
 }
 
 function targetShortName(body: ObservedBody) {
@@ -54,6 +65,7 @@ function createInitialTelemetry(simulationUtc: string): PlanetTelemetry {
     frameMs: 16.67, fps: 60, simulationUtc, controlMode: "survey", traverseMode: "spaceman", surfaceReady: true,
     shipDistanceM: null, shipCanBoard: false, shipSpeedMps: 0,
     shipAutoFlightMode: "off", shipAutopilotPhase: "idle", shipAutopilotTargetName: null,
+    shipAutopilotEtaSeconds: null,
   };
 }
 
@@ -168,7 +180,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const [shareStatus, setShareStatus] = useState<"idle" | "copied" | "error">("idle");
   const [observedBody, setObservedBody] = useState<ObservedBody>("Mars");
   const [bodyMenuVisible, setBodyMenuVisible] = useState(false);
-  const [simulationRate, setSimulationRate] = useState<SimulationRate>(60);
+  const [simulationRate, setSimulationRate] = useState<SimulationRate>(DEFAULT_SIMULATION_RATE);
   const [rateMenuVisible, setRateMenuVisible] = useState(false);
   const [graphicsVisible, setGraphicsVisible] = useState(false);
   const [graphicsState, setGraphicsState] = useState<GraphicsRuntimeState>(() => pendingGraphicsState());
@@ -193,7 +205,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         (landmark) => setHoveredLandmark(landmark ? positionLandmarkLabel(landmark) : null),
         setLandmarkMarkers,
         setOrbitalMarkers,
-        60,
+        DEFAULT_SIMULATION_RATE,
         loadGraphicsPreference(),
         setGraphicsState,
         setObservedBody,
@@ -323,16 +335,39 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
   const shipAutoFlightLabel = telemetry.shipAutopilotTargetName
     ? telemetry.shipAutopilotPhase === "landing"
       ? `AUTOLAND / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+      : telemetry.shipAutopilotPhase === "ascent"
+        ? `ORBITAL ASCENT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
       : telemetry.shipAutopilotPhase === "orbit"
         ? `CLOSE ORBIT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
       : telemetry.shipAutopilotPhase === "braking" || telemetry.shipAutopilotPhase === "approach"
         ? `APPROACH / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
+        : telemetry.shipAutopilotEtaSeconds !== null
+          ? `ORBITAL CRUISE / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
         : `AUTOPILOT / ${telemetry.shipAutopilotTargetName.toUpperCase()}`
     : telemetry.shipAutoFlightMode === "full"
       ? "AUTO FLIGHT / FULL THRUST"
       : telemetry.shipAutoFlightMode === "cruise"
         ? "AUTO FLIGHT / CRUISE"
         : "SPACECRAFT FLIGHT";
+  const shipLandingCountdown = telemetry.shipAutopilotTargetName &&
+    telemetry.shipAutopilotEtaSeconds !== null &&
+    telemetry.shipAutopilotPhase !== "orbit"
+    ? formatCountdown(telemetry.shipAutopilotEtaSeconds)
+    : null;
+  const shipLandingPhaseLabel = telemetry.shipAutopilotPhase === "ascent"
+    ? "ORBITAL ASCENT"
+    : telemetry.shipAutopilotPhase === "cruise"
+      ? "ORBITAL CRUISE"
+      : telemetry.shipAutopilotPhase === "landing"
+        ? "AUTOLAND"
+        : "SURFACE APPROACH";
+  const shipLandingPhaseDetail = telemetry.shipAutopilotPhase === "ascent"
+    ? "ATMOSPHERIC EGRESS"
+    : telemetry.shipAutopilotPhase === "cruise"
+      ? "HIGH ORBIT TRANSIT"
+      : telemetry.shipAutopilotPhase === "landing"
+        ? "REAL-TIME DESCENT"
+        : "DEORBIT SEQUENCE";
 
   return (
     <main className={`mars-shell${surfaceMode ? " surface-traverse" : ""}${spaceshipMode ? " ship-flight" : ""}${orbitalMode ? " moon-lock" : ""}${hoveredLandmark ? " landmark-hover" : ""}`}>
@@ -353,6 +388,11 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         <strong>{telemetry.shipCanBoard ? <><kbd>E</kbd> BOARD SPACECRAFT</> : "APPROACH TO BOARD"}</strong>
       </aside>}
       {spaceshipMode && <div className="ship-flight-reticle" aria-hidden="true"><i /><span /></div>}
+      {spaceshipMode && shipLandingCountdown && <aside className="ship-autopilot-eta" role="status" aria-live="polite">
+        <span>{shipLandingPhaseLabel} / EST. TOUCHDOWN</span>
+        <strong>T-{shipLandingCountdown}</strong>
+        <small>{shipLandingPhaseDetail}</small>
+      </aside>}
       {spaceshipMode && flightNavigationMarkers.length > 0 && <>
         <aside className="flight-nav-status" aria-label={`${flightNavigationMarkers.filter((marker) => marker.kind === "landmark" || marker.kind === "rover").length} surface destinations and ${flightNavigationMarkers.filter((marker) => marker.kind === "moon" || marker.kind === "orbiter").length} orbital destinations highlighted`}>
           <span>NAV / LOCAL + ORBITAL</span>
@@ -684,7 +724,7 @@ export function MarsExperience({ initialSimulationUtc }: { initialSimulationUtc:
         {orbitalMode ? <dl><div><dt>Rotate around target</dt><dd>Left / middle drag</dd></div><div><dt>Pan across target</dt><dd>Right-mouse drag</dd></div><div><dt>Change standoff</dt><dd>Mouse wheel</dd></div><div><dt>Retarget</dt><dd>Orbit highlight / menu</dd></div></dl> : (surfaceMode ? <>
           {spaceshipMode ? <>
             <dl><div><dt>Plot destination</dt><dd>Click HUD marker</dd></div><div><dt>Aim camera + nose</dt><dd>Move mouse</dd></div><div><dt>Mouse thrust</dt><dd>Hold left + right</dd></div><div><dt>Pitch nose up / down</dt><dd>↑ / ↓</dd></div><div><dt>Thrust</dt><dd>W</dd></div><div><dt>Reverse-thruster stop</dt><dd>Hold S</dd></div><div><dt>Auto-flight cycle</dt><dd>R · cruise / full / coast</dd></div><div><dt>Boost</dt><dd>Hold Shift</dd></div><div><dt>Ultra warp burst</dt><dd>F</dd></div><div><dt>Position hold</dt><dd>X</dd></div><div><dt>Roll left / right</dt><dd>Q / E</dd></div><div><dt>Strafe</dt><dd>Z / C</dd></div><div><dt>Rise / descend</dt><dd>Space / Ctrl</dd></div><div><dt>Camera-led turn</dt><dd>Left / middle drag</dd></div><div><dt>Free-look around ship</dt><dd>Hold Alt + drag</dd></div><div><dt>Chase to planet zoom</dt><dd>Mouse wheel</dd></div><div><dt>Safe ground return</dt><dd>Escape</dd></div></dl>
-            <p>Destination autopilot sustains the full 180 km/s warp-burst speed on its corrected cruise course, fires four visible forward reverse thrusters to brake before arrival, performs a cinematic descent, lands on the selected surface point, and returns you to spaceman mode automatically. R cycles cruise, full thrust, and coast; any manual flight input cancels automation while camera control remains available. F delivers the same 180 km/s ultra-warp speed on demand with expanded field of view and dedicated audio. The craft coasts naturally, S commands the reverse-thruster stop, and camera-led turns are rate-limited.</p>
+            <p>Surface destination autopilot climbs beyond the atmosphere, inserts onto a 180-420 km orbital arc, sustains the full 180 km/s warp-burst speed in space, and enters a deliberate deorbit corridor before braking and autoland. The touchdown countdown remains tied to real time. Autoland resolves the current terrain surface, lands on the selected point, and returns you to spaceman mode automatically. R cycles cruise, full thrust, and coast; any manual flight input cancels automation while camera control remains available. F delivers the same 180 km/s ultra-warp speed on demand with expanded field of view and dedicated audio. The craft coasts naturally, S commands the reverse-thruster stop, and camera-led turns are rate-limited.</p>
           </> : <>
             <dl><div><dt>Move / turn</dt><dd>W S / A D</dd></div><div><dt>Strafe</dt><dd>Q / E</dd></div><div><dt>Run</dt><dd>Hold Shift</dd></div><div><dt>Steer character + camera</dt><dd>Right-mouse drag</dd></div><div><dt>Free-look camera</dt><dd>Left-mouse drag</dd></div><div><dt>Mouse-run</dt><dd>Both mouse buttons</dd></div><div><dt>Auto-walk / run / stop</dt><dd>Press R repeatedly</dd></div><div><dt>Auto-run</dt><dd>Num Lock</dd></div><div><dt>Zoom / first person</dt><dd>Mouse wheel</dd></div><div><dt>Jump</dt><dd>Spacebar</dd></div><div><dt>Board spacecraft</dt><dd>Approach + E</dd></div><div><dt>Retarget field</dt><dd>~</dd></div><div><dt>Exit spaceman mode</dt><dd>Escape only</dd></div></dl>
             <p>The human figure is a dimensional and kinematic reference inside the solved light field—not transported matter. Its ballistic arc uses measured Mars surface gravity: 3.721 m/s². A spacecraft is instantiated nearby at every landing site.</p>
